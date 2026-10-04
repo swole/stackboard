@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+@theme {
+  --color-peach-50: #fbf3e8;
+  --color-peach-100: #f7e8d4;
+  --color-peach-200: #f9d0ad;
+  --color-peach-300: #f4b27f;
+  --color-peach-400: #ec8f4f;
+  --color-peach-500: #e4732f;
+  --color-peach-600: #c95a22;
+  --color-peach-700: #a4451d;
+  --color-peach-800: #82381c;
+  --color-peach-900: #682f1c;
+
+  --color-cream-50: #fcfaf6;
+  --color-cream-100: #f7f3e9;
+  --color-cream-200: #ede5d2;
+
+  --color-ink-50: #f5f5f4;
+  --color-ink-100: #e7e5e4;
+  --color-ink-200: #d6d3d1;
+  --color-ink-300: #a8a29e;
+  --color-ink-400: #78716c;
+  --color-ink-500: #57534e;
+  --color-ink-600: #44403c;
+  --color-ink-700: #292524;
+  --color-ink-800: #1c1917;
+
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color: var(--color-ink-700);
+}
+
+/* Hide scrollbars but keep scroll behavior on the horizontal stack row */
+.no-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-200) transparent;
+}
+.no-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.no-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-ink-200);
+  border-radius: 4px;
+}
+.no-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* dnd-kit drag overlay */
+.dnd-overlay {
+  cursor: grabbing !important;
+}
+
+/* ---------- Motion ----------
+   Every animation here degrades to the finished state: from-only keyframes animate toward
+   the element's normal style, so if animations never run you simply see the end result. */
+
+/* A dragged item lifts off the page: slight tilt, warm shadow. As it drops, App.tsx sets
+   data-dropping and it eases flat into its slot. */
+[data-lifted] {
+  transform: rotate(1.5deg) scale(1.03);
+  box-shadow:
+    0 16px 30px -12px rgb(130 56 28 / 0.35),
+    0 2px 6px rgb(28 25 23 / 0.08);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 200ms ease;
+  animation: lift 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  cursor: grabbing;
+}
+[data-lifted][data-dropping] {
+  transform: none;
+  box-shadow: 0 1px 2px rgb(28 25 23 / 0.06);
+}
+@keyframes lift {
+  from {
+    transform: none;
+    box-shadow: 0 1px 2px rgb(28 25 23 / 0.06);
+  }
+}
+
+/* Undo toast: rises in; a 2px bar counts down and pauses while the pointer is on it. */
+.toast {
+  animation: toast-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+.toast-timer {
+  animation: toast-timer linear both;
+  transform-origin: left;
+}
+.toast:hover .toast-timer {
+  animation-play-state: paused;
+}
+@keyframes toast-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-lifted] {
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+  .toast {
+    animation: none;
+  }
+  /* UndoToast falls back to a plain timer when this bar isn't running. */
+  .toast-timer {
+    display: none;
+  }
+}
+
+/* ---------- Welcome (0.4.0) ----------
+   One staggered rise on first paint. `backwards` holds the start state only during each
+   element's delay; reduced motion (below) skips it and everything is simply there. */
+.rise {
+  animation: rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+/* The logo's cards deal in column by column. */
+.stack-art rect + rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: deal 620ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes deal {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.9);
+  }
+}
+/* The "Keep it" hint and the rating card rise in like the toast (own class: tests and the
+   toast logic look for .toast). */
+.pop-in {
+  animation: toast-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .stack-art rect + rect,
+  .pop-in {
+    animation: none;
+  }
+}
