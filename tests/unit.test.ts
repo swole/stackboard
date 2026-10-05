@@ -6,7 +6,7 @@ import { planFolder, isImportableUrl, countPlanned, type FolderNode } from '../s
 import { installedAt, shouldAskForRating } from '../src/lib/onboarding'
 import { STARTER_PACKS } from '../src/lib/starterPacks'
 import { batchFlags } from '../src/lib/fresh'
-import { planStash } from '../src/lib/stashPlan'
+import { planStash, staysNote } from '../src/lib/stashPlan'
 
 let fails = 0
 function eq(label: string, got: unknown, want: unknown) {
@@ -129,6 +129,11 @@ eq('batch: one save stays news', batchFlags([1000]), [false])
 eq('batch: saves minutes apart stay news', batchFlags([0, 120000, 240000]), [false, false, false])
 eq('batch: an import stays quiet', batchFlags([5000, 5004, 5010]), [true, true, true])
 eq('batch: a later save next to an import is news', batchFlags([5000, 5004, 90000]), [true, true, false])
+eq('stays: one browser page', staysNote(0, 1), '1 browser page stays open.')
+eq('stays: one pinned tab', staysNote(1, 0), '1 pinned tab stays open.')
+eq('stays: two browser pages', staysNote(0, 2), '2 browser pages stay open.')
+eq('stays: pinned and browser', staysNote(1, 1), '1 pinned tab and 1 browser page stay open.')
+eq('stays: nothing', staysNote(0, 0), '')
 eq('batch: unknown dates never batch', batchFlags([undefined, undefined]), [false, false])
 // stash this window (0.4.0)
 const strip = [

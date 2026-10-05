@@ -1,4 +1,4 @@
-import { isImportableUrl, type PlannedStack } from './importPlan'
+import { isImportableUrl, plural, type PlannedStack } from './importPlan'
 
 // "Stash this window" (0.4.0): which tabs get saved, and how they group into stacks. Pure, so
 // it is unit-tested and the popup can show counts before anything happens.
@@ -73,4 +73,11 @@ export function planStash(tabs: TabLike[], groupTitles: ReadonlyMap<number, stri
 export function stashLabel(now = new Date()): string {
   const when = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(now)
   return `Stashed ${when}`
+}
+
+/** The popup's "... stay open." note; "1 browser page stays open" took the plural verb before 0.4.3. */
+export function staysNote(pinned: number, skipped: number): string {
+  const parts = [pinned ? plural(pinned, 'pinned tab') : '', skipped ? plural(skipped, 'browser page') : ''].filter(Boolean)
+  if (!parts.length) return ''
+  return `${parts.join(' and ')} ${pinned + skipped === 1 ? 'stays' : 'stay'} open.`
 }

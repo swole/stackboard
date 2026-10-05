@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Check, SquareKanban, Inbox } from 'lucide-re
 import type { StackableTree } from './lib/types'
 import { readTree, createBookmark } from './lib/bookmarks'
 import { planWindow } from './lib/stash'
-import type { StashPlan } from './lib/stashPlan'
+import { staysNote, type StashPlan } from './lib/stashPlan'
 import { plural } from './lib/importPlan'
 
 interface CurrentTab {
@@ -229,10 +229,7 @@ function StashSection() {
     }
   }
 
-  const stays = [
-    plan.pinned ? plural(plan.pinned, 'pinned tab') : '',
-    plan.skipped ? plural(plan.skipped, 'browser page') : '',
-  ].filter(Boolean)
+  const stays = staysNote(plan.pinned, plan.skipped)
 
   return (
     <section data-stash className="mt-4 border-t border-ink-100 pt-3">
@@ -254,7 +251,7 @@ function StashSection() {
         <>
           <p className="mt-1 text-xs text-ink-500">
             Saves {plan.links === 1 ? 'this tab' : `all ${plan.links} tabs`} as bookmarks in your Stash space, one stack per tab group.
-            {stays.length > 0 && ` ${stays.join(' and ')} stay open.`}
+            {stays && ` ${stays}`}
           </p>
           <div className="mt-2 flex gap-2">
             <button
