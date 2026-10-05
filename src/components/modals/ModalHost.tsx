@@ -1,12 +1,16 @@
+import { lazy, Suspense } from 'react'
 import { useStackableStore } from '../../store/useStackableStore'
 import { SpaceFormModal } from './SpaceFormModal'
 import { StackFormModal } from './StackFormModal'
 import { StackMoveModal } from './StackMoveModal'
 import { BookmarkFormModal } from './BookmarkFormModal'
 import { ConfirmDeleteModal } from './ConfirmDeleteModal'
-import { SettingsModal } from './SettingsModal'
 import { ImportModal } from './ImportModal'
 import { PacksModal } from './PacksModal'
+
+// Settings (with the 0.5.0 Appearance section) loads on first open, so a plain new tab doesn't
+// parse it.
+const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })))
 
 export function ModalHost() {
   const modal = useStackableStore((s) => s.modal)
@@ -60,7 +64,11 @@ export function ModalHost() {
         />
       )
     case 'settings':
-      return <SettingsModal />
+      return (
+        <Suspense fallback={null}>
+          <SettingsModal />
+        </Suspense>
+      )
     case 'import':
       return <ImportModal />
     case 'packs':

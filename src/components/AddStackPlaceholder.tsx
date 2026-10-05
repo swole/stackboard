@@ -10,8 +10,8 @@ export function AddStackPlaceholder({ spaceId }: Props) {
   return (
     <button
       onClick={() => openModal({ kind: 'stack-add', spaceId })}
-      className="flex h-fit w-[260px] shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-dashed border-ink-200 bg-white/30 px-4 py-3 text-sm text-ink-500 hover:border-peach-300 hover:bg-peach-50 hover:text-peach-700"
-      style={{ marginTop: 28 }}
+      // Lines up with the top of the stacks' link lists (below their headers).
+      className="mt-8 flex h-fit w-full items-center justify-center gap-2 self-start rounded-xl border border-dashed border-line-strong bg-well px-4 py-3 text-sm text-muted hover:border-accent-line hover:bg-accent-soft hover:text-accent-text compact:mt-7 compact:py-2 wallpaper:mt-0 wallpaper:bg-panel/60 wallpaper:backdrop-blur-md"
     >
       <Plus className="h-4 w-4" />
       Add empty Stack

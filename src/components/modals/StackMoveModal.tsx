@@ -37,7 +37,7 @@ export function StackMoveModal({ stackId, title, currentSpaceId }: Props) {
       footer={<SecondaryButton onClick={close}>Cancel</SecondaryButton>}
     >
       {targets.length === 0 ? (
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-muted">
           There’s nowhere to move this stack — create another space first.
         </p>
       ) : (
@@ -47,11 +47,11 @@ export function StackMoveModal({ stackId, title, currentSpaceId }: Props) {
               key={s.id}
               onClick={() => onMove(s.id)}
               disabled={movingTo !== null}
-              className="flex items-center gap-2.5 rounded-md border border-ink-100 bg-white px-3 py-2 text-left text-sm text-ink-700 hover:border-peach-300 hover:bg-peach-50 disabled:opacity-50"
+              className="flex items-center gap-2.5 rounded-md border border-line bg-card px-3 py-2 text-left text-sm text-fg hover:border-accent-line hover:bg-accent-soft disabled:opacity-50"
             >
               <span className="text-base leading-none">{s.emoji}</span>
               <span className="flex-1 truncate">{s.name || 'Untitled'}</span>
-              <span className="text-xs text-ink-400">
+              <span className="text-xs text-muted">
                 {s.stacks.length} stack{s.stacks.length === 1 ? '' : 's'}
               </span>
             </button>

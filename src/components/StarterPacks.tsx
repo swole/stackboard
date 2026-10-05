@@ -45,11 +45,11 @@ export function StarterPacks({ variant }: Props) {
             onClick={() => void add(p)}
             disabled={!!busy}
             title={`${p.blurb} (${plural(countPlanned(p), 'link')})`}
-            className="group/pack inline-flex items-center gap-1.5 rounded-full border border-ink-100 bg-white px-3 py-1.5 text-sm text-ink-700 shadow-[0_1px_2px_rgb(28_25_23/0.05)] transition hover:-translate-y-px hover:border-peach-300 hover:text-ink-800 hover:shadow-[0_6px_14px_-8px_rgb(130_56_28/0.45)] disabled:opacity-60"
+            className="group/pack inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3 py-1.5 text-sm text-fg shadow-xs transition hover:-translate-y-px hover:border-accent-line hover:text-strong hover:shadow-chip disabled:opacity-60"
           >
             <span className="text-base leading-none">{p.emoji}</span>
             {p.name}
-            <Plus className="h-3.5 w-3.5 text-ink-300 transition-colors group-hover/pack:text-peach-500" />
+            <Plus className="h-3.5 w-3.5 text-ghost transition-colors group-hover/pack:text-accent" />
           </button>
         ))}
       </div>
@@ -57,26 +57,26 @@ export function StarterPacks({ variant }: Props) {
   }
 
   return (
-    <ul className="flex flex-col divide-y divide-ink-100">
+    <ul className="flex flex-col divide-y divide-line">
       {STARTER_PACKS.map((p) => {
         const done = added.has(p.id)
         return (
           <li key={p.id} className="flex items-center gap-3 py-2.5">
             <span className="text-xl leading-none">{p.emoji}</span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-ink-800">{p.name}</div>
-              <div className="truncate text-xs text-ink-500">
+              <div className="text-sm font-medium text-strong">{p.name}</div>
+              <div className="truncate text-xs text-muted">
                 {p.blurb}, {plural(countPlanned(p), 'link')}
               </div>
             </div>
             <button
               onClick={() => void add(p)}
               disabled={!!busy || done}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-ink-200 bg-white px-2.5 py-1 text-xs font-medium text-ink-700 hover:border-peach-300 hover:bg-peach-50 disabled:opacity-60"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-card px-2.5 py-1 text-xs font-medium text-fg hover:border-accent-line hover:bg-accent-soft disabled:opacity-60"
             >
               {done ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-peach-600" /> Added
+                  <Check className="h-3.5 w-3.5 text-accent-text" /> Added
                 </>
               ) : busy === p.id ? (
                 'Adding'

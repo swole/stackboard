@@ -1,58 +1,150 @@
 @import "tailwindcss";
+@import "./palettes.css";
+
+/* ---------- Colour tokens (0.5.0) ----------
+   Components use these names only (bg-canvas, text-muted, border-line, ...). Their values come
+   from the active palette in palettes.css. `inline` makes each utility read the --sb-* variable
+   itself, so an element carrying its own data-palette/data-scheme (the swatches in Settings)
+   renders in that palette. */
+@theme inline {
+  --color-canvas: var(--sb-canvas);
+  --color-panel: var(--sb-panel);
+  --color-card: var(--sb-card);
+  --color-raised: var(--sb-raised);
+  --color-well: var(--sb-well);
+  --color-hover: var(--sb-hover);
+  --color-selected: var(--sb-selected);
+  --color-sunken: var(--sb-sunken);
+
+  --color-strong: var(--sb-strong);
+  --color-fg: var(--sb-fg);
+  --color-soft: var(--sb-soft);
+  --color-muted: var(--sb-muted);
+  --color-faint: var(--sb-faint);
+  --color-ghost: var(--sb-ghost);
+
+  --color-line: var(--sb-line);
+  --color-line-strong: var(--sb-line-strong);
+
+  --color-accent: var(--sb-accent);
+  --color-accent-hover: var(--sb-accent-hover);
+  --color-on-accent: var(--sb-on-accent);
+  --color-accent-soft: var(--sb-accent-soft);
+  --color-accent-line: var(--sb-accent-line);
+  --color-accent-text: var(--sb-accent-text);
+  --color-accent-mark: var(--sb-accent-mark);
+  --color-focus: var(--sb-focus);
+
+  --color-danger: var(--sb-danger);
+  --color-danger-fill: var(--sb-danger-fill);
+  --color-danger-fill-hover: var(--sb-danger-fill-hover);
+  --color-on-danger: var(--sb-on-danger);
+  --color-danger-soft: var(--sb-danger-soft);
+
+  --color-inverse: var(--sb-inverse);
+  --color-on-inverse: var(--sb-on-inverse);
+  --color-inverse-strong: var(--sb-inverse-strong);
+  --color-inverse-muted: var(--sb-inverse-muted);
+  --color-inverse-accent: var(--sb-inverse-accent);
+
+  --color-scrim: var(--sb-scrim);
+
+  /* Warm in the cream palette, plain black in the dark ones (--sb-shade). */
+  --shadow-float: 0 22px 48px -24px color-mix(in srgb, var(--sb-shade) 55%, transparent);
+  --shadow-panel: 0 18px 40px -24px color-mix(in srgb, var(--sb-shade) 45%, transparent);
+  --shadow-chip: 0 6px 14px -8px color-mix(in srgb, var(--sb-shade) 45%, transparent);
+  --shadow-cta: 0 6px 16px -8px color-mix(in srgb, var(--sb-accent) 75%, transparent);
+  --shadow-toast: 0 14px 34px -12px rgb(0 0 0 / 0.5);
+}
 
 @theme {
-  --color-peach-50: #fbf3e8;
-  --color-peach-100: #f7e8d4;
-  --color-peach-200: #f9d0ad;
-  --color-peach-300: #f4b27f;
-  --color-peach-400: #ec8f4f;
-  --color-peach-500: #e4732f;
-  --color-peach-600: #c95a22;
-  --color-peach-700: #a4451d;
-  --color-peach-800: #82381c;
-  --color-peach-900: #682f1c;
-
-  --color-cream-50: #fcfaf6;
-  --color-cream-100: #f7f3e9;
-  --color-cream-200: #ede5d2;
-
-  --color-ink-50: #f5f5f4;
-  --color-ink-100: #e7e5e4;
-  --color-ink-200: #d6d3d1;
-  --color-ink-300: #a8a29e;
-  --color-ink-400: #78716c;
-  --color-ink-500: #57534e;
-  --color-ink-600: #44403c;
-  --color-ink-700: #292524;
-  --color-ink-800: #1c1917;
-
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* compact: the denser board (Settings > Appearance > Density).
+   wallpaper: a picture is behind the board, so panels turn to frosted glass.
+   dark: follows the resolved scheme on <html>, never the OS media query directly. */
+@custom-variant compact (&:where([data-density="compact"] *));
+@custom-variant wallpaper (&:where([data-bg="image"] *));
+@custom-variant dark (&:where([data-scheme="dark"], [data-scheme="dark"] *));
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  /* The body's background paints the whole canvas (it propagates to the root), so the picture
+     layer in Backdrop.tsx can sit at z-index -1 above it. */
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    color: var(--sb-fg);
+    background: var(--sb-canvas);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--sb-accent) 30%, transparent);
+  }
 }
 
-body {
-  margin: 0;
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  color: var(--color-ink-700);
+[data-scheme="light"] {
+  color-scheme: light;
+}
+[data-scheme="dark"] {
+  color-scheme: dark;
 }
 
-/* Hide scrollbars but keep scroll behavior on the horizontal stack row */
+/* ---------- Backgrounds (0.5.0) ----------
+   A gradient is CSS only, so theme-boot.js can show it on the very first frame. A picture comes
+   from IndexedDB after the board has painted (Backdrop.tsx). */
+:root[data-bg="gradient"] body {
+  background: var(--sb-gradient-1);
+}
+:root[data-bg="gradient"][data-gradient="2"] body {
+  background: var(--sb-gradient-2);
+}
+:root[data-bg="gradient"][data-gradient="3"] body {
+  background: var(--sb-gradient-3);
+}
+
+.backdrop-image {
+  animation: backdrop-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Headings that sit straight on a picture get a soft halo in the canvas colour. */
+[data-bg="image"] .on-wallpaper {
+  text-shadow:
+    0 0 1px var(--sb-canvas),
+    0 1px 12px color-mix(in srgb, var(--sb-canvas) 90%, transparent);
+}
+
+/* A theme switch should land in one frame: the store sets this attribute while it swaps the
+   palette, so hover fades and the like don't animate the change. */
+[data-theme-switching] *,
+[data-theme-switching] *::before,
+[data-theme-switching] *::after {
+  transition: none !important;
+}
+
+/* Thin scrollbars in the palette's line colour */
 .no-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-ink-200) transparent;
+  scrollbar-color: var(--sb-line-strong) transparent;
 }
 .no-scrollbar::-webkit-scrollbar {
   height: 8px;
   width: 8px;
 }
 .no-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-ink-200);
+  background: var(--sb-line-strong);
   border-radius: 4px;
 }
 .no-scrollbar::-webkit-scrollbar-track {
@@ -64,17 +156,44 @@ body {
   cursor: grabbing !important;
 }
 
+/* The emoji picker (lazy-loaded in the space form) takes the palette too. Tripled class: the
+   library injects its own rules at runtime, after this sheet. */
+.EmojiPickerReact.EmojiPickerReact.EmojiPickerReact {
+  --epr-bg-color: var(--sb-raised);
+  --epr-category-label-bg-color: color-mix(in srgb, var(--sb-raised) 92%, transparent);
+  --epr-text-color: var(--sb-muted);
+  --epr-picker-border-color: var(--sb-line);
+  --epr-hover-bg-color: var(--sb-hover);
+  --epr-hover-bg-color-reduced-opacity: color-mix(in srgb, var(--sb-hover) 60%, transparent);
+  --epr-focus-bg-color: var(--sb-selected);
+  --epr-highlight-color: var(--sb-accent);
+  --epr-search-input-bg-color: var(--sb-sunken);
+  --epr-search-input-bg-color-active: var(--sb-card);
+  --epr-search-input-text-color: var(--sb-fg);
+  --epr-category-icon-active-color: var(--sb-accent);
+  --epr-emoji-variation-picker-bg-color: var(--sb-raised);
+  --epr-skin-tone-picker-menu-color: color-mix(in srgb, var(--sb-raised) 92%, transparent);
+  --epr-reactions-bg-color: color-mix(in srgb, var(--sb-raised) 92%, transparent);
+}
+
+/* Some sites ship a black glyph as their favicon (GitHub, Wikipedia) or a white one. On a card of
+   the opposite tone it disappears, so favicon.ts flags those glyphs and they flip here. */
+[data-scheme="dark"] .glyph-dark,
+[data-scheme="light"] .glyph-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* ---------- Motion ----------
    Every animation here degrades to the finished state: from-only keyframes animate toward
    the element's normal style, so if animations never run you simply see the end result. */
 
-/* A dragged item lifts off the page: slight tilt, warm shadow. As it drops, App.tsx sets
-   data-dropping and it eases flat into its slot. */
+/* A dragged item lifts off the page: slight tilt, a shadow in the palette's shade. As it drops,
+   App.tsx sets data-dropping and it eases flat into its slot. */
 [data-lifted] {
   transform: rotate(1.5deg) scale(1.03);
   box-shadow:
-    0 16px 30px -12px rgb(130 56 28 / 0.35),
-    0 2px 6px rgb(28 25 23 / 0.08);
+    0 16px 30px -12px color-mix(in srgb, var(--sb-shade) 35%, transparent),
+    0 2px 6px rgb(0 0 0 / 0.08);
   transition:
     transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 200ms ease;
@@ -83,12 +202,12 @@ body {
 }
 [data-lifted][data-dropping] {
   transform: none;
-  box-shadow: 0 1px 2px rgb(28 25 23 / 0.06);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
 }
 @keyframes lift {
   from {
     transform: none;
-    box-shadow: 0 1px 2px rgb(28 25 23 / 0.06);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   }
 }
 
@@ -124,7 +243,8 @@ body {
     transition: none;
     animation: none;
   }
-  .toast {
+  .toast,
+  .backdrop-image {
     animation: none;
   }
   /* UndoToast falls back to a plain timer when this bar isn't running. */

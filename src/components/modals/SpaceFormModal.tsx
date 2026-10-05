@@ -1,8 +1,10 @@
 import { useState, lazy, Suspense } from 'react'
+import type { Theme } from 'emoji-picker-react'
 import { Modal, PrimaryButton, SecondaryButton, TextInput, Label } from './Modal'
 import { createSpace, renameSpace } from '../../lib/bookmarks'
 import { useStackableStore } from '../../store/useStackableStore'
 import { DEFAULT_EMOJI } from '../../lib/icon'
+import { useAppearance } from '../../store/useAppearance'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
 
@@ -18,6 +20,8 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
   const close = useStackableStore((s) => s.closeModal)
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
+  // The picker's own light/dark set picks its category icons; index.css maps its colours.
+  const scheme = useAppearance((s) => s.scheme)
 
   const [name, setName] = useState(initialName)
   const [emoji, setEmoji] = useState(initialEmoji || DEFAULT_EMOJI)
@@ -62,13 +66,13 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
           <button
             type="button"
             onClick={() => setShowPicker((v) => !v)}
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-ink-200 bg-white text-xl hover:bg-cream-50"
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-line-strong bg-card text-xl hover:bg-hover"
           >
             {emoji}
           </button>
           {showPicker && (
             <div className="mt-2">
-              <Suspense fallback={<div className="text-xs text-ink-400">Loading…</div>}>
+              <Suspense fallback={<div className="text-xs text-muted">Loading…</div>}>
                 <EmojiPicker
                   onEmojiClick={(d) => {
                     setEmoji(d.emoji)
@@ -76,6 +80,7 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
                   }}
                   width="100%"
                   height={320}
+                  theme={scheme as Theme}
                 />
               </Suspense>
             </div>

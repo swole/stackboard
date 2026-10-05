@@ -21,6 +21,7 @@ import { Welcome } from './components/Welcome'
 import { KeepItHint } from './components/KeepItHint'
 import { RatingPrompt } from './components/RatingPrompt'
 import { BookmarkGhost, StackGhost } from './components/DragGhosts'
+import { Backdrop } from './components/Backdrop'
 import { ModalHost } from './components/modals/ModalHost'
 import { useStackableStore } from './store/useStackableStore'
 import { useBookmarkTree } from './hooks/useBookmarkTree'
@@ -121,6 +122,10 @@ export default function App() {
 
   // A tab opened by "Stash this window" lands on the Stash space and says what it saved.
   const loaded = !!tree
+  // Timing mark for the board's first paint; the e2e suite checks the wallpaper comes after it.
+  useEffect(() => {
+    if (loaded) performance.mark('sb:board')
+  }, [loaded])
   useEffect(() => {
     if (!loaded || !IS_EXTENSION) return
     void takeOpenSpaceNote().then((note) => {
@@ -235,16 +240,17 @@ export default function App() {
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <div className="flex h-screen bg-peach-50 text-ink-700">
+      <div className="flex h-screen text-fg">
+        <Backdrop />
         <Sidebar />
         <main className="flex-1 overflow-hidden">
           {loading && !tree && (
-            <div className="flex h-full items-center justify-center text-sm text-ink-400">
+            <div className="flex h-full items-center justify-center text-sm text-muted">
               Loading…
             </div>
           )}
           {error && (
-            <div className="flex h-full items-center justify-center text-sm text-peach-700">
+            <div className="flex h-full items-center justify-center text-sm text-danger">
               {error}
             </div>
           )}
@@ -262,7 +268,7 @@ export default function App() {
           {dragging?.type === 'space' && (
             <div
               data-lifted
-              className="rounded-md border border-peach-300 bg-white px-2 py-1.5 text-sm"
+              className="rounded-md border border-accent-line bg-card px-2 py-1.5 text-sm text-fg"
             >
               {dragging.space.emoji} {dragging.space.name}
             </div>

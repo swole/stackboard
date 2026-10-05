@@ -64,19 +64,19 @@ export function UndoToast() {
     >
       <div
         key={toast.id}
-        className="toast pointer-events-auto relative flex max-w-full items-center gap-3 overflow-hidden rounded-xl bg-ink-800 py-2 pl-4 pr-2 text-sm text-cream-100 shadow-[0_14px_34px_-12px_rgb(28_25_23/0.55)]"
+        className="toast pointer-events-auto relative flex max-w-full items-center gap-3 overflow-hidden rounded-xl bg-inverse py-2 pl-4 pr-2 text-sm text-on-inverse shadow-toast ring-1 ring-on-inverse/10 ring-inset"
       >
         <span className="min-w-0 truncate py-1">
-          {toast.verb} <span className="font-semibold text-white">{toast.title}</span>
-          {toast.detail && <span className="text-ink-300"> ({toast.detail})</span>}
+          {toast.verb} <span className="font-semibold text-inverse-strong">{toast.title}</span>
+          {toast.detail && <span className="text-inverse-muted"> ({toast.detail})</span>}
         </span>
         {toast.undo ? (
           <button
             onClick={() => void undo()}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 font-semibold text-peach-300 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-peach-300"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 font-semibold text-inverse-accent hover:bg-on-inverse/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse-accent"
           >
             Undo
-            <kbd className="font-sans text-[11px] font-normal text-ink-300">{MOD}Z</kbd>
+            <kbd className="font-sans text-[11px] font-normal text-inverse-muted">{MOD}Z</kbd>
           </button>
         ) : (
           <span className="w-2" />
@@ -84,7 +84,7 @@ export function UndoToast() {
         <span
           ref={barRef}
           aria-hidden
-          className="toast-timer absolute inset-x-0 bottom-0 h-[2px] bg-peach-400/80"
+          className="toast-timer absolute inset-x-0 bottom-0 h-[2px] bg-accent-mark/80"
           style={{ animationDuration: `${toast.duration}ms` }}
           onAnimationEnd={() => dismiss(toast.id)}
         />

@@ -103,7 +103,7 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
             <li key={s.id}>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                  on ? 'bg-peach-50 text-ink-800' : 'text-ink-600 hover:bg-cream-50'
+                  on ? 'bg-accent-soft text-strong' : 'text-soft hover:bg-hover'
                 }`}
               >
                 <input
@@ -111,13 +111,13 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
                   checked={on}
                   disabled={!!progress}
                   onChange={() => toggle(s.id)}
-                  className="h-4 w-4 accent-peach-500"
+                  className="h-4 w-4 accent-accent"
                 />
                 <span className="text-base leading-none">{s.plan.space.emoji}</span>
                 <span className="flex-1 truncate font-medium">{s.label}</span>
-                <span className="shrink-0 tabular-nums text-ink-400">
+                <span className="shrink-0 tabular-nums text-muted">
                   {plural(s.plan.links, 'link')}
-                  <span className="text-ink-300"> in </span>
+                  <span className="text-faint"> in </span>
                   {plural(s.plan.space.stacks.length, 'stack')}
                 </span>
               </label>
@@ -126,7 +126,7 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
         })}
       </ul>
 
-      <p className="mt-3 text-xs leading-relaxed text-ink-500">
+      <p className="mt-3 text-xs leading-relaxed text-muted">
         {links
           ? `${chosen.length === 1 ? 'A new space' : `${chosen.length} new spaces`} with ${plural(stacks, 'stack')}, one per folder. Your originals stay where they are.`
           : 'Tick a folder to copy it into a space.'}
@@ -134,18 +134,18 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
           ` ${plural(skipped, 'bookmarklet or browser page', 'bookmarklets or browser pages')} ${skipped === 1 ? 'stays' : 'stay'} behind: a new tab can't open ${skipped === 1 ? 'it' : 'them'}.`}
       </p>
 
-      {error && <p className="mt-2 text-xs text-peach-700">Copy failed: {error}</p>}
+      {error && <p className="mt-2 text-xs text-danger">Copy failed: {error}</p>}
 
       <div className="mt-4 flex items-center justify-end gap-3">
         {progress ? (
           <div className="flex w-full items-center gap-3" role="status" aria-live="polite">
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-cream-200">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
               <div
-                className="h-full rounded-full bg-peach-500 transition-[width] duration-150"
+                className="h-full rounded-full bg-accent transition-[width] duration-150"
                 style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }}
               />
             </div>
-            <span className="shrink-0 text-xs tabular-nums text-ink-500">
+            <span className="shrink-0 text-xs tabular-nums text-muted">
               Copying {progress.done.toLocaleString()} of {progress.total.toLocaleString()}
             </span>
           </div>
@@ -153,7 +153,7 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
           <button
             onClick={() => void copy()}
             disabled={!links}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-peach-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_16px_-8px_rgb(201_90_34/0.8)] transition hover:bg-peach-600 disabled:opacity-40 disabled:shadow-none"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent shadow-cta transition hover:bg-accent-hover disabled:opacity-40 disabled:shadow-none"
           >
             {links ? `Copy ${plural(links, 'link')}` : 'Copy'}
             <ArrowRight className="h-4 w-4" />

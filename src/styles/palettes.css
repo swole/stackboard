@@ -1,0 +1,517 @@
+/* Stackboard palettes (0.5.0).
+ *
+ * Each block is one palette variant, picked by two attributes on <html>: data-palette (the family
+ * chosen in Settings > Appearance) and data-scheme (light or dark, resolved from the Light / Dark /
+ * System choice; public/theme-boot.js sets both before the first paint). The same attributes on any
+ * element re-theme just that subtree, which is how the palette swatches in Settings preview
+ * themselves.
+ *
+ * Every colour is an official palette colour or a two-colour sRGB mix of them, noted beside it:
+ * "mauve 70% + text" means color-mix(in srgb, mauve 70%, text). Tailwind reads these through the
+ * @theme inline tokens in index.css (bg-canvas, text-muted, ...).
+ *
+ * tests/unit.test.ts parses this file: every block must define every token, and text must clear
+ * WCAG AA on the surfaces it sits on (4.5:1; 3:1 for icons, focus rings and monogram letters).
+ * Write colours as #rrggbb or #rrggbbaa (no names, no rgb()) so the parser can read them.
+ *
+ * Sources: catppuccin.com/palette, github.com/morhetz/gruvbox, nordtheme.com/docs/colors-and-palettes.
+ */
+
+/* Stackboard. The original cream and peach look. */
+:root,
+[data-palette="stackboard"][data-scheme="light"] {
+  --sb-canvas: #fbf3e8; /* peach-50 */
+  --sb-panel: #ffffff; /* white */
+  --sb-card: #ffffff; /* white */
+  --sb-raised: #ffffff; /* white */
+  --sb-well: #ffffff66; /* white at 40% */
+  --sb-hover: #fcfaf6; /* cream-50 */
+  --sb-selected: #f7f3e9; /* cream-100 */
+  --sb-sunken: #fcfaf6; /* cream-50 */
+  --sb-strong: #1c1917; /* ink-800 */
+  --sb-fg: #292524; /* ink-700 */
+  --sb-soft: #44403c; /* ink-600 */
+  --sb-muted: #57534e; /* ink-500 */
+  --sb-faint: #78716c; /* ink-400 */
+  --sb-ghost: #a8a29e; /* ink-300 */
+  --sb-line: #e7e5e4; /* ink-100 */
+  --sb-line-strong: #d6d3d1; /* ink-200 */
+  --sb-accent: #e4732f; /* peach-500 */
+  --sb-accent-hover: #c95a22; /* peach-600 */
+  --sb-on-accent: #ffffff; /* white */
+  --sb-accent-soft: #fbf3e8; /* peach-50 */
+  --sb-accent-line: #f4b27f; /* peach-300 */
+  --sb-accent-text: #a4451d; /* peach-700 */
+  --sb-accent-mark: #ec8f4f; /* peach-400 */
+  --sb-focus: #c95a22; /* peach-600 */
+  --sb-danger: #a4451d; /* peach-700 */
+  --sb-danger-fill: #a4451d; /* peach-700 */
+  --sb-danger-fill-hover: #82381c; /* peach-800 */
+  --sb-on-danger: #ffffff; /* white */
+  --sb-danger-soft: #fbf3e8; /* peach-50 */
+  --sb-inverse: #1c1917; /* ink-800 */
+  --sb-on-inverse: #f7f3e9; /* cream-100 */
+  --sb-inverse-strong: #ffffff; /* white */
+  --sb-inverse-muted: #a8a29e; /* ink-300 */
+  --sb-inverse-accent: #f4b27f; /* peach-300 */
+  --sb-scrim: #2925244d; /* ink-700 at 30% */
+  --sb-shade: #82381c; /* peach-800 */
+  --sb-brand-from: #f28f4f;
+  --sb-brand-to: #d2581d;
+  --sb-brand-ink: #ffffff; /* white */
+  --sb-tint-0-bg: #f9d0ad;
+  --sb-tint-0-fg: #82381c;
+  --sb-tint-1-bg: #fde3a7;
+  --sb-tint-1-fg: #7a4a0c;
+  --sb-tint-2-bg: #d9e7cb;
+  --sb-tint-2-fg: #3f5a2a;
+  --sb-tint-3-bg: #cde8e2;
+  --sb-tint-3-fg: #1f5d52;
+  --sb-tint-4-bg: #d6e4f3;
+  --sb-tint-4-fg: #274b6d;
+  --sb-tint-5-bg: #e5dcf3;
+  --sb-tint-5-fg: #4c3a78;
+  --sb-tint-6-bg: #f6d5dc;
+  --sb-tint-6-fg: #7a2e41;
+  --sb-tint-7-bg: #ede5d2;
+  --sb-tint-7-fg: #57534e;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #f7cdaa 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #f4d6db 0%, transparent 70%),
+    #fbf3e8;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #dce6c9 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #f7d5ba 0%, transparent 68%),
+    #fbf3e8;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #fbe2ad 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #e5dcf0 0%, transparent 70%),
+    #fbf3e8;
+}
+
+/* Stackboard Dark. Designed for 0.5.0: warm charcoal with the Stackboard peach. */
+[data-palette="stackboard"][data-scheme="dark"] {
+  --sb-canvas: #1b1714;
+  --sb-panel: #211c18;
+  --sb-card: #2a2420;
+  --sb-raised: #302925;
+  --sb-well: #00000033; /* 20% alpha */
+  --sb-hover: #362e29;
+  --sb-selected: #3d3430;
+  --sb-sunken: #1a1613;
+  --sb-strong: #f6eee4;
+  --sb-fg: #ebe2d6;
+  --sb-soft: #d6cabd;
+  --sb-muted: #b4a799;
+  --sb-faint: #8f8277;
+  --sb-ghost: #6a5f56;
+  --sb-line: #3a312b;
+  --sb-line-strong: #4c423b;
+  --sb-accent: #f0884a;
+  --sb-accent-hover: #f49e68;
+  --sb-on-accent: #1e130b;
+  --sb-accent-soft: #3a2a20;
+  --sb-accent-line: #a35a30;
+  --sb-accent-text: #f4a573;
+  --sb-accent-mark: #f0884a;
+  --sb-focus: #f0884a;
+  --sb-danger: #f4927f;
+  --sb-danger-fill: #b8432c;
+  --sb-danger-fill-hover: #a33a25;
+  --sb-on-danger: #fff6f0;
+  --sb-danger-soft: #3d2520;
+  --sb-inverse: #3f3631;
+  --sb-on-inverse: #efe6da;
+  --sb-inverse-strong: #fdf8f2;
+  --sb-inverse-muted: #c9bcae;
+  --sb-inverse-accent: #f6b384;
+  --sb-scrim: #0b0907a6; /* 65% alpha */
+  --sb-shade: #000000;
+  --sb-brand-from: #f28f4f;
+  --sb-brand-to: #d2581d;
+  --sb-brand-ink: #fff8f1;
+  --sb-tint-0-bg: #5a4233;
+  --sb-tint-0-fg: #f1ac81;
+  --sb-tint-1-bg: #574932;
+  --sb-tint-1-fg: #e8c77e;
+  --sb-tint-2-bg: #484b3a;
+  --sb-tint-2-fg: #b5cd99;
+  --sb-tint-3-bg: #3e4a43;
+  --sb-tint-3-fg: #8ecaba;
+  --sb-tint-4-bg: #42484e;
+  --sb-tint-4-fg: #9ec0e1;
+  --sb-tint-5-bg: #4c424f;
+  --sb-tint-5-fg: #c2aee3;
+  --sb-tint-6-bg: #574041;
+  --sb-tint-6-fg: #e9a7b4;
+  --sb-tint-7-bg: #51493e;
+  --sb-tint-7-fg: #d1c4a9;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #553623 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #433a48 0%, transparent 70%),
+    #1b1714;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #463a26 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #313f38 0%, transparent 68%),
+    #1b1714;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #4c3638 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #553623 0%, transparent 70%),
+    #1b1714;
+}
+
+/* Catppuccin Latte. Catppuccin Latte, official palette. */
+[data-palette="catppuccin"][data-scheme="light"] {
+  --sb-canvas: #e6e9ef; /* mantle */
+  --sb-panel: #dce0e8; /* crust */
+  --sb-card: #eff1f5; /* base */
+  --sb-raised: #eff1f5; /* base */
+  --sb-well: #dce0e8b3; /* crust at 70% */
+  --sb-hover: #e6e9ef; /* mantle */
+  --sb-selected: #ccd0da; /* surface0 */
+  --sb-sunken: #e6e9ef; /* mantle */
+  --sb-strong: #4c4f69; /* text */
+  --sb-fg: #4c4f69; /* text */
+  --sb-soft: #5c5f77; /* subtext1 */
+  --sb-muted: #5c5f77; /* subtext1 */
+  --sb-faint: #6c6f85; /* subtext0 */
+  --sb-ghost: #9ca0b0; /* overlay0 */
+  --sb-line: #ccd0da; /* surface0 */
+  --sb-line-strong: #bcc0cc; /* surface1 */
+  --sb-accent: #8839ef; /* mauve */
+  --sb-accent-hover: #7f3cdb; /* mauve 85% + text */
+  --sb-on-accent: #eff1f5; /* base */
+  --sb-accent-soft: #e5dff4; /* mauve 10% + base */
+  --sb-accent-line: #c19ef2; /* mauve 45% + base */
+  --sb-accent-text: #7f3cdb; /* mauve 85% + text */
+  --sb-accent-mark: #fe640b; /* peach */
+  --sb-focus: #8839ef; /* mauve */
+  --sb-danger: #c2173f; /* red 88% + text */
+  --sb-danger-fill: #c2173f; /* red 88% + text */
+  --sb-danger-fill-hover: #b11f45; /* red 75% + text */
+  --sb-on-danger: #eff1f5; /* base */
+  --sb-danger-soft: #eddfe6; /* red 8% + base */
+  --sb-inverse: #4c4f69; /* text */
+  --sb-on-inverse: #eff1f5; /* base */
+  --sb-inverse-strong: #eff1f5; /* base */
+  --sb-inverse-muted: #ccd0da; /* surface0 */
+  --sb-inverse-accent: #d5c3f4; /* mauve 25% + base */
+  --sb-scrim: #4c4f694d; /* text at 30% */
+  --sb-shade: #4c4f69; /* text */
+  --sb-brand-from: #ea76cb; /* pink */
+  --sb-brand-to: #8839ef; /* mauve */
+  --sb-brand-ink: #eff1f5; /* base */
+  --sb-tint-0-bg: #f2d9cd;
+  --sb-tint-0-fg: #ae5b35;
+  --sb-tint-1-bg: #ece0d0;
+  --sb-tint-1-fg: #8e6b47;
+  --sb-tint-2-bg: #d1e3d3;
+  --sb-tint-2-fg: #458044;
+  --sb-tint-3-bg: #cae1e6;
+  --sb-tint-3-fg: #2c7786;
+  --sb-tint-4-bg: #cce3ea;
+  --sb-tint-4-fg: #36778f;
+  --sb-tint-5-bg: #ddd2f4;
+  --sb-tint-5-fg: #793fce;
+  --sb-tint-6-bg: #eedcee;
+  --sb-tint-6-fg: #a3649f;
+  --sb-tint-7-bg: #dee0e7;
+  --sb-tint-7-fg: #4c4f69;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #dedbef 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #e7d9ea 0%, transparent 70%),
+    #e6e9ef;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #cbe1ee 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #d1e0e6 0%, transparent 68%),
+    #e6e9ef;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #e9dad6 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #d8ddf1 0%, transparent 70%),
+    #e6e9ef;
+}
+
+/* Catppuccin Mocha. Catppuccin Mocha, official palette. */
+[data-palette="catppuccin"][data-scheme="dark"] {
+  --sb-canvas: #1e1e2e; /* base */
+  --sb-panel: #181825; /* mantle */
+  --sb-card: #313244; /* surface0 */
+  --sb-raised: #313244; /* surface0 */
+  --sb-well: #11111b73; /* crust at 45% */
+  --sb-hover: #3b3d4f; /* surface0 50% + surface1 */
+  --sb-selected: #45475a; /* surface1 */
+  --sb-sunken: #11111b; /* crust */
+  --sb-strong: #cdd6f4; /* text */
+  --sb-fg: #cdd6f4; /* text */
+  --sb-soft: #bac2de; /* subtext1 */
+  --sb-muted: #a6adc8; /* subtext0 */
+  --sb-faint: #7f849c; /* overlay1 */
+  --sb-ghost: #6c7086; /* overlay0 */
+  --sb-line: #45475a; /* surface1 */
+  --sb-line-strong: #585b70; /* surface2 */
+  --sb-accent: #cba6f7; /* mauve */
+  --sb-accent-hover: #ccb4f6; /* mauve 70% + text */
+  --sb-on-accent: #11111b; /* crust */
+  --sb-accent-soft: #4a4561; /* mauve 16% + surface0 */
+  --sb-accent-line: #8672a6; /* mauve 55% + surface0 */
+  --sb-accent-text: #cba6f7; /* mauve */
+  --sb-accent-mark: #fab387; /* peach */
+  --sb-focus: #cba6f7; /* mauve */
+  --sb-danger: #f38ba8; /* red */
+  --sb-danger-fill: #f38ba8; /* red */
+  --sb-danger-fill-hover: #eba0ac; /* maroon */
+  --sb-on-danger: #11111b; /* crust */
+  --sb-danger-soft: #443b4e; /* red 10% + surface0 */
+  --sb-inverse: #45475a; /* surface1 */
+  --sb-on-inverse: #cdd6f4; /* text */
+  --sb-inverse-strong: #cdd6f4; /* text */
+  --sb-inverse-muted: #bac2de; /* subtext1 */
+  --sb-inverse-accent: #b4befe; /* lavender */
+  --sb-scrim: #11111b99; /* crust at 60% */
+  --sb-shade: #000000;
+  --sb-brand-from: #f5c2e7; /* pink */
+  --sb-brand-to: #cba6f7; /* mauve */
+  --sb-brand-ink: #1e1e2e; /* base */
+  --sb-tint-0-bg: #615154;
+  --sb-tint-0-fg: #f3b897;
+  --sb-tint-1-bg: #615c5e;
+  --sb-tint-1-fg: #f2e0b9;
+  --sb-tint-2-bg: #4d5c5a;
+  --sb-tint-2-fg: #ace1ad;
+  --sb-tint-3-bg: #495c67;
+  --sb-tint-3-fg: #9de0da;
+  --sb-tint-4-bg: #41566c;
+  --sb-tint-4-fg: #81c9ed;
+  --sb-tint-5-bg: #564e6f;
+  --sb-tint-5-fg: #cbadf7;
+  --sb-tint-6-bg: #60556b;
+  --sb-tint-6-fg: #efc5e9;
+  --sb-tint-7-bg: #494b5e;
+  --sb-tint-7-fg: #9ca2bc;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #443c5a 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #363f5b 0%, transparent 70%),
+    #1e1e2e;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #304156 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #33414c 0%, transparent 68%),
+    #1e1e2e;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #453c4f 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #4a3c40 0%, transparent 70%),
+    #1e1e2e;
+}
+
+/* Gruvbox Light. Gruvbox light mode, official palette. */
+[data-palette="gruvbox"][data-scheme="light"] {
+  --sb-canvas: #fbf1c7; /* bg0 */
+  --sb-panel: #f2e5bc; /* bg0_s */
+  --sb-card: #f9f5d7; /* bg0_h */
+  --sb-raised: #f9f5d7; /* bg0_h */
+  --sb-well: #ebdbb280; /* bg1 at 50% */
+  --sb-hover: #ebdbb2; /* bg1 */
+  --sb-selected: #ebdbb2; /* bg1 */
+  --sb-sunken: #fbf1c7; /* bg0 */
+  --sb-strong: #282828; /* fg0 */
+  --sb-fg: #3c3836; /* fg1 */
+  --sb-soft: #504945; /* fg2 */
+  --sb-muted: #665c54; /* fg3 */
+  --sb-faint: #7c6f64; /* fg4 */
+  --sb-ghost: #928374; /* gray */
+  --sb-line: #ebdbb2; /* bg1 */
+  --sb-line-strong: #d5c4a1; /* bg2 */
+  --sb-accent: #af3a03; /* forange */
+  --sb-accent-hover: #9b3709; /* forange 85% + fg0 */
+  --sb-on-accent: #fbf1c7; /* bg0 */
+  --sb-accent-soft: #f6e6c3; /* norange 10% + bg0_h */
+  --sb-accent-line: #d65d0e; /* norange */
+  --sb-accent-text: #af3a03; /* forange */
+  --sb-accent-mark: #d65d0e; /* norange */
+  --sb-focus: #af3a03; /* forange */
+  --sb-danger: #9d0006; /* fred */
+  --sb-danger-fill: #9d0006; /* fred */
+  --sb-danger-fill-hover: #86080d; /* fred 80% + fg0 */
+  --sb-on-danger: #fbf1c7; /* bg0 */
+  --sb-danger-soft: #f5e4c8; /* nred 8% + bg0_h */
+  --sb-inverse: #3c3836; /* fg1 */
+  --sb-on-inverse: #ebdbb2; /* bg1 */
+  --sb-inverse-strong: #fbf1c7; /* bg0 */
+  --sb-inverse-muted: #bdae93; /* bg3 */
+  --sb-inverse-accent: #fabd2f; /* yellow */
+  --sb-scrim: #3c38364d; /* fg1 at 30% */
+  --sb-shade: #3c3836; /* fg1 */
+  --sb-brand-from: #d65d0e; /* norange */
+  --sb-brand-to: #af3a03; /* forange */
+  --sb-brand-ink: #f9f5d7; /* bg0_h */
+  --sb-tint-0-bg: #fbd7a7;
+  --sb-tint-0-fg: #af3a03;
+  --sb-tint-1-bg: #f9e7ad;
+  --sb-tint-1-fg: #996618;
+  --sb-tint-2-bg: #e8e7aa;
+  --sb-tint-2-fg: #79740e;
+  --sb-tint-3-bg: #dee7c0;
+  --sb-tint-3-fg: #427b58;
+  --sb-tint-4-bg: #dbe1c7;
+  --sb-tint-4-fg: #076678;
+  --sb-tint-5-bg: #f0d9c8;
+  --sb-tint-5-fg: #8f3f71;
+  --sb-tint-6-bg: #fac9ad;
+  --sb-tint-6-fg: #9d0006;
+  --sb-tint-7-bg: #eae3c6;
+  --sb-tint-7-fg: #504945;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #f4d5a4 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #edd6bb 0%, transparent 70%),
+    #fbf1c7;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #d8ddb1 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #f0d795 0%, transparent 68%),
+    #fbf1c7;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #f4d4af 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #d8dcbb 0%, transparent 70%),
+    #fbf1c7;
+}
+
+/* Gruvbox Dark. Gruvbox dark mode, official palette. */
+[data-palette="gruvbox"][data-scheme="dark"] {
+  --sb-canvas: #282828; /* bg0 */
+  --sb-panel: #1d2021; /* bg0_h */
+  --sb-card: #3c3836; /* bg1 */
+  --sb-raised: #3c3836; /* bg1 */
+  --sb-well: #1d202180; /* bg0_h at 50% */
+  --sb-hover: #504945; /* bg2 */
+  --sb-selected: #504945; /* bg2 */
+  --sb-sunken: #32302f; /* bg0_s */
+  --sb-strong: #fbf1c7; /* fg0 */
+  --sb-fg: #ebdbb2; /* fg1 */
+  --sb-soft: #d5c4a1; /* fg2 */
+  --sb-muted: #bdae93; /* fg3 */
+  --sb-faint: #a89984; /* fg4 */
+  --sb-ghost: #928374; /* gray */
+  --sb-line: #504945; /* bg2 */
+  --sb-line-strong: #665c54; /* bg3 */
+  --sb-accent: #fe8019; /* orange */
+  --sb-accent-hover: #fc9822; /* orange 60% + yellow */
+  --sb-on-accent: #282828; /* bg0 */
+  --sb-accent-soft: #574232; /* orange 14% + bg1 */
+  --sb-accent-line: #a76026; /* orange 55% + bg1 */
+  --sb-accent-text: #fe8019; /* orange */
+  --sb-accent-mark: #fabd2f; /* yellow */
+  --sb-focus: #fe8019; /* orange */
+  --sb-danger: #fb9173; /* red 57% + fg0 */
+  --sb-danger-fill: #cc241d; /* nred */
+  --sb-danger-fill-hover: #b3251f; /* nred 85% + bg0 */
+  --sb-on-danger: #fbf1c7; /* fg0 */
+  --sb-danger-soft: #4f3a36; /* red 10% + bg1 */
+  --sb-inverse: #504945; /* bg2 */
+  --sb-on-inverse: #ebdbb2; /* fg1 */
+  --sb-inverse-strong: #fbf1c7; /* fg0 */
+  --sb-inverse-muted: #d5c4a1; /* fg2 */
+  --sb-inverse-accent: #fabd2f; /* yellow */
+  --sb-scrim: #1d2021a6; /* bg0_h at 65% */
+  --sb-shade: #000000;
+  --sb-brand-from: #fabd2f; /* yellow */
+  --sb-brand-to: #fe8019; /* orange */
+  --sb-brand-ink: #282828; /* bg0 */
+  --sb-tint-0-bg: #6b492f;
+  --sb-tint-0-fg: #fe9133;
+  --sb-tint-1-bg: #6a5834;
+  --sb-tint-1-fg: #fac546;
+  --sb-tint-2-bg: #5a5732;
+  --sb-tint-2-fg: #c2c33e;
+  --sb-tint-3-bg: #505947;
+  --sb-tint-3-fg: #9ec787;
+  --sb-tint-4-bg: #4d524e;
+  --sb-tint-4-fg: #95b09f;
+  --sb-tint-5-bg: #604b4e;
+  --sb-tint-5-fg: #d996a2;
+  --sb-tint-6-bg: #6a3c36;
+  --sb-tint-6-fg: #fb7057;
+  --sb-tint-7-bg: #564f49;
+  --sb-tint-7-fg: #b4a68e;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #573b25 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #4e3d41 0%, transparent 70%),
+    #282828;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #3b4538 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #4c4129 0%, transparent 68%),
+    #282828;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #69322c 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #3c4441 0%, transparent 70%),
+    #282828;
+}
+
+/* Nord. Nord, official palette (Polar Night, Snow Storm, Frost, Aurora). */
+[data-palette="nord"][data-scheme="dark"] {
+  --sb-canvas: #2e3440; /* nord0 */
+  --sb-panel: #3b4252; /* nord1 */
+  --sb-card: #3b4252; /* nord1 */
+  --sb-raised: #3b4252; /* nord1 */
+  --sb-well: #3b425266; /* nord1 at 40% */
+  --sb-hover: #434c5e; /* nord2 */
+  --sb-selected: #434c5e; /* nord2 */
+  --sb-sunken: #2e3440; /* nord0 */
+  --sb-strong: #eceff4; /* nord6 */
+  --sb-fg: #e5e9f0; /* nord5 */
+  --sb-soft: #d8dee9; /* nord4 */
+  --sb-muted: #b1b7c3; /* nord4 75% + nord1 */
+  --sb-faint: #9198a5; /* nord4 55% + nord1 */
+  --sb-ghost: #6a707b; /* nord4 35% + nord0 */
+  --sb-line: #434c5e; /* nord2 */
+  --sb-line-strong: #4c566a; /* nord3 */
+  --sb-accent: #88c0d0; /* nord8 */
+  --sb-accent-hover: #a1ccd9; /* nord8 75% + nord6 */
+  --sb-on-accent: #2e3440; /* nord0 */
+  --sb-accent-soft: #465464; /* nord8 14% + nord1 */
+  --sb-accent-line: #5e81ac; /* nord10 */
+  --sb-accent-text: #88c0d0; /* nord8 */
+  --sb-accent-mark: #ebcb8b; /* nord13 */
+  --sb-focus: #88c0d0; /* nord8 */
+  --sb-danger: #d8b1b7; /* nord11 44% + nord6 */
+  --sb-danger-fill: #94545d; /* nord11 70% + nord0 */
+  --sb-danger-fill-hover: #854f59; /* nord11 60% + nord0 */
+  --sb-on-danger: #eceff4; /* nord6 */
+  --sb-danger-soft: #4b4655; /* nord11 12% + nord1 */
+  --sb-inverse: #4c566a; /* nord3 */
+  --sb-on-inverse: #e5e9f0; /* nord5 */
+  --sb-inverse-strong: #eceff4; /* nord6 */
+  --sb-inverse-muted: #d8dee9; /* nord4 */
+  --sb-inverse-accent: #b0d3de; /* nord8 60% + nord6 */
+  --sb-scrim: #00000073; /* 45% alpha */
+  --sb-shade: #000000;
+  --sb-brand-from: #88c0d0; /* nord8 */
+  --sb-brand-to: #5e81ac; /* nord10 */
+  --sb-brand-ink: #eceff4; /* nord6 */
+  --sb-tint-0-bg: #5f5359;
+  --sb-tint-0-fg: #d6a08f;
+  --sb-tint-1-bg: #656360;
+  --sb-tint-1-fg: #ebd09b;
+  --sb-tint-2-bg: #546060;
+  --sb-tint-2-fg: #aec59c;
+  --sb-tint-3-bg: #4f5f6b;
+  --sb-tint-3-fg: #9dc4c4;
+  --sb-tint-4-bg: #4c596d;
+  --sb-tint-4-fg: #9ab4cd;
+  --sb-tint-5-bg: #585468;
+  --sb-tint-5-fg: #c1a5be;
+  --sb-tint-6-bg: #5b4958;
+  --sb-tint-6-fg: #d0949c;
+  --sb-tint-7-bg: #616776;
+  --sb-tint-7-fg: #dbe1eb;
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #3b4854 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #474555 0%, transparent 70%),
+    #2e3440;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #3a485c 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #3e474b 0%, transparent 68%),
+    #2e3440;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #3d4857 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #4d4449 0%, transparent 70%),
+    #2e3440;
+}
+

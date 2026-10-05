@@ -7,6 +7,24 @@ import { installedAt, shouldAskForRating } from '../src/lib/onboarding'
 import { STARTER_PACKS } from '../src/lib/starterPacks'
 import { batchFlags } from '../src/lib/fresh'
 import { planStash, staysNote } from '../src/lib/stashPlan'
+import {
+  BLUR_MAX,
+  DEFAULT_APPEARANCE,
+  DIM_MAX,
+  PALETTES,
+  PALETTE_TOKENS,
+  bootMirror,
+  mergeAppearance,
+  onlyScheme,
+  parseAppearance,
+  resolveScheme,
+  settingsFromMirror,
+  variantName,
+} from '../src/lib/appearance'
+import { spaceIndexForKey } from '../src/lib/shortcuts'
+import { glyphOf } from '../src/lib/favicon'
+import palettesCss from '../src/styles/palettes.css'
+import { contrastRatio, gradientStops, mix, over, readPalettes } from './contrast'
 
 let fails = 0
 function eq(label: string, got: unknown, want: unknown) {
@@ -154,6 +172,117 @@ eq('stash: pinned and browser pages stay', [sp.links, sp.skipped, sp.pinned], [4
 eq('stash: nothing to save', planStash([{ id: 1, url: 'chrome://newtab/' }], new Map(), 'x').links, 0)
 eq('stash: a tab still loading is saved by where it is headed', planStash([{ id: 1, url: '', pendingUrl: 'https://slow.example/' }], new Map(), 'x').tabIds, [1])
 eq('packs: no duplicate link inside a pack', STARTER_PACKS.every((p) => { const u = p.stacks.flatMap((s) => s.links.map((l) => l.url)); return new Set(u).size === u.length }), true)
+
+// ---------- 0.5.0: the visual pack ----------
+
+// Contrast helper, against known values.
+const round2 = (n: number) => Math.round(n * 100) / 100
+eq('contrast: black on white is 21:1', round2(contrastRatio('#000000', '#ffffff')), 21)
+eq('contrast: a colour on itself is 1:1', contrastRatio('#cba6f7', '#cba6f7'), 1)
+eq('contrast: #777 on white is 4.48:1, just under AA', round2(contrastRatio('#777777', '#ffffff')), 4.48)
+eq('contrast: order does not matter', contrastRatio('#1e1e2e', '#cdd6f4') === contrastRatio('#cdd6f4', '#1e1e2e'), true)
+eq('mix: half black, half white', mix('#000000', '#ffffff', 0.5), '#808080')
+eq('mix: alpha laid over a colour', over('#ffffff66', '#000000'), '#666666')
+
+// Palettes: every variant the app can pick has a full block in palettes.css.
+const blocks = readPalettes(palettesCss)
+const variantIds = PALETTES.flatMap((p) => [p.light && `${p.id}/light`, p.dark && `${p.id}/dark`].filter(Boolean) as string[])
+eq('palettes: one CSS block per variant, no strays', blocks.map((b) => `${b.palette}/${b.scheme}`).sort(), [...variantIds].sort())
+for (const b of blocks) {
+  const id = `${b.palette}/${b.scheme}`
+  eq(`palettes: ${id} defines every token`, PALETTE_TOKENS.filter((t) => !b.tokens.has(t)), [])
+  eq(`palettes: ${id} has no unknown tokens`, [...b.tokens.keys()].filter((t) => !PALETTE_TOKENS.includes(t)), [])
+}
+
+// WCAG AA: 4.5:1 for text, 3:1 for icons, focus rings, the open dot and monogram letters.
+// One documented exception: Stackboard Light keeps its original white-on-peach buttons (3.1:1,
+// AA for large text only), because 0.5.0 keeps the default look as it was.
+const EXCEPTIONS: Record<string, Record<string, number>> = {
+  'stackboard/light': { 'on-accent/accent': 3, 'on-accent/accent-hover': 3 },
+}
+for (const b of blocks) {
+  const id = `${b.palette}/${b.scheme}`
+  // A missing token is reported above; here it just counts as a miss instead of crashing the run.
+  const t = (k: string) => b.tokens.get(k) ?? '#ff00ff'
+  const short = (need: number, pairs: Array<[string, string]>) =>
+    pairs
+      .filter(([fg, bg]) => !b.tokens.has(fg) || !b.tokens.has(bg) || contrastRatio(t(fg), t(bg)) < (EXCEPTIONS[id]?.[`${fg}/${bg}`] ?? need))
+      .map(([fg, bg]) => `${fg} on ${bg} ${b.tokens.has(fg) && b.tokens.has(bg) ? round2(contrastRatio(t(fg), t(bg))) : 'missing'}`)
+  const text: Array<[string, string]> = []
+  for (const s of ['canvas', 'panel', 'card', 'raised']) for (const f of ['strong', 'fg', 'soft', 'muted']) text.push([f, s])
+  text.push(['fg', 'sunken'], ['muted', 'sunken'], ['fg', 'hover'], ['strong', 'hover'], ['strong', 'selected'], ['strong', 'accent-soft'])
+  for (const s of ['canvas', 'card', 'raised']) text.push(['accent-text', s], ['danger', s])
+  text.push(['danger', 'danger-soft'])
+  eq(`contrast: ${id} text clears AA on every surface`, short(4.5, text), [])
+  eq(
+    `contrast: ${id} buttons and toasts clear AA`,
+    short(4.5, [
+      ['on-accent', 'accent'], ['on-accent', 'accent-hover'], ['on-danger', 'danger-fill'], ['on-danger', 'danger-fill-hover'],
+      ['on-inverse', 'inverse'], ['inverse-strong', 'inverse'], ['inverse-muted', 'inverse'], ['inverse-accent', 'inverse'],
+    ]),
+    [],
+  )
+  const marks: Array<[string, string]> = [['focus', 'card'], ['focus', 'canvas'], ['accent', 'card'], ['accent', 'panel']]
+  for (const s of ['canvas', 'panel', 'card', 'raised', 'sunken']) marks.push(['faint', s])
+  for (let i = 0; i < 8; i++) marks.push([`tint-${i}-fg`, `tint-${i}-bg`])
+  eq(`contrast: ${id} icons, focus rings and monograms clear 3:1`, short(3, marks), [])
+  const gradientMisses = [1, 2, 3].flatMap((g) => {
+    if (!b.tokens.has(`gradient-${g}`)) return [`gradient-${g} missing`]
+    return gradientStops(t(`gradient-${g}`)).flatMap((stop) =>
+      ['strong', 'fg', 'muted'].filter((f) => contrastRatio(t(f), stop) < 4.5).map((f) => `gradient-${g} ${f} on ${stop}`),
+    )
+  })
+  eq(`contrast: ${id} text stays AA on all three gradients`, gradientMisses, [])
+}
+
+// Appearance settings: whatever storage holds comes back complete and in range.
+eq('appearance: nothing stored gives the defaults', parseAppearance(undefined), DEFAULT_APPEARANCE)
+eq('appearance: junk gives the defaults', parseAppearance('dark please'), DEFAULT_APPEARANCE)
+eq(
+  'appearance: unknown palette, mode, density and kind fall back',
+  parseAppearance({ palette: 'dracula', mode: 'dim', density: 'cosy', bg: { kind: 'video' } }),
+  DEFAULT_APPEARANCE,
+)
+eq(
+  'appearance: dim and blur are clamped',
+  parseAppearance({ bg: { dim: 400, blur: -3 } }).bg,
+  { ...DEFAULT_APPEARANCE.bg, dim: DIM_MAX, blur: 0 },
+)
+eq('appearance: blur caps at its maximum', parseAppearance({ bg: { blur: 99 } }).bg.blur, BLUR_MAX)
+eq('appearance: gradient choice stays 1-3', [parseAppearance({ bg: { gradient: 0 } }).bg.gradient, parseAppearance({ bg: { gradient: 7 } }).bg.gradient, parseAppearance({ bg: { gradient: 2.4 } }).bg.gradient], [1, 3, 2])
+eq('appearance: numbers stored as text still read', parseAppearance({ bg: { dim: '42', blur: ' 6 ' } }).bg, { ...DEFAULT_APPEARANCE.bg, dim: 42, blur: 6 })
+eq('appearance: NaN and Infinity fall back', parseAppearance({ bg: { dim: NaN, blur: Infinity } }).bg, DEFAULT_APPEARANCE.bg)
+const picked = { mode: 'dark', palette: 'nord', density: 'compact', bg: { kind: 'image', gradient: 2, dim: 50, blur: 8, imageRev: 1791200000000 } }
+eq('appearance: a full image setup survives a round trip', parseAppearance(JSON.parse(JSON.stringify(picked))), picked)
+eq('appearance: merging a slider keeps the rest of the background', mergeAppearance(parseAppearance(picked), { bg: { dim: 20 } }).bg, { ...picked.bg, dim: 20 })
+eq('appearance: merging clamps too', mergeAppearance(DEFAULT_APPEARANCE, { bg: { dim: 999 } }).bg.dim, DIM_MAX)
+eq('mirror: settings survive the localStorage copy', settingsFromMirror(JSON.stringify(bootMirror(parseAppearance(picked)))), picked)
+eq('mirror: a broken copy gives the defaults', [settingsFromMirror('{not json'), settingsFromMirror(null)], [DEFAULT_APPEARANCE, DEFAULT_APPEARANCE])
+eq('mirror: tells the boot script when a palette has one scheme', [bootMirror(parseAppearance({ palette: 'nord' })).only, bootMirror(DEFAULT_APPEARANCE).only], ['dark', null])
+eq('mirror: carries the background kind for the first frame', bootMirror(parseAppearance(picked)).bg, 'image')
+
+// Light, dark, system.
+eq('scheme: system follows the OS', [resolveScheme('system', 'catppuccin', true), resolveScheme('system', 'catppuccin', false)], ['dark', 'light'])
+eq('scheme: an explicit choice beats the OS', [resolveScheme('light', 'gruvbox', true), resolveScheme('dark', 'stackboard', false)], ['light', 'dark'])
+eq('scheme: Nord stays dark in light mode', [resolveScheme('light', 'nord', false), resolveScheme('system', 'nord', false), onlyScheme('nord')], ['dark', 'dark', 'dark'])
+eq('scheme: variant names', [variantName('catppuccin', 'dark'), variantName('catppuccin', 'light'), variantName('gruvbox', 'dark'), variantName('stackboard', 'light')], ['Catppuccin Mocha', 'Catppuccin Latte', 'Gruvbox Dark', 'Stackboard Light'])
+
+// Keys 1-9.
+eq('keys: 1-9 pick spaces 0-8', ['1', '5', '9'].map(spaceIndexForKey), [0, 4, 8])
+eq('keys: 0, letters and named keys do nothing', ['0', 'a', '/', 'F1', '10', ''].map(spaceIndexForKey), [null, null, null, null, null, null])
+
+// Favicons that vanish on the opposite tone (0.5.0 flips them).
+const icon = (paint: (x: number, y: number) => [number, number, number, number] | null): number[] => {
+  const px: number[] = []
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px.push(...(paint(x, y) ?? [0, 0, 0, 0]))
+  return px
+}
+const ring = (x: number, y: number) => Math.abs(Math.hypot(x - 7.5, y - 7.5) - 5) < 1.6
+eq('glyph: a black mark on transparency is dark', glyphOf(icon((x, y) => (ring(x, y) ? [20, 20, 22, 255] : null))), 'dark')
+eq('glyph: a white mark on transparency is light', glyphOf(icon((x, y) => (ring(x, y) ? [250, 250, 250, 255] : null))), 'light')
+eq('glyph: a coloured mark is left alone', glyphOf(icon((x, y) => (ring(x, y) ? [36, 99, 235, 255] : null))), null)
+eq('glyph: a full tile keeps its own background', glyphOf(icon(() => [10, 10, 10, 255])), null)
+eq('monogram: the tint follows the host', [monogram('A', 'https://x.io/1').tint === monogram('B', 'https://x.io/2').tint, monogram('A', 'https://x.io/').tint < 8], [true, true])
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)

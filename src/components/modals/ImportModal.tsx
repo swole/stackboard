@@ -9,12 +9,12 @@ export function ImportModal() {
   return (
     <Modal title="Copy from Chrome bookmarks" onClose={close} width="md" footer={<SecondaryButton onClick={close}>Close</SecondaryButton>}>
       {sources === null ? (
-        <div className="h-24 animate-pulse rounded-lg bg-cream-50" />
+        <div className="h-24 animate-pulse rounded-lg bg-sunken" />
       ) : sources.length === 0 ? (
-        <p className="text-sm text-ink-500">Chrome has no other bookmarks to copy.</p>
+        <p className="text-sm text-muted">Chrome has no other bookmarks to copy.</p>
       ) : (
         <>
-          <p className="mb-3 text-xs text-ink-500">
+          <p className="mb-3 text-xs text-muted">
             Each folder you tick becomes a new space. Copying twice makes a second copy.
           </p>
           <ImportPanel sources={sources} variant="modal" onDone={close} />

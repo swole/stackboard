@@ -1,6 +1,6 @@
 // End-to-end check of the built Stackboard extension in Chrome for Testing.
 // Loads dist/ unpacked into a throwaway profile, seeds bookmarks through chrome.bookmarks,
-// and drives the new-tab page with real mouse and keyboard input. 50 checks, ~1.5 min.
+// and drives the new-tab page with real mouse and keyboard input. 79 checks, ~2 min.
 //
 // Setup (branded Chrome ignores --load-extension, so use Chrome for Testing):
 //   npm i puppeteer-core@24 @puppeteer/browsers@2
@@ -220,7 +220,7 @@ try {
     return {
       ghost: !!g,
       transform: g ? getComputedStyle(g).transform : null,
-      slot: !!document.querySelector('.border-dashed.border-peach-300'),
+      slot: !!document.querySelector('[data-drop-slot].border-dashed'),
     }
   })
   await ntp.screenshot({ path: path.join(SHOTS, '02-mid-drag.png') })
@@ -275,7 +275,7 @@ try {
   check('stack delete toast counts links', !!toast3 && toast3.includes('Japan') && toast3.includes('4 links'), toast3)
   const gone = await control.evaluate(async () => (await chrome.bookmarks.search({ title: 'Japan' })).filter((x) => !x.url).length)
   check('stack actually deleted', gone === 0)
-  await ntp.mouse.click(700, 700) // focus the page, away from any input
+  await ntp.mouse.click(120, 860) // focus the page, away from any input (the empty end of the sidebar)
   await ntp.keyboard.down('Control')
   await ntp.keyboard.press('KeyZ')
   await ntp.keyboard.up('Control')
@@ -308,7 +308,7 @@ try {
   check('confirm disarms after 3s', disarmed === '', JSON.stringify(disarmed))
 
   // ---------- search ----------
-  await ntp.mouse.click(700, 700)
+  await ntp.mouse.click(120, 860)
   await ntp.keyboard.press('/')
   await ntp.keyboard.type('wiki')
   await sleep(300)
@@ -577,6 +577,189 @@ try {
   check('stash closes the saved tabs only', stashed.left.join(',') === 'chrome-extension:,chrome-extension:,pinned' || stashed.left.join(',') === 'chrome-extension:,chrome:,pinned', stashed.left.join(','))
   const landed = stashTab ? await stashTab.evaluate(() => ({ h1: document.querySelector('main h1')?.textContent, toast: document.querySelector('.toast')?.textContent ?? '' })) : null
   check('stash opens a new tab on the Stash space', landed?.h1 === 'Stash' && landed.toast.includes('Stashed 3 tabs'), JSON.stringify(landed))
+
+  // ---------- 0.5.0: appearance ----------
+  const rgb = (hex) => {
+    const n = parseInt(hex.slice(1), 16)
+    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+  }
+  const look = (page) =>
+    page.evaluate(() => {
+      const card = document.querySelector('main a[href^="http"]')?.parentElement
+      return {
+        palette: document.documentElement.dataset.palette,
+        scheme: document.documentElement.dataset.scheme,
+        canvas: getComputedStyle(document.body).backgroundColor,
+        heading: getComputedStyle(document.querySelector('main h1')).color,
+        card: card ? getComputedStyle(card).backgroundColor : null,
+        panel: getComputedStyle(document.querySelector('aside')).backgroundColor,
+      }
+    })
+  const ntpA = await openNtp()
+  await ntpA.bringToFront()
+  await ntpA.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await sleep(300)
+  const cream = await look(ntpA)
+  check('default look is the cream Stackboard palette', cream.palette === 'stackboard' && cream.canvas === rgb('#fbf3e8') && cream.card === rgb('#ffffff'), JSON.stringify(cream))
+
+  await clickText(ntpA, 'aside button', 'Settings')
+  await ntpA.waitForSelector('[data-appearance]', { timeout: 5000 })
+  const pick = async (sel) => {
+    const found = await ntpA.evaluate((s) => {
+      const el = document.querySelector(s)
+      el?.click()
+      return !!el
+    }, sel)
+    if (!found) console.log('missing control:', sel)
+    await sleep(250)
+  }
+  await pick('[data-palette-option="catppuccin"]')
+  const latte = await look(ntpA)
+  check('Catppuccin on a light system is Latte', latte.scheme === 'light' && latte.canvas === rgb('#e6e9ef') && latte.card === rgb('#eff1f5') && latte.heading === rgb('#4c4f69'), JSON.stringify(latte))
+  await pick('[aria-label="Mode"] [data-option="dark"]')
+  const mocha = await look(ntpA)
+  check('Dark turns it into Catppuccin Mocha', mocha.scheme === 'dark' && mocha.canvas === rgb('#1e1e2e') && mocha.card === rgb('#313244') && mocha.heading === rgb('#cdd6f4'), JSON.stringify(mocha))
+  await pick('[data-palette-option="gruvbox"]')
+  const gruvbox = await look(ntpA)
+  check('Gruvbox Dark colours', gruvbox.canvas === rgb('#282828') && gruvbox.card === rgb('#3c3836') && gruvbox.panel === rgb('#1d2021') && gruvbox.heading === rgb('#fbf1c7'), JSON.stringify(gruvbox))
+  await pick('[data-palette-option="nord"]')
+  const nord = await look(ntpA)
+  check('Nord colours', nord.canvas === rgb('#2e3440') && nord.card === rgb('#3b4252') && nord.heading === rgb('#eceff4'), JSON.stringify(nord))
+  await pick('[aria-label="Mode"] [data-option="light"]')
+  const nordLight = await look(ntpA)
+  const modeNote = await ntpA.evaluate(() => document.querySelector('[data-mode-note]')?.textContent ?? '')
+  check('Nord stays dark when Light is picked, and says why', nordLight.scheme === 'dark' && nordLight.canvas === rgb('#2e3440') && modeNote.includes('only comes in dark'), modeNote)
+  const saved = await control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance)
+  check('appearance is saved in chrome.storage.local', saved?.palette === 'nord' && saved?.mode === 'light', JSON.stringify(saved))
+
+  await pick('[data-palette-option="stackboard"]')
+  await pick('[aria-label="Mode"] [data-option="system"]')
+  const sysLight = await look(ntpA)
+  await ntpA.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
+  await sleep(400)
+  const sysDark = await look(ntpA)
+  check('System mode follows the OS into dark', sysLight.canvas === rgb('#fbf3e8') && sysDark.scheme === 'dark' && sysDark.canvas === rgb('#1b1714'), `${sysLight.canvas} -> ${sysDark.canvas}`)
+  await ntpA.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await sleep(300)
+  check('and back to light', (await look(ntpA)).canvas === rgb('#fbf3e8'))
+
+  // theme-boot.js paints the first frame from the localStorage copy, before any module runs.
+  await pick('[aria-label="Mode"] [data-option="dark"]')
+  const booted = await ntpA.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const root = document.documentElement
+        for (const a of ['data-palette', 'data-scheme', 'data-mode']) root.removeAttribute(a)
+        const s = document.createElement('script')
+        s.src = '/theme-boot.js'
+        s.onload = () => resolve({ palette: root.dataset.palette, scheme: root.dataset.scheme, mode: root.dataset.mode })
+        s.onerror = () => resolve(null)
+        document.head.appendChild(s)
+      }),
+  )
+  check('the boot script restores the saved theme before first paint', booted?.palette === 'stackboard' && booted?.scheme === 'dark' && booted?.mode === 'dark', JSON.stringify(booted))
+  await pick('[aria-label="Mode"] [data-option="system"]')
+
+  const cardHeight = () => ntpA.evaluate(() => document.querySelector('main a[href^="http"]').getBoundingClientRect().height)
+  const roomy = await cardHeight()
+  await pick('[aria-label="Density"] [data-option="compact"]')
+  const tight = await cardHeight()
+  check('compact density makes cards shorter', tight < roomy - 4, `${roomy} -> ${tight}`)
+  await pick('[aria-label="Density"] [data-option="comfortable"]')
+
+  await pick('[aria-label="Background"] [data-option="gradient"]')
+  await pick('[data-gradient-option="2"]')
+  const gradient = await ntpA.evaluate(() => ({ kind: document.documentElement.dataset.bg, n: document.documentElement.dataset.gradient, image: getComputedStyle(document.body).backgroundImage }))
+  check('a gradient background paints the page', gradient.kind === 'gradient' && gradient.n === '2' && gradient.image.includes('radial-gradient'), `${gradient.kind} ${gradient.n} ${gradient.image.slice(0, 40)}`)
+
+  // A picture, through the real file input.
+  const picture = path.join(SHOTS, 'picture.png')
+  await ntpA.screenshot({ path: picture, clip: { x: 0, y: 0, width: 320, height: 200 } })
+  await (await ntpA.$('[data-bg-file]')).uploadFile(picture)
+  // Polled from here: the control tab has been hidden for minutes by now, and Chrome's intensive
+  // throttling holds its timers (and so waitForFunction) to about one tick a minute.
+  let imageSaved = false
+  for (let i = 0; i < 50 && !imageSaved; i++) {
+    imageSaved = await control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance?.bg?.kind === 'image')
+    if (!imageSaved) await sleep(200)
+  }
+  check('picking an image makes it the background', imageSaved)
+  await ntpA.keyboard.press('Escape')
+
+  const ntpB = await openNtp()
+  await ntpB.waitForSelector('[data-backdrop] .backdrop-image', { timeout: 10000 }).catch(() => {})
+  const wall = await ntpB.evaluate(async () => {
+    const el = document.querySelector('[data-backdrop] .backdrop-image')
+    const mark = (n) => performance.getEntriesByName(n)[0]?.startTime ?? null
+    const stored = await new Promise((resolve) => {
+      const req = indexedDB.open('stackboard', 1)
+      req.onerror = () => resolve(null)
+      req.onsuccess = () => {
+        const get = req.result.transaction('files', 'readonly').objectStore('files').get('background')
+        get.onsuccess = () => resolve(get.result ? { type: get.result.blob.type, size: get.result.blob.size } : null)
+        get.onerror = () => resolve(null)
+      }
+    })
+    return { src: el?.style.backgroundImage ?? null, board: mark('sb:board'), backdrop: mark('sb:backdrop'), stored }
+  })
+  check('the background image comes back on a new tab', !!wall.src && wall.src.includes('blob:chrome-extension://'), JSON.stringify(wall))
+  check('the picture loads only after the board has painted', wall.board !== null && wall.backdrop !== null && wall.backdrop > wall.board, `board ${wall.board}, picture ${wall.backdrop}`)
+  const storageUse = await control.evaluate(async () => ({ sync: await chrome.storage.sync.getBytesInUse(null), local: JSON.stringify(await chrome.storage.local.get(null)).length }))
+  check('the picture lives in IndexedDB, never in chrome.storage', !!wall.stored && wall.stored.size > 0 && storageUse.sync === 0 && storageUse.local < 4000, JSON.stringify({ stored: wall.stored, storageUse }))
+  await ntpB.screenshot({ path: path.join(SHOTS, '30-wallpaper.png') })
+
+  // Keys 1-9 jump to spaces; digits typed into search stay there.
+  const spaceNames = await control.evaluate(async () => {
+    const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+    return (await chrome.bookmarks.getChildren(root.id)).filter((c) => !c.url).map((c) => c.title.replace(/^\S+\s/, ''))
+  })
+  await ntpB.bringToFront()
+  await ntpB.mouse.click(120, 860)
+  await ntpB.keyboard.press('2')
+  await sleep(250)
+  const onSecond = await ntpB.$eval('main h1', (h) => h.textContent)
+  await ntpB.keyboard.press('1')
+  await sleep(250)
+  const onFirst = await ntpB.$eval('main h1', (h) => h.textContent)
+  check('keys 1-9 switch spaces', spaceNames.length > 1 && onSecond === spaceNames[1] && onFirst === spaceNames[0], `${onSecond}, ${onFirst} vs ${spaceNames.join(' | ')}`)
+  await ntpB.keyboard.press('/')
+  await ntpB.keyboard.type('2')
+  await sleep(250)
+  const typed = await ntpB.evaluate(() => document.querySelector('aside input')?.value)
+  await ntpB.keyboard.press('Escape')
+  await sleep(200)
+  const stayed = await ntpB.$eval('main h1', (h) => h.textContent)
+  check('a digit typed into search stays in the search box', typed === '2' && stayed === spaceNames[0], `${typed} ${stayed}`)
+
+  // Other open tabs and the toolbar popup follow a change; the popup never gets the wallpaper.
+  await control.evaluate(async () => {
+    const { appearance } = await chrome.storage.local.get('appearance')
+    await chrome.storage.local.set({ appearance: { ...appearance, palette: 'nord', mode: 'dark' } })
+  })
+  await sleep(500)
+  check('other open tabs follow a change', (await look(ntpB)).canvas === rgb('#2e3440'))
+  const popupPage = await browser.newPage()
+  await popupPage.goto(NTP.replace('newtab.html', 'popup.html'))
+  await sleep(600)
+  const popupLook = await popupPage.evaluate(() => ({ canvas: getComputedStyle(document.body).backgroundColor, bg: document.documentElement.dataset.bg ?? null }))
+  check('the toolbar popup takes the palette, without the wallpaper', popupLook.canvas === rgb('#2e3440') && popupLook.bg === null, JSON.stringify(popupLook))
+
+  // Nothing leaves the browser, and no new permissions.
+  const quiet = await browser.newPage()
+  const outside = []
+  quiet.on('request', (r) => {
+    if (/^(https?|wss?):/.test(r.url())) outside.push(r.url())
+  })
+  await quiet.goto(NTP, { waitUntil: 'load' })
+  await quiet.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+  await sleep(1500)
+  check('the new tab makes no network requests', outside.length === 0, outside.slice(0, 3).join(', '))
+  const shipped = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'))
+  check(
+    'no new permissions',
+    JSON.stringify(shipped.permissions) === JSON.stringify(['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups']) && !shipped.host_permissions && !shipped.optional_permissions,
+    JSON.stringify(shipped.permissions),
+  )
 } catch (e) {
   console.log('ERROR', e.message)
   results.push({ name: 'script error', ok: false })

@@ -19,6 +19,7 @@ import { useStackableStore } from '../store/useStackableStore'
 import { glow } from '../lib/motion'
 import { topHit } from '../lib/search'
 import { openHere, openInNewTab } from '../lib/tabs'
+import { spaceIndexForKey, typingInField } from '../lib/shortcuts'
 
 interface SortableSpaceProps {
   space: Space
@@ -110,23 +111,23 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
       }}
       style={style}
       className={`group flex items-center rounded-md transition-colors ${
-        stackIncoming ? 'bg-peach-50 ring-2 ring-peach-300' : ''
+        stackIncoming ? 'bg-accent-soft ring-2 ring-accent-line' : ''
       } ${isDragging ? 'opacity-30' : ''}`}
     >
       <button
         {...attributes}
         {...listeners}
-        className="cursor-grab text-ink-200 opacity-0 group-hover:opacity-100 hover:text-ink-500 active:cursor-grabbing"
+        className="cursor-grab text-ghost opacity-0 group-hover:opacity-100 hover:text-muted active:cursor-grabbing"
         aria-label="Drag space"
       >
         <GripVertical className="h-3.5 w-3.5" />
       </button>
       <button
         onClick={onClick}
-        className={`flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm compact:py-1 ${
           active
-            ? 'bg-cream-100 text-ink-800 font-medium'
-            : 'text-ink-600 hover:bg-cream-50 hover:text-ink-800'
+            ? 'bg-selected text-strong font-medium'
+            : 'text-soft hover:bg-hover hover:text-strong'
         }`}
       >
         <span
@@ -150,26 +151,26 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
             e.stopPropagation()
             setMenuOpen((v) => !v)
           }}
-          className="rounded p-0.5 text-ink-300 opacity-0 group-hover:opacity-100 hover:bg-cream-50 hover:text-ink-700"
+          className="rounded p-0.5 text-faint opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-fg"
           aria-label="Space options"
         >
           <MoreVertical className="h-3.5 w-3.5" />
         </button>
         {menuOpen && (
           <div
-            className="absolute right-0 top-6 z-30 w-32 overflow-hidden rounded-md border border-ink-100 bg-white shadow-md"
+            className="absolute right-0 top-6 z-30 w-32 overflow-hidden rounded-md border border-line bg-raised shadow-md"
             onMouseLeave={() => setMenuOpen(false)}
           >
             <button
               onClick={openEdit}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-cream-50"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-hover"
             >
               <Pencil className="h-3.5 w-3.5" />
               Edit
             </button>
             <button
               onClick={openDelete}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-peach-700 hover:bg-peach-50"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-danger hover:bg-danger-soft"
             >
               <Trash2 className="h-3.5 w-3.5" />
               Delete
@@ -179,11 +180,6 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
       </div>
     </div>
   )
-}
-
-function typingInField(): boolean {
-  const el = document.activeElement as HTMLElement | null
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
 export function Sidebar() {
@@ -215,13 +211,25 @@ export function Sidebar() {
     )
   }, [activeSpace, search])
 
-  // "/" from anywhere on the page jumps to search (expanding the sidebar if needed).
+  // "/" from anywhere on the page jumps to search (expanding the sidebar if needed); 1-9 jump
+  // to that space (0.5.0). Neither fires while typing in a field or with a dialog open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || typingInField()) return
+      if (e.ctrlKey || e.metaKey || e.altKey || typingInField()) return
+      if (e.key === '/') {
+        e.preventDefault()
+        if (collapsed) toggle()
+        setFocusSearch(true)
+        return
+      }
+      const index = spaceIndexForKey(e.key)
+      if (index === null) return
+      const state = useStackableStore.getState()
+      const target = state.tree?.spaces[index]
+      if (!target || state.modal.kind !== 'none') return
       e.preventDefault()
-      if (collapsed) toggle()
-      setFocusSearch(true)
+      state.setSearch('')
+      state.selectSpace(target.id)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -254,22 +262,22 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-ink-100 bg-white py-3">
+      <aside className="flex w-12 shrink-0 flex-col items-center gap-3 border-r border-line bg-panel py-3 wallpaper:bg-panel/80 wallpaper:backdrop-blur-xl">
         <button
           onClick={toggle}
-          className="rounded p-1 text-ink-400 hover:bg-cream-50 hover:text-ink-700"
+          className="rounded p-1 text-faint hover:bg-hover hover:text-fg"
           aria-label="Expand sidebar"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
         <div className="mt-2 flex flex-col gap-1.5">
-          {spaces.map((s) => (
+          {spaces.map((s, i) => (
             <button
               key={s.id}
               onClick={() => goToSpace(s.id)}
-              title={s.name}
+              title={i < 9 ? `${s.name} (${i + 1})` : s.name}
               className={`flex h-8 w-8 items-center justify-center rounded-md text-base ${
-                s.id === selectedId ? 'bg-cream-100' : 'hover:bg-cream-50'
+                s.id === selectedId ? 'bg-selected' : 'hover:bg-hover'
               }`}
             >
               {s.emoji}
@@ -281,15 +289,15 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[240px] shrink-0 flex-col border-r border-ink-100 bg-white">
+    <aside className="flex w-[240px] shrink-0 flex-col border-r border-line bg-panel wallpaper:bg-panel/80 wallpaper:backdrop-blur-xl">
       <div className="flex items-center justify-between px-3 py-3">
-        <div className="flex items-center gap-1.5 text-sm font-semibold text-ink-800">
-          <SquareKanban className="h-4 w-4 text-peach-500" />
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-strong">
+          <SquareKanban className="h-4 w-4 text-accent" />
           Stackboard
         </div>
         <button
           onClick={toggle}
-          className="rounded p-1 text-ink-400 hover:bg-cream-50 hover:text-ink-700"
+          className="rounded p-1 text-faint hover:bg-hover hover:text-fg"
           aria-label="Collapse sidebar"
         >
           <ChevronLeft className="h-4 w-4" />
@@ -298,7 +306,7 @@ export function Sidebar() {
 
       <div className="px-3 pb-2">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
           <input
             ref={searchRef}
             type="text"
@@ -307,7 +315,7 @@ export function Sidebar() {
             onKeyDown={onSearchKey}
             placeholder="Search all spaces"
             aria-label="Search all spaces"
-            className="peer w-full rounded-md border border-ink-100 bg-cream-50 py-1.5 pl-7 pr-7 text-sm placeholder:text-ink-400 focus:border-peach-300 focus:bg-white focus:outline-none"
+            className="peer w-full rounded-md border border-line bg-sunken py-1.5 pl-7 pr-7 text-sm text-fg placeholder:text-faint focus:border-focus focus:bg-card focus:outline-none"
           />
           {search ? (
             <button
@@ -315,13 +323,13 @@ export function Sidebar() {
                 setSearch('')
                 searchRef.current?.focus()
               }}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-400 hover:bg-cream-100 hover:text-ink-700"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-faint hover:bg-selected hover:text-fg"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-ink-100 bg-white px-1 font-sans text-[10px] leading-4 text-ink-400 peer-focus:hidden">
+            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line bg-card px-1 font-sans text-[10px] leading-4 text-faint peer-focus:hidden">
               /
             </kbd>
           )}
@@ -331,7 +339,7 @@ export function Sidebar() {
       <div className="px-3 pb-2">
         <button
           onClick={() => openModal({ kind: 'settings' })}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-600 hover:bg-cream-50 hover:text-ink-800"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-soft hover:bg-hover hover:text-strong compact:py-1"
         >
           <SettingsIcon className="h-3.5 w-3.5" />
           Settings
@@ -339,10 +347,15 @@ export function Sidebar() {
       </div>
 
       <div className="mt-1 flex items-center justify-between px-3 pb-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink-400">Spaces</span>
+        <span
+          className="text-xs font-semibold uppercase tracking-wide text-muted"
+          title="Press 1-9 to jump to a space"
+        >
+          Spaces
+        </span>
         <button
           onClick={() => openModal({ kind: 'space-add' })}
-          className="rounded p-0.5 text-ink-400 hover:bg-cream-50 hover:text-ink-700"
+          className="rounded p-0.5 text-faint hover:bg-hover hover:text-fg"
           aria-label="Add space"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -372,7 +385,7 @@ export function Sidebar() {
                           e.preventDefault()
                           revealStack(s.id, st.id)
                         }}
-                        className="truncate rounded px-2 py-1 text-xs text-ink-500 hover:bg-cream-50 hover:text-ink-700"
+                        className="truncate rounded px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg compact:py-0.5"
                       >
                         {st.title}
                       </a>
@@ -384,7 +397,7 @@ export function Sidebar() {
             {spaces.length === 0 && (
               <button
                 onClick={() => openModal({ kind: 'space-add' })}
-                className="rounded-md border border-dashed border-ink-200 px-2 py-3 text-xs text-ink-400 hover:border-peach-300 hover:bg-peach-50 hover:text-peach-700"
+                className="rounded-md border border-dashed border-line-strong px-2 py-3 text-xs text-muted hover:border-accent-line hover:bg-accent-soft hover:text-accent-text"
               >
                 + Create your first space
               </button>

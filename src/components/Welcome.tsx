@@ -19,31 +19,31 @@ export function Welcome() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-[768px] flex-col justify-center px-10 py-14">
         <StackArt />
-        <h2 className="rise mt-7 text-[32px] font-bold leading-tight tracking-tight text-ink-800" style={delay(90)}>
+        <h2 className="rise on-wallpaper mt-7 text-[32px] font-bold leading-tight tracking-tight text-strong" style={delay(90)}>
           Welcome to Stackboard
         </h2>
-        <p className="rise mt-2 max-w-lg text-[15px] leading-relaxed text-ink-500" style={delay(150)}>
+        <p className="rise on-wallpaper mt-2 max-w-lg text-[15px] leading-relaxed text-muted" style={delay(150)}>
           Your new tab, sorted into spaces of link stacks. Everything is saved as ordinary Chrome
           bookmarks, so it syncs with Chrome and works offline.
         </p>
 
-        {sources === null && <div className="mt-8 h-44 animate-pulse rounded-2xl bg-white/60" />}
+        {sources === null && <div className="mt-8 h-44 animate-pulse rounded-2xl bg-card/60" />}
 
         {hasSources && (
           <section
             data-welcome="import"
-            className="rise mt-8 rounded-2xl border border-peach-200/70 bg-white p-5 shadow-[0_18px_40px_-24px_rgb(130_56_28/0.45)]"
+            className="rise mt-8 rounded-2xl border border-accent-line/50 bg-card p-5 shadow-panel"
             style={delay(210)}
           >
-            <h3 className="text-base font-semibold text-ink-800">Bring in your bookmarks</h3>
-            <p className="mb-3 mt-0.5 text-sm text-ink-500">Start with the links you already use.</p>
+            <h3 className="text-base font-semibold text-strong">Bring in your bookmarks</h3>
+            <p className="mb-3 mt-0.5 text-sm text-muted">Start with the links you already use.</p>
             <ImportPanel sources={sources} variant="welcome" />
           </section>
         )}
 
         {sources !== null && (
           <section data-welcome="packs" className="rise mt-7" style={delay(hasSources ? 270 : 210)}>
-            <h3 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+            <h3 className="on-wallpaper mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">
               {hasSources ? 'Or start from a pack' : 'Start from a pack'}
             </h3>
             <StarterPacks variant="chips" />
@@ -51,11 +51,11 @@ export function Welcome() {
         )}
 
         {sources !== null && (
-          <div className="rise mt-6 flex items-center gap-2 text-sm text-ink-500" style={delay(hasSources ? 330 : 270)}>
+          <div className="rise on-wallpaper mt-6 flex items-center gap-2 text-sm text-muted" style={delay(hasSources ? 330 : 270)}>
             Or start with a blank space:
             <button
               onClick={() => openModal({ kind: 'space-add' })}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium text-peach-700 hover:bg-peach-100"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium text-accent-text hover:bg-accent-soft"
             >
               <Plus className="h-3.5 w-3.5" />
               New space
@@ -63,7 +63,7 @@ export function Welcome() {
           </div>
         )}
 
-        <p className="rise mt-12 text-xs text-ink-400" style={delay(390)}>
+        <p className="rise on-wallpaper mt-12 text-xs text-muted" style={delay(390)}>
           Saved under Other bookmarks › Stackboard. No account, and nothing leaves your browser.
         </p>
       </div>
@@ -71,7 +71,7 @@ export function Welcome() {
   )
 }
 
-/** The brand mark as a small board whose cards deal in, column by column. */
+/** The brand mark as a small board whose cards deal in, column by column. Colours follow the palette. */
 function StackArt() {
   const cards: Array<[number, number, number, number, number]> = [
     // x, y, h, opacity, column
@@ -86,8 +86,8 @@ function StackArt() {
     <svg viewBox="0 0 118 112" width="92" height="87" className="stack-art rise" aria-hidden>
       <defs>
         <linearGradient id="sb-tile" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#f28f4f" />
-          <stop offset="1" stopColor="#d2581d" />
+          <stop offset="0" style={{ stopColor: 'var(--sb-brand-from)' }} />
+          <stop offset="1" style={{ stopColor: 'var(--sb-brand-to)' }} />
         </linearGradient>
       </defs>
       <rect x="4" y="4" width="110" height="104" rx="26" fill="url(#sb-tile)" />
@@ -99,9 +99,8 @@ function StackArt() {
           width="20"
           height={h}
           rx="5"
-          fill="#fff"
           opacity={o}
-          style={{ animationDelay: `${160 + col * 90 + i * 25}ms` }}
+          style={{ fill: 'var(--sb-brand-ink)', animationDelay: `${160 + col * 90 + i * 25}ms` }}
         />
       ))}
     </svg>

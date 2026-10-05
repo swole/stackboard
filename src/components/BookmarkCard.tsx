@@ -95,16 +95,17 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
       }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       {...(sortable ? listeners : {})}
-      className={`group/card relative rounded-lg border text-sm text-ink-700 ${grab} ${
+      data-drop-slot={isDragging ? '' : undefined}
+      className={`group/card relative rounded-lg border text-sm text-fg compact:text-[13px] ${grab} ${
         isDragging
-          ? 'border-dashed border-peach-300 bg-peach-100/40' // the slot the card will drop into
-          : `bg-white hover:border-ink-100 hover:bg-cream-50 ${top ? 'border-peach-300' : 'border-transparent'}`
+          ? 'border-dashed border-accent-line bg-accent-soft/50' // the slot the card will drop into
+          : `bg-card hover:border-line hover:bg-hover wallpaper:bg-card/70 wallpaper:hover:bg-hover/90 ${top ? 'border-accent-line' : 'border-transparent'}`
       }`}
     >
       {isNew && !isDragging && (
         <span
           aria-hidden
-          className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-peach-400"
+          className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-accent-mark"
         />
       )}
       {/* A real link, so the browser owns every open gesture: click (this tab), Ctrl/Cmd+click
@@ -117,7 +118,7 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
         draggable={false}
         title={tooltip}
         onClick={onLinkClick}
-        className={`flex items-center gap-2 rounded-lg py-2 pl-2.5 pr-9.5 ${grab} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-peach-300 ${
+        className={`flex items-center gap-2 rounded-lg py-2 pl-2.5 pr-9.5 ${grab} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus compact:py-1 ${
           isDragging ? 'invisible' : ''
         }`}
       >
@@ -126,7 +127,7 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
           {isOpen && (
             <span
               aria-hidden
-              className="absolute -bottom-1 -right-1 h-2 w-2 rounded-full bg-peach-500 ring-2 ring-white"
+              className="absolute -bottom-1 -right-1 h-2 w-2 rounded-full bg-accent ring-2 ring-card"
             />
           )}
         </span>
@@ -140,14 +141,14 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
       {top && !isDragging && (
         <kbd
           aria-hidden
-          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-ink-100 bg-cream-50 px-1 font-sans text-[10px] leading-4 text-ink-400 group-hover/card:opacity-0"
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-line bg-sunken px-1 font-sans text-[10px] leading-4 text-faint group-hover/card:opacity-0"
         >
           ↵
         </kbd>
       )}
       <button
         onClick={() => setMenuOpen((v) => !v)}
-        className={`absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-400 opacity-0 hover:bg-ink-100 hover:text-ink-700 focus-visible:opacity-100 group-hover/card:opacity-100 ${
+        className={`absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 hover:bg-selected hover:text-fg focus-visible:opacity-100 group-hover/card:opacity-100 ${
           isDragging ? 'invisible' : ''
         }`}
         aria-label="Bookmark options"
@@ -157,19 +158,19 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
 
       {menuOpen && (
         <div
-          className="absolute right-1 top-9 z-30 w-32 overflow-hidden rounded-md border border-ink-100 bg-white shadow-md"
+          className="absolute right-1 top-9 z-30 w-32 overflow-hidden rounded-md border border-line bg-raised shadow-md compact:top-7"
           onMouseLeave={() => setMenuOpen(false)}
         >
           <button
             onClick={onEdit}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-cream-50"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-hover"
           >
             <Pencil className="h-3.5 w-3.5" />
             Edit
           </button>
           <button
             onClick={onDelete}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-peach-700 hover:bg-peach-50"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-danger hover:bg-danger-soft"
           >
             <Trash2 className="h-3.5 w-3.5" />
             Delete

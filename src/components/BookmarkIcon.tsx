@@ -45,7 +45,7 @@ function Favicon({ src, title, url }: { src: string; title: string; url: string 
       <span
         aria-hidden
         className="flex h-4 w-4 shrink-0 select-none items-center justify-center rounded-[4px] text-[10px] font-bold leading-none"
-        style={{ backgroundColor: m.bg, color: m.fg }}
+        style={{ backgroundColor: `var(--sb-tint-${m.tint}-bg)`, color: `var(--sb-tint-${m.tint}-fg)` }}
       >
         {m.letter}
       </span>
@@ -59,7 +59,7 @@ function Favicon({ src, title, url }: { src: string; title: string; url: string 
       width={16}
       height={16}
       draggable={false}
-      className="h-4 w-4 shrink-0 rounded-sm"
+      className={`h-4 w-4 shrink-0 rounded-sm ${icon.glyph ? `glyph-${icon.glyph}` : ''}`}
       onError={() => setFailed(true)}
     />
   )

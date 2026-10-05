@@ -56,34 +56,34 @@ export function RatingPrompt() {
   return (
     <aside
       data-rating-prompt
-      className="pop-in fixed bottom-6 right-6 z-40 w-[300px] rounded-2xl border border-ink-100 bg-white p-4 shadow-[0_22px_48px_-24px_rgb(130_56_28/0.55)]"
+      className="pop-in fixed bottom-6 right-6 z-40 w-[300px] rounded-2xl border border-line bg-raised p-4 shadow-float"
     >
       <button
         onClick={() => answer('dismissed')}
-        className="absolute right-2.5 top-2.5 rounded p-1 text-ink-300 hover:bg-cream-50 hover:text-ink-600"
+        className="absolute right-2.5 top-2.5 rounded p-1 text-faint hover:bg-hover hover:text-soft"
         aria-label="Close"
       >
         <X className="h-3.5 w-3.5" />
       </button>
-      <div className="flex gap-0.5 text-peach-400" aria-hidden>
+      <div className="flex gap-0.5 text-accent-mark" aria-hidden>
         {[0, 1, 2, 3, 4].map((i) => (
           <Star key={i} className="h-4 w-4 fill-current" />
         ))}
       </div>
-      <h3 className="mt-2 text-sm font-semibold text-ink-800">Enjoying Stackboard?</h3>
-      <p className="mt-1 text-xs leading-relaxed text-ink-500">
+      <h3 className="mt-2 text-sm font-semibold text-strong">Enjoying Stackboard?</h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted">
         A rating on the Chrome Web Store helps other people find it. It takes a few seconds.
       </p>
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={() => answer('rated')}
-          className="rounded-lg bg-peach-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-peach-600"
+          className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent hover:bg-accent-hover"
         >
           Rate Stackboard
         </button>
         <button
           onClick={() => answer('dismissed')}
-          className="rounded-lg px-2.5 py-1.5 text-sm text-ink-500 hover:bg-cream-50 hover:text-ink-700"
+          className="rounded-lg px-2.5 py-1.5 text-sm text-muted hover:bg-hover hover:text-fg"
         >
           No thanks
         </button>

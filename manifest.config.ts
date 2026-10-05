@@ -7,7 +7,7 @@ export default defineManifest({
   // 0.4.0: title carries the words people search the store for ("bookmark manager", "new tab").
   name: 'Stackboard: Bookmark Manager & New Tab Spaces',
   short_name: 'Stackboard',
-  version: '0.4.3',
+  version: '0.5.0',
   description:
     'Your new tab as a board of bookmark stacks: speed dial, spaces and search, saved as Chrome bookmarks. Synced, offline, no account.',
   chrome_url_overrides: {

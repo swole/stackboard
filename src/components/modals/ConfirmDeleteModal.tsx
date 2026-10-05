@@ -56,11 +56,11 @@ export function ConfirmDeleteModal({ targetKind, id, name, childCount }: Props) 
         </>
       }
     >
-      <p className="text-sm text-ink-700">
+      <p className="text-sm text-fg">
         Delete <span className="font-semibold">{name || 'Untitled'}</span>?
       </p>
-      {childLabel && <p className="mt-2 text-xs text-ink-500">{childLabel}</p>}
-      <p className="mt-2 text-xs text-ink-500">You can undo this for a few seconds afterwards.</p>
+      {childLabel && <p className="mt-2 text-xs text-muted">{childLabel}</p>}
+      <p className="mt-2 text-xs text-muted">You can undo this for a few seconds afterwards.</p>
     </Modal>
   )
 }

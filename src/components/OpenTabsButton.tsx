@@ -30,8 +30,8 @@ export function OpenTabsButton({ space }: Props) {
       title={confirmStep.armed ? 'Click again to open them all' : undefined}
       className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm disabled:opacity-40 ${
         confirmStep.armed
-          ? 'border-peach-500 bg-peach-500 font-medium text-white hover:bg-peach-600'
-          : 'border-ink-100 bg-white text-ink-700 hover:border-ink-200 hover:bg-cream-50'
+          ? 'border-accent bg-accent font-medium text-on-accent hover:bg-accent-hover'
+          : 'border-line bg-card text-fg hover:border-line-strong hover:bg-hover'
       }`}
     >
       <ExternalLink className="h-3.5 w-3.5" />
@@ -40,7 +40,7 @@ export function OpenTabsButton({ space }: Props) {
       ) : (
         <>
           Open tabs
-          <span className="ml-0.5 rounded bg-ink-100 px-1.5 text-xs text-ink-600">{count}</span>
+          <span className="ml-0.5 rounded bg-selected px-1.5 text-xs text-soft">{count}</span>
         </>
       )}
     </button>

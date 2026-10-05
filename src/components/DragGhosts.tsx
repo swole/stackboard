@@ -12,7 +12,7 @@ export function BookmarkGhost({ bookmark }: { bookmark: Bookmark }) {
   return (
     <div
       data-lifted
-      className="flex h-full w-full items-center gap-2 rounded-lg border border-peach-300 bg-white px-2.5 text-sm text-ink-700"
+      className="flex h-full w-full items-center gap-2 rounded-lg border border-accent-line bg-card px-2.5 text-sm text-fg"
     >
       <BookmarkIcon emoji={emoji} title={shown} url={bookmark.url} />
       <span className="truncate">{shown}</span>
@@ -25,20 +25,20 @@ export function StackGhost({ stack }: { stack: Stack }) {
   return (
     <div
       data-lifted
-      className="flex w-[260px] items-center gap-2 rounded-xl border border-peach-300 bg-white px-3 py-2 text-sm"
+      className="flex w-[260px] items-center gap-2 rounded-xl border border-accent-line bg-card px-3 py-2 text-sm"
     >
-      <span className="flex-1 truncate font-semibold text-ink-700">{stack.title}</span>
+      <span className="flex-1 truncate font-semibold text-fg">{stack.title}</span>
       <span className="flex -space-x-1">
         {preview.map((b) => {
           const { emoji, text } = parseBookmarkTitle(b.title)
           return (
-            <span key={b.id} className="rounded-[5px] bg-white ring-2 ring-white">
+            <span key={b.id} className="rounded-[5px] bg-card ring-2 ring-card">
               <BookmarkIcon emoji={emoji} title={displayTitle(text, b.url)} url={b.url} />
             </span>
           )
         })}
       </span>
-      <span className="rounded bg-ink-100 px-1.5 text-xs text-ink-600">{stack.bookmarks.length}</span>
+      <span className="rounded bg-selected px-1.5 text-xs text-soft">{stack.bookmarks.length}</span>
     </div>
   )
 }

@@ -77,38 +77,38 @@ export default function SaveTabPopup() {
   const spaces = useMemo(() => tree?.spaces ?? [], [tree])
 
   return (
-    <div className="w-[340px] bg-peach-50 p-4 font-sans text-ink-700">
-      <header className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink-800">
-        <SquareKanban className="h-4 w-4 text-peach-500" />
+    <div className="w-[340px] bg-canvas p-4 font-sans text-fg">
+      <header className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-strong">
+        <SquareKanban className="h-4 w-4 text-accent" />
         Save current tab
       </header>
 
       {error && (
-        <div className="mb-3 rounded-md border border-peach-200 bg-peach-50 px-3 py-2 text-xs text-peach-700">
+        <div className="mb-3 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
           {error}
         </div>
       )}
 
       {savedTo ? (
-        <div className="flex items-center gap-2 rounded-md border border-peach-200 bg-white px-3 py-3 text-sm text-ink-700">
-          <Check className="h-4 w-4 text-peach-600" />
+        <div className="flex items-center gap-2 rounded-md border border-accent-line bg-card px-3 py-3 text-sm text-fg">
+          <Check className="h-4 w-4 text-accent-text" />
           Saved to <span className="font-medium">{savedTo}</span>
         </div>
       ) : tab && !saveable ? (
-        <div className="rounded-md border border-ink-100 bg-white px-3 py-3 text-sm text-ink-600">
-          <div className="font-medium text-ink-700">This page can't be saved</div>
-          <p className="mt-1 text-xs text-ink-500">
+        <div className="rounded-md border border-line bg-card px-3 py-3 text-sm text-soft">
+          <div className="font-medium text-fg">This page can't be saved</div>
+          <p className="mt-1 text-xs text-muted">
             Stackboard can only save normal web pages (http, https). Browser pages like
             this one can't be bookmarked.
           </p>
-          <div className="mt-2 truncate text-[11px] text-ink-400" title={tab.url}>
+          <div className="mt-2 truncate text-[11px] text-muted" title={tab.url}>
             {tab.url}
           </div>
         </div>
       ) : (
         <>
           <div className="mb-3">
-            <label className="mb-1 block text-xs font-medium text-ink-600">Link name</label>
+            <label className="mb-1 block text-xs font-medium text-soft">Link name</label>
             <input
               autoFocus
               type="text"
@@ -116,46 +116,46 @@ export default function SaveTabPopup() {
               onChange={(e) => setTitle(e.target.value)}
               onFocus={(e) => e.target.select()}
               placeholder="Title for the bookmark"
-              className="w-full rounded-md border border-ink-200 bg-white px-2.5 py-1.5 text-sm text-ink-700 placeholder:text-ink-400 focus:border-peach-400 focus:outline-none"
+              className="w-full rounded-md border border-line-strong bg-card px-2.5 py-1.5 text-sm text-fg placeholder:text-faint focus:border-focus focus:outline-none"
             />
             {tab && (
-              <div className="mt-1 truncate text-[11px] text-ink-400" title={tab.url}>
+              <div className="mt-1 truncate text-[11px] text-muted" title={tab.url}>
                 {tab.url}
               </div>
             )}
             {tab && !title.trim() && (
-              <div className="mt-1 text-[11px] text-peach-700">Enter a name to save.</div>
+              <div className="mt-1 text-[11px] text-danger">Enter a name to save.</div>
             )}
           </div>
 
-          <div className="mb-1 text-xs font-medium text-ink-600">Where to save</div>
-          <div className="max-h-[320px] overflow-y-auto rounded-md border border-ink-100 bg-white">
+          <div className="mb-1 text-xs font-medium text-soft">Where to save</div>
+          <div className="no-scrollbar max-h-[320px] overflow-y-auto rounded-md border border-line bg-card">
             {spaces.length === 0 && (
-              <div className="px-3 py-3 text-xs text-ink-400">
+              <div className="px-3 py-3 text-xs text-muted">
                 No spaces yet. Open a new tab and create a space first.
               </div>
             )}
             {spaces.map((sp) => {
               const expanded = expandedSpaceId === sp.id
               return (
-                <div key={sp.id} className="border-b border-ink-50 last:border-0">
+                <div key={sp.id} className="border-b border-line last:border-0">
                   <button
                     onClick={() => setExpandedSpaceId(expanded ? null : sp.id)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-cream-50"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg hover:bg-hover"
                   >
                     <span className="text-base leading-none">{sp.emoji}</span>
                     <span className="flex-1 truncate">{sp.name || 'Untitled'}</span>
-                    <span className="text-xs text-ink-300">{sp.stacks.length}</span>
+                    <span className="text-xs text-faint">{sp.stacks.length}</span>
                     {expanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-ink-400" />
+                      <ChevronDown className="h-3.5 w-3.5 text-faint" />
                     ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-ink-400" />
+                      <ChevronRight className="h-3.5 w-3.5 text-faint" />
                     )}
                   </button>
                   {expanded && (
-                    <div className="border-t border-ink-50 bg-cream-50/50 py-1">
+                    <div className="border-t border-line bg-sunken py-1">
                       {sp.stacks.length === 0 ? (
-                        <div className="px-6 py-1.5 text-xs text-ink-400">
+                        <div className="px-6 py-1.5 text-xs text-muted">
                           No stacks in this space.
                         </div>
                       ) : (
@@ -164,10 +164,10 @@ export default function SaveTabPopup() {
                             key={st.id}
                             onClick={() => handleSave(st.id, st.title, sp.name)}
                             disabled={!canSave || saving}
-                            className="flex w-full items-center justify-between gap-2 px-6 py-1.5 text-left text-sm text-ink-600 hover:bg-white disabled:opacity-50"
+                            className="flex w-full items-center justify-between gap-2 px-6 py-1.5 text-left text-sm text-soft hover:bg-card hover:text-strong disabled:opacity-50"
                           >
                             <span className="truncate">{st.title}</span>
-                            <span className="text-[11px] text-ink-300">
+                            <span className="text-[11px] text-faint">
                               {st.bookmarks.length}
                             </span>
                           </button>
@@ -180,7 +180,7 @@ export default function SaveTabPopup() {
             })}
           </div>
 
-          <div className="mt-2 text-[11px] text-ink-400">
+          <div className="mt-2 text-[11px] text-muted">
             Tap a stack to save. No save button needed.
           </div>
         </>
@@ -232,24 +232,24 @@ function StashSection() {
   const stays = staysNote(plan.pinned, plan.skipped)
 
   return (
-    <section data-stash className="mt-4 border-t border-ink-100 pt-3">
-      <div className="flex items-center gap-1.5 text-sm font-semibold text-ink-800">
-        <Inbox className="h-4 w-4 text-peach-500" />
+    <section data-stash className="mt-4 border-t border-line pt-3">
+      <div className="flex items-center gap-1.5 text-sm font-semibold text-strong">
+        <Inbox className="h-4 w-4 text-accent" />
         <span className="flex-1">Stash this window</span>
         {shortcut && (
-          <kbd className="rounded border border-ink-100 bg-white px-1.5 font-sans text-[10px] font-normal leading-4 text-ink-400">
+          <kbd className="rounded border border-line bg-card px-1.5 font-sans text-[10px] font-normal leading-4 text-faint">
             {shortcut}
           </kbd>
         )}
       </div>
       {state.kind === 'saved' ? (
-        <div className="mt-2 flex items-center gap-2 rounded-md border border-peach-200 bg-white px-3 py-2 text-sm">
-          <Check className="h-4 w-4 text-peach-600" />
+        <div className="mt-2 flex items-center gap-2 rounded-md border border-accent-line bg-card px-3 py-2 text-sm">
+          <Check className="h-4 w-4 text-accent-text" />
           Saved {plural(state.saved, 'tab')} to Stash
         </div>
       ) : (
         <>
-          <p className="mt-1 text-xs text-ink-500">
+          <p className="mt-1 text-xs text-muted">
             Saves {plan.links === 1 ? 'this tab' : `all ${plan.links} tabs`} as bookmarks in your Stash space, one stack per tab group.
             {stays && ` ${stays}`}
           </p>
@@ -257,19 +257,19 @@ function StashSection() {
             <button
               onClick={() => void run(true)}
               disabled={state.kind === 'busy'}
-              className="rounded-md bg-peach-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-peach-600 disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50"
             >
               Stash and close {plural(plan.tabIds.length, 'tab')}
             </button>
             <button
               onClick={() => void run(false)}
               disabled={state.kind === 'busy'}
-              className="rounded-md border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 hover:bg-cream-50 disabled:opacity-50"
+              className="rounded-md border border-line-strong bg-card px-3 py-1.5 text-sm text-fg hover:bg-hover disabled:opacity-50"
             >
               Save only
             </button>
           </div>
-          {state.kind === 'error' && <p className="mt-2 text-xs text-peach-700">Stash failed: {state.message}</p>}
+          {state.kind === 'error' && <p className="mt-2 text-xs text-danger">Stash failed: {state.message}</p>}
         </>
       )}
     </section>
