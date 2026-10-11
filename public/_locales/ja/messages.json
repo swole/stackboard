@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: ブックマーク管理と新しいタブ",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "新しいタブをブックマークのボードに。スピードダイヤル、スペース、検索。Chrome のブックマークに保存され、同期、オフライン対応、アカウント不要。",
+    "description": "Store summary, 132 characters at most"
+  }
+}

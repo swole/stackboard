@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: gestore di segnalibri e nuova scheda",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "La nuova scheda come bacheca di segnalibri: accesso rapido, spazi e ricerca, salvati nei segnalibri di Chrome. Senza account.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

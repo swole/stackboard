@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: 북마크 관리자 & 새 탭",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "새 탭을 북마크 보드로: 스피드 다이얼, 스페이스, 검색. Chrome 북마크에 저장되어 동기화되고 오프라인에서도 작동하며 계정이 필요 없습니다.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: Yer İmi Yöneticisi ve Yeni Sekme",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Yeni sekmeniz bir yer imi panosu: hızlı erişim, alanlar ve arama, Chrome yer imleri olarak kaydedilir. Senkronize, hesap gerekmez.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

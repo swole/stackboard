@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: gerenciador de favoritos e nova guia",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Sua nova guia como um quadro de favoritos: discagem rápida, espaços e busca, salvos nos favoritos do Chrome. Sincroniza, sem conta.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

@@ -578,6 +578,49 @@ try {
   const landed = stashTab ? await stashTab.evaluate(() => ({ h1: document.querySelector('main h1')?.textContent, toast: document.querySelector('.toast')?.textContent ?? '' })) : null
   check('stash opens a new tab on the Stash space', landed?.h1 === 'Stash' && landed.toast.includes('Stashed 3 tabs'), JSON.stringify(landed))
 
+  // ---------- 0.5.1: tab bankruptcy (every window) ----------
+  const bk = await control.evaluate(async (ntpUrl) => {
+    const a = await chrome.windows.create({ url: ['https://example.com/?bk=1', 'https://example.org/?bk=2'], focused: false })
+    const b = await chrome.windows.create({ url: ['https://example.com/?bk=3', 'https://example.com/?bk=3', 'https://example.net/?bk=4'], focused: true })
+    await chrome.tabs.create({ windowId: b.id, url: ntpUrl.replace('newtab.html', 'popup.html'), active: true })
+    return [a.id, b.id]
+  }, NTP)
+  const bkPopupTarget = await browser.waitForTarget((t) => t.url().endsWith('/popup.html') && !knownBefore.has(t), { timeout: 10000 })
+  const bkPopup = await bkPopupTarget.page()
+  await bkPopup.waitForSelector('[data-bankruptcy]', { timeout: 15000 })
+  const bkOffer = await bkPopup.evaluate(() => document.querySelector('[data-bankruptcy]')?.textContent ?? '')
+  check('popup offers tab bankruptcy across windows', /Declare tab bankruptcy: stash all \d+ tabs in \d+ windows/.test(bkOffer), bkOffer)
+  await bkPopup.click('[data-bankruptcy]')
+  await sleep(200)
+  const armedText = await bkPopup.evaluate(() => document.querySelector('[data-bankruptcy]')?.textContent ?? '')
+  check('bankruptcy asks before closing', armedText.startsWith('Sure? Close all'), armedText)
+  const knownBk = new Set(browser.targets())
+  await bkPopup.click('[data-bankruptcy]').catch(() => {})
+  const certTab = await browser
+    .waitForTarget((t) => !knownBk.has(t) && t.type() === 'page' && (t.url() === NTP || t.url().startsWith('chrome://newtab')), { timeout: 15000 })
+    .then((t) => t.page())
+    .catch(() => null)
+  await sleep(3000)
+  const bkState = await control.evaluate(async () => {
+    const tabs = await chrome.tabs.query({})
+    const web = tabs.filter((t) => !t.pinned && /^https?:/.test(t.pendingUrl || t.url))
+    const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+    const [sub] = await chrome.bookmarks.getSubTree(root.id)
+    const space = sub.children.find((c) => c.title === '📥 Stash')
+    const bkStacks = space.children.filter((st) => st.title.startsWith('Tab bankruptcy'))
+    return { web: web.length, pinned: tabs.filter((t) => t.pinned).length, stacks: bkStacks.map((st) => st.title.replace(/^Tab bankruptcy [^(]+/, 'TB').trim() + ':' + st.children.length) }
+  })
+  check('bankruptcy closes every web tab, pinned stay', bkState.web === 0 && bkState.pinned >= 1, JSON.stringify(bkState))
+  check('bankruptcy saves a stack per window', bkState.stacks.length >= 2 && bkState.stacks[0].startsWith('TB:') && bkState.stacks.some((x) => x.startsWith('TB(window 2)')), JSON.stringify(bkState.stacks))
+  const certified = certTab
+    ? await certTab
+        .waitForSelector('[data-certificate] canvas', { timeout: 8000 })
+        .then(() => certTab.evaluate(() => ({ h: document.querySelector('[data-certificate] h2')?.textContent, w: document.querySelector('[data-certificate] canvas')?.width })))
+        .catch(() => null)
+    : null
+  check('bankruptcy opens a new tab with the certificate', !!certified && /^\d+ tabs discharged$/.test(certified.h) && certified.w === 1200, JSON.stringify(certified))
+  if (certTab) await certTab.keyboard.press('Escape')
+
   // ---------- 0.5.0: appearance ----------
   const rgb = (hex) => {
     const n = parseInt(hex.slice(1), 16)
@@ -759,6 +802,13 @@ try {
     'no new permissions',
     JSON.stringify(shipped.permissions) === JSON.stringify(['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups']) && !shipped.host_permissions && !shipped.optional_permissions,
     JSON.stringify(shipped.permissions),
+  )
+  const enMsgs = path.join(EXT, '_locales', 'en', 'messages.json')
+  check(
+    'store name and summary come from _locales (en default)',
+    shipped.default_locale === 'en' && shipped.name === '__MSG_extName__' && fs.existsSync(enMsgs) &&
+      JSON.parse(fs.readFileSync(enMsgs, 'utf8')).extName.message === 'Stackboard: Bookmark Manager & New Tab Spaces',
+    `${shipped.default_locale} ${shipped.name}`,
   )
 } catch (e) {
   console.log('ERROR', e.message)

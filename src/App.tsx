@@ -20,6 +20,8 @@ import { UndoToast } from './components/UndoToast'
 import { Welcome } from './components/Welcome'
 import { KeepItHint } from './components/KeepItHint'
 import { RatingPrompt } from './components/RatingPrompt'
+import { Certificate } from './components/Certificate'
+import type { Bankruptcy } from './lib/stashPlan'
 import { BookmarkGhost, StackGhost } from './components/DragGhosts'
 import { Backdrop } from './components/Backdrop'
 import { ModalHost } from './components/modals/ModalHost'
@@ -122,6 +124,7 @@ export default function App() {
 
   // A tab opened by "Stash this window" lands on the Stash space and says what it saved.
   const loaded = !!tree
+  const [certificate, setCertificate] = useState<Bankruptcy | null>(null)
   // Timing mark for the board's first paint; the e2e suite checks the wallpaper comes after it.
   useEffect(() => {
     if (loaded) performance.mark('sb:board')
@@ -132,6 +135,7 @@ export default function App() {
       if (!note) return
       const store = useStackableStore.getState()
       store.selectSpace(note.spaceId)
+      if (note.bankruptcy) setCertificate(note.bankruptcy)
       store.showToast({ verb: 'Stashed', title: plural(note.saved, 'tab'), duration: 4000 })
       store.celebrate()
     })
@@ -262,6 +266,7 @@ export default function App() {
         <UndoToast />
         <KeepItHint />
         <RatingPrompt />
+        {certificate && <Certificate bankruptcy={certificate} onClose={() => setCertificate(null)} />}
         <DragOverlay dropAnimation={dropAnimation}>
           {dragging?.type === 'bookmark' && <BookmarkGhost bookmark={dragging.bookmark} />}
           {dragging?.type === 'stack' && <StackGhost stack={dragging.stack} />}

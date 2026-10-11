@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard：书签管理器与新标签页",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "把新标签页变成书签看板：快速拨号、空间和搜索，全部保存为 Chrome 书签。自动同步，离线可用，无需账号。",
+    "description": "Store summary, 132 characters at most"
+  }
+}

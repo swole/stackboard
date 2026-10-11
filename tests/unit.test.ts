@@ -6,7 +6,7 @@ import { planFolder, isImportableUrl, countPlanned, type FolderNode } from '../s
 import { installedAt, shouldAskForRating } from '../src/lib/onboarding'
 import { STARTER_PACKS } from '../src/lib/starterPacks'
 import { batchFlags } from '../src/lib/fresh'
-import { planStash, staysNote } from '../src/lib/stashPlan'
+import { bankruptcyStackTitle, certificateText, planStash, staysNote } from '../src/lib/stashPlan'
 import {
   BLUR_MAX,
   DEFAULT_APPEARANCE,
@@ -25,6 +25,17 @@ import { spaceIndexForKey } from '../src/lib/shortcuts'
 import { glyphOf } from '../src/lib/favicon'
 import palettesCss from '../src/styles/palettes.css'
 import { contrastRatio, gradientStops, mix, over, readPalettes } from './contrast'
+import msgEn from '../public/_locales/en/messages.json'
+import msgEs from '../public/_locales/es/messages.json'
+import msgPtBR from '../public/_locales/pt_BR/messages.json'
+import msgDe from '../public/_locales/de/messages.json'
+import msgFr from '../public/_locales/fr/messages.json'
+import msgIt from '../public/_locales/it/messages.json'
+import msgJa from '../public/_locales/ja/messages.json'
+import msgKo from '../public/_locales/ko/messages.json'
+import msgZhCN from '../public/_locales/zh_CN/messages.json'
+import msgId from '../public/_locales/id/messages.json'
+import msgTr from '../public/_locales/tr/messages.json'
 
 let fails = 0
 function eq(label: string, got: unknown, want: unknown) {
@@ -171,6 +182,14 @@ eq('stash: closes every saved tab, duplicates too', sp.tabIds, [1, 3, 4, 6, 7])
 eq('stash: pinned and browser pages stay', [sp.links, sp.skipped, sp.pinned], [4, 1, 1])
 eq('stash: nothing to save', planStash([{ id: 1, url: 'chrome://newtab/' }], new Map(), 'x').links, 0)
 eq('stash: a tab still loading is saved by where it is headed', planStash([{ id: 1, url: '', pendingUrl: 'https://slow.example/' }], new Map(), 'x').tabIds, [1])
+// 0.5.1: tab bankruptcy
+const cert = certificateText({ tabs: 312, windows: 3, saved: 290, at: Date.UTC(2026, 9, 8, 12) })
+eq('bankruptcy: headline counts closed tabs', cert.headline, '312 tabs discharged')
+eq('bankruptcy: detail names windows and saved links', cert.detail, 'October 8, 2026 across 3 windows. All 290 links saved as bookmarks.')
+eq('bankruptcy: one window, no window count', certificateText({ tabs: 1, windows: 1, saved: 1, at: Date.UTC(2026, 9, 8, 12) }).share, 'I declared tab bankruptcy: 1 tab discharged. Nothing lost, all saved as bookmarks.')
+eq('bankruptcy: thousands get a separator', certificateText({ tabs: 1204, windows: 2, saved: 1100, at: 0 }).headline, '1,204 tabs discharged')
+eq('bankruptcy: first window keeps the plain label', bankruptcyStackTitle('Tab bankruptcy Oct 8', 0), 'Tab bankruptcy Oct 8')
+eq('bankruptcy: later windows are numbered', bankruptcyStackTitle('Tab bankruptcy Oct 8', 2), 'Tab bankruptcy Oct 8 (window 3)')
 eq('packs: no duplicate link inside a pack', STARTER_PACKS.every((p) => { const u = p.stacks.flatMap((s) => s.links.map((l) => l.url)); return new Set(u).size === u.length }), true)
 
 // ---------- 0.5.0: the visual pack ----------
@@ -283,6 +302,19 @@ eq('glyph: a white mark on transparency is light', glyphOf(icon((x, y) => (ring(
 eq('glyph: a coloured mark is left alone', glyphOf(icon((x, y) => (ring(x, y) ? [36, 99, 235, 255] : null))), null)
 eq('glyph: a full tile keeps its own background', glyphOf(icon(() => [10, 10, 10, 255])), null)
 eq('monogram: the tint follows the host', [monogram('A', 'https://x.io/1').tint === monogram('B', 'https://x.io/2').tint, monogram('A', 'https://x.io/').tint < 8], [true, true])
+
+// Store title and summary per language (G3, 0.5.1). The store cuts the summary at 132 characters
+// and the name at 75; the brand stays first and the short name is never translated.
+const LOCALES: Record<string, Record<string, { message: string }>> = {
+  en: msgEn, es: msgEs, pt_BR: msgPtBR, de: msgDe, fr: msgFr, it: msgIt, ja: msgJa, ko: msgKo, zh_CN: msgZhCN, id: msgId, tr: msgTr,
+}
+for (const [loc, m] of Object.entries(LOCALES)) {
+  eq(`locale ${loc}: has every message`, ['extName', 'extShortName', 'extDescription'].map((k) => typeof m[k]?.message === 'string' && m[k].message.length > 0), [true, true, true])
+  eq(`locale ${loc}: name starts with the brand and fits 75`, [m.extName.message.startsWith('Stackboard'), [...m.extName.message].length <= 75], [true, true])
+  eq(`locale ${loc}: short name stays Stackboard`, m.extShortName.message, 'Stackboard')
+  eq(`locale ${loc}: summary fits 132`, [...m.extDescription.message].length <= 132, true)
+}
+eq('locale en: the English title is unchanged', msgEn.extName.message, 'Stackboard: Bookmark Manager & New Tab Spaces')
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)

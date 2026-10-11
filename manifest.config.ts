@@ -5,11 +5,13 @@ export default defineManifest({
   // Renamed from "Stackable" in 0.3.0: stackable.so publishes a featured extension under
   // that name and developer name. The store title is this field; short_name is for tight UI.
   // 0.4.0: title carries the words people search the store for ("bookmark manager", "new tab").
-  name: 'Stackboard: Bookmark Manager & New Tab Spaces',
-  short_name: 'Stackboard',
-  version: '0.5.0',
-  description:
-    'Your new tab as a board of bookmark stacks: speed dial, spaces and search, saved as Chrome bookmarks. Synced, offline, no account.',
+  // 0.5.1: name and description come from public/_locales (G3), so each store language gets its own
+  // searchable title. English stays the default; tests/unit.test.ts checks every locale's lengths.
+  default_locale: 'en',
+  name: '__MSG_extName__',
+  short_name: '__MSG_extShortName__',
+  version: '0.5.1',
+  description: '__MSG_extDescription__',
   chrome_url_overrides: {
     newtab: 'newtab.html',
   },

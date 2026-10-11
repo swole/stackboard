@@ -15,6 +15,7 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 - **Cards are real links:** Ctrl+click, middle-click and the right-click menu work the way your browser already does. A dot marks links that are already open, and clicking one jumps to that tab.
 - **Search every space** from the sidebar (press `/`).
 - **Stash this window** (Alt+Shift+S or the toolbar popup): saves every open tab as a stack, one per tab group, and can close them. Open the stack later and they come back as a tab group.
+- **Tab bankruptcy** (toolbar popup, under Stash this window): stashes every tab in every window, closes them all and gives you a certificate you can save as an image.
 
 ## Where your data lives
 

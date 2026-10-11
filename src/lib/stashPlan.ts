@@ -81,3 +81,36 @@ export function staysNote(pinned: number, skipped: number): string {
   if (!parts.length) return ''
   return `${parts.join(' and ')} ${pinned + skipped === 1 ? 'stays' : 'stay'} open.`
 }
+
+// "Tab bankruptcy" (0.5.1, G2): stash every tab in every window at once, then hand out a
+// certificate. The numbers and wording live here so they're unit-tested.
+
+export interface Bankruptcy {
+  /** tabs closed (duplicates included: each one was open) */
+  tabs: number
+  windows: number
+  /** links saved after de-duplication */
+  saved: number
+  at: number
+}
+
+/** The window's loose-tab stack name: the first window keeps the plain label, later ones get a number. */
+export function bankruptcyStackTitle(label: string, windowIndex: number): string {
+  return windowIndex === 0 ? label : `${label} (window ${windowIndex + 1})`
+}
+
+export interface Certificate {
+  headline: string
+  detail: string
+  /** a short line for the share text and the alt text */
+  share: string
+}
+
+export function certificateText(b: Bankruptcy): Certificate {
+  const date = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(b.at))
+  const headline = `${plural(b.tabs, 'tab')} discharged`
+  const where = b.windows > 1 ? ` across ${plural(b.windows, 'window')}` : ''
+  const detail = `${date}${where}. All ${plural(b.saved, 'link')} saved as bookmarks.`
+  const share = `I declared tab bankruptcy: ${plural(b.tabs, 'tab')} discharged${where}. Nothing lost, all saved as bookmarks.`
+  return { headline, detail, share }
+}

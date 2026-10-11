@@ -1,4 +1,4 @@
-import { stashWindow } from './lib/stash'
+import { declareBankruptcy, stashWindow } from './lib/stash'
 
 // Service worker (0.4.0).
 // 1. On a fresh install, open a new tab so people land on Stackboard straight away: the welcome
@@ -16,7 +16,12 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 })
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (sender.id !== chrome.runtime.id || msg?.type !== 'stash' || typeof msg.windowId !== 'number') return
+  if (sender.id !== chrome.runtime.id) return
+  if (msg?.type === 'bankruptcy') {
+    declareBankruptcy().then((b) => reply(b ?? { tabs: 0 }), (err) => reply({ error: String(err) }))
+    return true
+  }
+  if (msg?.type !== 'stash' || typeof msg.windowId !== 'number') return
   stashWindow(msg.windowId, { close: !!msg.close }).then(reply, (err) => reply({ error: String(err) }))
   return true // reply comes later
 })

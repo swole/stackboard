@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: Pengelola Bookmark & Tab Baru",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Tab baru Anda jadi papan bookmark: speed dial, ruang, dan pencarian, tersimpan sebagai bookmark Chrome. Tersinkron, tanpa akun.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

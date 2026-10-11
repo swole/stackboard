@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: Bookmark Manager & New Tab Spaces",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Your new tab as a board of bookmark stacks: speed dial, spaces and search, saved as Chrome bookmarks. Synced, offline, no account.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

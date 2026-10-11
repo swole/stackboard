@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard : gestionnaire de favoris et nouvel onglet",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Votre nouvel onglet en tableau de favoris : accès rapide, espaces et recherche, enregistrés dans les favoris Chrome. Sans compte.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

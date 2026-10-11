@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Check, SquareKanban, Inbox } from 'lucide-react'
 import type { StackableTree } from './lib/types'
 import { readTree, createBookmark } from './lib/bookmarks'
-import { planWindow } from './lib/stash'
+import { planAllWindows, planWindow } from './lib/stash'
+import { useTwoStep } from './hooks/useTwoStep'
 import { staysNote, type StashPlan } from './lib/stashPlan'
 import { plural } from './lib/importPlan'
 
@@ -203,6 +204,8 @@ function StashSection() {
   const [plan, setPlan] = useState<StashPlan | null>(null)
   const [shortcut, setShortcut] = useState('')
   const [state, setState] = useState<StashState>({ kind: 'idle' })
+  const [everywhere, setEverywhere] = useState<{ tabs: number; windows: number } | null>(null)
+  const confirm = useTwoStep(4000)
 
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.windows) return
@@ -213,6 +216,8 @@ function StashSection() {
       setPlan(await planWindow(win.id))
       const commands = await chrome.commands.getAll()
       setShortcut(commands.find((c) => c.name === 'stash-window')?.shortcut ?? '')
+      const all = await planAllWindows()
+      setEverywhere({ tabs: all.reduce((n, w) => n + w.plan.tabIds.length, 0), windows: all.length })
     })().catch(() => {})
   }, [])
 
@@ -224,6 +229,18 @@ function StashSection() {
       const res = await chrome.runtime.sendMessage({ type: 'stash', windowId, close })
       if (res?.error) setState({ kind: 'error', message: res.error })
       else setState({ kind: 'saved', saved: res?.saved ?? plan.links })
+    } catch (err) {
+      setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  const bankrupt = async () => {
+    if (!confirm.armed) return confirm.arm()
+    setState({ kind: 'busy' })
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'bankruptcy' })
+      if (res?.error) setState({ kind: 'error', message: res.error })
+      else setState({ kind: 'saved', saved: res?.saved ?? 0 })
     } catch (err) {
       setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
     }
@@ -269,6 +286,18 @@ function StashSection() {
               Save only
             </button>
           </div>
+          {everywhere && everywhere.tabs >= 2 && (
+            <button
+              data-bankruptcy
+              onClick={() => void bankrupt()}
+              disabled={state.kind === 'busy'}
+              className="mt-2 text-xs text-muted underline decoration-dotted underline-offset-2 hover:text-fg disabled:opacity-50"
+            >
+              {confirm.armed
+                ? `Sure? Close all ${plural(everywhere.tabs, 'tab')}`
+                : `Declare tab bankruptcy: stash all ${plural(everywhere.tabs, 'tab')}${everywhere.windows > 1 ? ` in ${plural(everywhere.windows, 'window')}` : ''}`}
+            </button>
+          )}
           {state.kind === 'error' && <p className="mt-2 text-xs text-danger">Stash failed: {state.message}</p>}
         </>
       )}

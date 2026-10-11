@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: gestor de marcadores y nueva pestaña",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Tu nueva pestaña como un tablero de marcadores: acceso rápido, espacios y búsqueda, guardados como marcadores de Chrome. Sin cuenta.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

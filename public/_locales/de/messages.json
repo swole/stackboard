@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: Lesezeichen-Manager & Neuer Tab",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Dein neuer Tab als Board aus Lesezeichen: Schnellwahl, Bereiche und Suche, als Chrome-Lesezeichen gespeichert. Synchron, ohne Konto.",
+    "description": "Store summary, 132 characters at most"
+  }
+}
