@@ -2,7 +2,7 @@
 
 Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stacks of links across, and you can drag anything anywhere.
 
-**[Get it free on the Chrome Web Store](https://chromewebstore.google.com/detail/bgcedhchngcopaefchpkbhioagknnpma?utm_source=github&utm_medium=readme&utm_campaign=oss)**
+**[Get it free on the Chrome Web Store](https://chromewebstore.google.com/detail/bgcedhchngcopaefchpkbhioagknnpma?utm_source=github&utm_medium=readme&utm_campaign=oss)** &nbsp; Website and guides: **[getstackboard.com](https://getstackboard.com)**
 
 ![A Stackboard board in Catppuccin Mocha over a dusk wallpaper: a Work space with Daily, Design, Dashboards and Docs stacks](docs/mocha.png)
 
@@ -22,6 +22,8 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 ## Where your data lives
 
 Everything is plain Chrome bookmarks under **Other bookmarks → Stackboard** (space folders, then stack folders, then bookmarks). So it syncs through Chrome sync, works offline, and if you uninstall the extension your bookmarks stay put.
+
+Coming from another tool? See [Stackboard as a OneTab alternative](https://getstackboard.com/onetab-alternative) or [as a Toby alternative](https://getstackboard.com/toby-alternative), and the [Catppuccin, Gruvbox and Nord themes](https://getstackboard.com/themes).
 
 No account, no server, no analytics. A few preferences (last space opened, your theme, whether you've answered the one-time rating ask) stay in local storage on your device, and a wallpaper you pick stays in the browser's local database on that device. [Privacy policy](https://stackboard.vercel.app/privacy)
 
