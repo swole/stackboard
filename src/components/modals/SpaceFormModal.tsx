@@ -20,6 +20,7 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
   const close = useStackableStore((s) => s.closeModal)
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
+  const reportError = useStackableStore((s) => s.reportError)
   // The picker's own light/dark set picks its category icons; index.css maps its colours.
   const scheme = useAppearance((s) => s.scheme)
 
@@ -42,6 +43,8 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
         await refresh()
       }
       close()
+    } catch (err) {
+      reportError(mode === 'add' ? 'create the space' : 'save the space', err)
     } finally {
       setSubmitting(false)
     }

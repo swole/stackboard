@@ -12,7 +12,11 @@ export function useImportSources(): ImportSource[] | null {
     let live = true
     listSources()
       .then((s) => live && setSources(s))
-      .catch(() => live && setSources([]))
+      .catch((err) => {
+        // Used to look exactly like "no bookmarks to copy"; say why as well.
+        useStackableStore.getState().reportError('read your bookmarks', err)
+        if (live) setSources([])
+      })
     return () => {
       live = false
     }

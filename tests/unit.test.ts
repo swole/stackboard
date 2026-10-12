@@ -6,7 +6,7 @@ import { planFolder, isImportableUrl, countPlanned, type FolderNode } from '../s
 import { installedAt, shouldAskForRating } from '../src/lib/onboarding'
 import { STARTER_PACKS } from '../src/lib/starterPacks'
 import { batchFlags } from '../src/lib/fresh'
-import { bankruptcyStackTitle, certificateText, planStash, staysNote } from '../src/lib/stashPlan'
+import { bankruptcyStackTitle, certificateText, planSelected, planStash, staysNote } from '../src/lib/stashPlan'
 import {
   BLUR_MAX,
   DEFAULT_APPEARANCE,
@@ -182,6 +182,22 @@ eq('stash: closes every saved tab, duplicates too', sp.tabIds, [1, 3, 4, 6, 7])
 eq('stash: pinned and browser pages stay', [sp.links, sp.skipped, sp.pinned], [4, 1, 1])
 eq('stash: nothing to save', planStash([{ id: 1, url: 'chrome://newtab/' }], new Map(), 'x').links, 0)
 eq('stash: a tab still loading is saved by where it is headed', planStash([{ id: 1, url: '', pendingUrl: 'https://slow.example/' }], new Map(), 'x').tabIds, [1])
+// 0.5.2: save selected tabs (C1)
+const sel = planSelected([
+  { id: 1, url: 'https://a.example/', title: 'A' },
+  { id: 2, url: 'chrome://settings/', title: 'Settings' },
+  { id: 3, url: 'https://b.example/', title: '  ', pinned: true },
+  { id: 4, url: 'https://a.example/', title: 'A twice' },
+  { id: 5, url: 'about:blank', title: '' },
+  { id: 6, url: '', pendingUrl: 'https://slow.example/', title: 'Slow' },
+  { id: 7, url: 'file:///C:/notes.txt', title: 'Notes' },
+])
+eq('selected: web pages saved in strip order', sel.links.map((l) => l.url), ['https://a.example/', 'https://b.example/', 'https://slow.example/'])
+eq('selected: browser, about: and file: pages are skipped', sel.skipped, 3)
+eq('selected: a pinned tab someone selected is saved', sel.links.some((l) => l.url === 'https://b.example/'), true)
+eq('selected: a blank title falls back to the url', sel.links[1].title, 'https://b.example/')
+eq('selected: a url selected twice is saved once, first title wins', sel.links[0].title, 'A')
+eq('selected: nothing saveable', planSelected([{ url: 'chrome://newtab/' }, { url: 'chrome-extension://x/popup.html' }]), { links: [], skipped: 2 })
 // 0.5.1: tab bankruptcy
 const cert = certificateText({ tabs: 312, windows: 3, saved: 290, at: Date.UTC(2026, 9, 8, 12) })
 eq('bankruptcy: headline counts closed tabs', cert.headline, '312 tabs discharged')
@@ -254,6 +270,12 @@ for (const b of blocks) {
   eq(`contrast: ${id} text stays AA on all three gradients`, gradientMisses, [])
 }
 
+// True black (0.5.2, C2): the canvas is pure black for OLED screens, and the panel too.
+const black = blocks.find((b) => b.palette === 'black' && b.scheme === 'dark')
+eq('palettes: True black has a dark block only', blocks.filter((b) => b.palette === 'black').map((b) => b.scheme), ['dark'])
+eq('palettes: True black canvas and panel are #000000', [black?.tokens.get('canvas'), black?.tokens.get('panel')], ['#000000', '#000000'])
+eq('palettes: True black gradients end on pure black', [1, 2, 3].map((g) => black?.tokens.get(`gradient-${g}`)?.trim().endsWith('#000000')), [true, true, true])
+
 // Appearance settings: whatever storage holds comes back complete and in range.
 eq('appearance: nothing stored gives the defaults', parseAppearance(undefined), DEFAULT_APPEARANCE)
 eq('appearance: junk gives the defaults', parseAppearance('dark please'), DEFAULT_APPEARANCE)
@@ -284,6 +306,9 @@ eq('mirror: carries the background kind for the first frame', bootMirror(parseAp
 eq('scheme: system follows the OS', [resolveScheme('system', 'catppuccin', true), resolveScheme('system', 'catppuccin', false)], ['dark', 'light'])
 eq('scheme: an explicit choice beats the OS', [resolveScheme('light', 'gruvbox', true), resolveScheme('dark', 'stackboard', false)], ['light', 'dark'])
 eq('scheme: Nord stays dark in light mode', [resolveScheme('light', 'nord', false), resolveScheme('system', 'nord', false), onlyScheme('nord')], ['dark', 'dark', 'dark'])
+eq('scheme: True black is dark only, like Nord', [resolveScheme('light', 'black', false), resolveScheme('system', 'black', false), onlyScheme('black'), variantName('black', 'dark')], ['dark', 'dark', 'dark', 'True black'])
+eq('appearance: True black survives storage', parseAppearance({ palette: 'black' }).palette, 'black')
+eq('mirror: True black boots dark', bootMirror(parseAppearance({ palette: 'black' })).only, 'dark')
 eq('scheme: variant names', [variantName('catppuccin', 'dark'), variantName('catppuccin', 'light'), variantName('gruvbox', 'dark'), variantName('stackboard', 'light')], ['Catppuccin Mocha', 'Catppuccin Latte', 'Gruvbox Dark', 'Stackboard Light'])
 
 // Keys 1-9.

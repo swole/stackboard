@@ -1,4 +1,4 @@
-import { isImportableUrl, plural, type PlannedStack } from './importPlan'
+import { isImportableUrl, plural, type PlannedLink, type PlannedStack } from './importPlan'
 
 // "Stash this window" (0.4.0): which tabs get saved, and how they group into stacks. Pure, so
 // it is unit-tested and the popup can show counts before anything happens.
@@ -67,6 +67,32 @@ export function planStash(tabs: TabLike[], groupTitles: ReadonlyMap<number, stri
     skipped,
     pinned,
   }
+}
+
+// "Save N selected tabs" (0.5.2, C1): the tabs highlighted in the tab strip (Ctrl/Shift+click)
+// go into one stack the popup's picker chooses. Unlike a stash, a pinned tab someone selected is
+// saved too. Browser pages are skipped and a URL selected twice is saved once, in strip order.
+
+export interface SelectionPlan {
+  links: PlannedLink[]
+  skipped: number
+}
+
+export function planSelected(tabs: TabLike[]): SelectionPlan {
+  const seen = new Set<string>()
+  const links: PlannedLink[] = []
+  let skipped = 0
+  for (const tab of tabs) {
+    const url = tab.url || tab.pendingUrl || ''
+    if (!isImportableUrl(url)) {
+      skipped++
+      continue
+    }
+    if (seen.has(url)) continue
+    seen.add(url)
+    links.push({ title: (tab.title ?? '').trim() || url, url })
+  }
+  return { links, skipped }
 }
 
 /** "Stashed Sep 27, 11:42 PM" in the browser's locale. */

@@ -8,7 +8,7 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 
 ## What it does
 
-- **Themes:** Catppuccin (Latte and Mocha), Gruvbox (light and dark), Nord, and the cream default with a dark version, all in their official colors. Light, dark or follow your system, plus gradients or your own wallpaper with dim and blur. Compact density for big boards, and keys 1 to 9 switch spaces.
+- **Themes:** Catppuccin (Latte and Mocha), Gruvbox (light and dark), Nord, and the cream default with a dark version, all in their official colors, plus a true black for OLED screens. Light, dark or follow your system, plus gradients or your own wallpaper with dim and blur. Compact density for big boards, and keys 1 to 9 switch spaces.
 - **First run:** copies your bookmarks bar and its folders into a board, one stack per folder. Your originals stay where they are. No bookmarks yet? Pick a starter pack.
 - **Drag everything:** spaces, stacks and links, within and across stacks.
 - **Undo every delete** with the toast or Ctrl+Z. Chrome has no trash for bookmarks, so this matters.
@@ -16,6 +16,8 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 - **Search every space** from the sidebar (press `/`).
 - **Stash this window** (Alt+Shift+S or the toolbar popup): saves every open tab as a stack, one per tab group, and can close them. Open the stack later and they come back as a tab group.
 - **Tab bankruptcy** (toolbar popup, under Stash this window): stashes every tab in every window, closes them all and gives you a certificate you can save as an image.
+- **Save selected tabs:** Ctrl or Shift+click a few tabs in the tab strip, open the toolbar popup, and one tap on a stack saves them all.
+- **Nothing fails silently:** if a bookmark write fails, a message says what went wrong.
 
 ## Where your data lives
 
@@ -54,6 +56,10 @@ Then open `chrome://extensions`, turn on **Developer mode**, click **Load unpack
 ## Stack
 
 Manifest V3, React 18, TypeScript, Vite with the crxjs plugin, Tailwind 4, Zustand and dnd-kit. Built with Claude Code.
+
+## Thanks
+
+[tokyo51](https://github.com/tokyo51) tracked down why Stackboard froze in Brave (a background tab holding the root-folder lock forever, with failed writes showing nothing) and sent the fix that shipped in 0.5.2.
 
 ## License
 

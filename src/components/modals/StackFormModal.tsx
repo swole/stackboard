@@ -13,6 +13,7 @@ interface Props {
 export function StackFormModal({ mode, spaceId, stackId, initialTitle = '' }: Props) {
   const close = useStackableStore((s) => s.closeModal)
   const refresh = useStackableStore((s) => s.refresh)
+  const reportError = useStackableStore((s) => s.reportError)
 
   const [title, setTitle] = useState(initialTitle)
   const [submitting, setSubmitting] = useState(false)
@@ -29,6 +30,8 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '' }: Pr
       }
       await refresh()
       close()
+    } catch (err) {
+      reportError(mode === 'add' ? 'create the stack' : 'rename the stack', err)
     } finally {
       setSubmitting(false)
     }

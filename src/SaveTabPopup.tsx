@@ -4,7 +4,7 @@ import type { StackableTree } from './lib/types'
 import { readTree, createBookmark } from './lib/bookmarks'
 import { planAllWindows, planWindow } from './lib/stash'
 import { useTwoStep } from './hooks/useTwoStep'
-import { staysNote, type StashPlan } from './lib/stashPlan'
+import { planSelected, staysNote, type SelectionPlan, type StashPlan } from './lib/stashPlan'
 import { plural } from './lib/importPlan'
 
 interface CurrentTab {
@@ -18,6 +18,18 @@ async function getActiveTab(): Promise<CurrentTab | null> {
   const tab = tabs[0]
   if (!tab || !tab.url) return null
   return { url: tab.url, title: tab.title || tab.url }
+}
+
+/**
+ * 0.5.2: the tabs highlighted in this window (Ctrl/Shift+click in the tab strip), when there is
+ * more than one. With one, the popup saves the current tab as it always has.
+ */
+async function getSelection(): Promise<SelectionPlan | null> {
+  if (typeof chrome === 'undefined' || !chrome.tabs) return null
+  const tabs = await chrome.tabs.query({ highlighted: true, currentWindow: true })
+  if (tabs.length < 2) return null
+  tabs.sort((a, b) => a.index - b.index)
+  return planSelected(tabs)
 }
 
 // Chrome rejects bookmark creation for restricted schemes (chrome://, the
@@ -36,17 +48,19 @@ export default function SaveTabPopup() {
   const [savedTo, setSavedTo] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [selection, setSelection] = useState<SelectionPlan | null>(null)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const [t, tr] = await Promise.all([getActiveTab(), readTree()])
+        const [t, tr, sel] = await Promise.all([getActiveTab(), readTree(), getSelection().catch(() => null)])
         if (cancelled) return
+        setSelection(sel)
         if (t) {
           setTab(t)
           setTitle(t.title)
-        } else {
+        } else if (!sel) {
           setError('No active tab to save.')
         }
         setTree(tr)
@@ -60,17 +74,21 @@ export default function SaveTabPopup() {
   }, [])
 
   const saveable = !!tab && isSaveableUrl(tab.url)
-  const canSave = saveable && !!title.trim()
+  const canSave = selection ? selection.links.length > 0 : saveable && !!title.trim()
 
   const handleSave = async (stackId: string, stackName: string, spaceName: string) => {
     if (!canSave || saving) return
     setSaving(true)
     try {
-      await createBookmark(stackId, title.trim(), tab!.url)
+      if (selection) {
+        for (const link of selection.links) await createBookmark(stackId, link.title, link.url)
+      } else {
+        await createBookmark(stackId, title.trim(), tab!.url)
+      }
       setSavedTo(`${spaceName} › ${stackName}`)
       setTimeout(() => window.close(), 900)
     } catch {
-      setError("Couldn't save this page. Try again, or reopen the popup.")
+      setError(selection ? "Couldn't save these tabs. Try again, or reopen the popup." : "Couldn't save this page. Try again, or reopen the popup.")
       setSaving(false)
     }
   }
@@ -79,9 +97,9 @@ export default function SaveTabPopup() {
 
   return (
     <div className="w-[340px] bg-canvas p-4 font-sans text-fg">
-      <header className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-strong">
+      <header className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-strong" data-popup-title>
         <SquareKanban className="h-4 w-4 text-accent" />
-        Save current tab
+        {selection ? `Save ${plural(selection.links.length, 'selected tab')}` : 'Save current tab'}
       </header>
 
       {error && (
@@ -93,9 +111,17 @@ export default function SaveTabPopup() {
       {savedTo ? (
         <div className="flex items-center gap-2 rounded-md border border-accent-line bg-card px-3 py-3 text-sm text-fg">
           <Check className="h-4 w-4 text-accent-text" />
-          Saved to <span className="font-medium">{savedTo}</span>
+          Saved {selection ? `${plural(selection.links.length, 'tab')} ` : ''}to <span className="font-medium">{savedTo}</span>
         </div>
-      ) : tab && !saveable ? (
+      ) : selection && !selection.links.length ? (
+        <div className="rounded-md border border-line bg-card px-3 py-3 text-sm text-soft">
+          <div className="font-medium text-fg">These pages can't be saved</div>
+          <p className="mt-1 text-xs text-muted">
+            Stackboard can only save normal web pages (http, https). The selected tabs are all
+            browser pages.
+          </p>
+        </div>
+      ) : !selection && tab && !saveable ? (
         <div className="rounded-md border border-line bg-card px-3 py-3 text-sm text-soft">
           <div className="font-medium text-fg">This page can't be saved</div>
           <p className="mt-1 text-xs text-muted">
@@ -108,6 +134,22 @@ export default function SaveTabPopup() {
         </div>
       ) : (
         <>
+          {selection ? (
+            <div className="mb-3" data-selected-tabs>
+              <ul className="no-scrollbar max-h-[96px] overflow-y-auto rounded-md border border-line bg-card px-2.5 py-1.5 text-xs text-soft">
+                {selection.links.map((l) => (
+                  <li key={l.url} className="truncate py-0.5" title={l.url}>
+                    {l.title}
+                  </li>
+                ))}
+              </ul>
+              {selection.skipped > 0 && (
+                <div className="mt-1 text-[11px] text-muted">
+                  {plural(selection.skipped, 'browser page')} can't be saved and {selection.skipped === 1 ? 'is' : 'are'} skipped.
+                </div>
+              )}
+            </div>
+          ) : (
           <div className="mb-3">
             <label className="mb-1 block text-xs font-medium text-soft">Link name</label>
             <input
@@ -128,6 +170,7 @@ export default function SaveTabPopup() {
               <div className="mt-1 text-[11px] text-danger">Enter a name to save.</div>
             )}
           </div>
+          )}
 
           <div className="mb-1 text-xs font-medium text-soft">Where to save</div>
           <div className="no-scrollbar max-h-[320px] overflow-y-auto rounded-md border border-line bg-card">
@@ -182,7 +225,9 @@ export default function SaveTabPopup() {
           </div>
 
           <div className="mt-2 text-[11px] text-muted">
-            Tap a stack to save. No save button needed.
+            {selection
+              ? `Tap a stack to save all ${plural(selection.links.length, 'tab')} there.`
+              : 'Tap a stack to save. No save button needed.'}
           </div>
         </>
       )}

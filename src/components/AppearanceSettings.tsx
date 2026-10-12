@@ -90,7 +90,7 @@ export function AppearanceSettings() {
     <section data-appearance>
       <h3 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">Appearance</h3>
 
-      <div role="radiogroup" aria-label="Palette" className="grid grid-cols-4 gap-2.5">
+      <div role="radiogroup" aria-label="Palette" className="grid grid-cols-5 gap-2.5">
         {PALETTES.map((p) => {
           const s = resolveScheme(a.mode, p.id, systemDark)
           return (

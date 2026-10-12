@@ -16,6 +16,7 @@ export function StarterPacks({ variant }: Props) {
   const flashItem = useStackableStore((s) => s.flashItem)
   const setOnboarding = useStackableStore((s) => s.setOnboarding)
   const celebrate = useStackableStore((s) => s.celebrate)
+  const reportError = useStackableStore((s) => s.reportError)
   const [busy, setBusy] = useState<string | null>(null)
   const [added, setAdded] = useState<Set<string>>(new Set())
 
@@ -30,6 +31,8 @@ export function StarterPacks({ variant }: Props) {
       flashItem(id)
       setAdded((prev) => new Set(prev).add(pack.id))
       celebrate()
+    } catch (err) {
+      reportError(`add ${pack.name}`, err)
     } finally {
       setBusy(null)
       if (variant === 'chips') setOnboarding(false)

@@ -515,3 +515,77 @@
     #2e3440;
 }
 
+/* True black (0.5.2). For OLED screens: a pure #000000 canvas, neutral greys, one soft blue
+ * accent (#8ab4f8). Dark only, like Nord. Mixes are against card (#121212) unless noted. */
+[data-palette="black"][data-scheme="dark"] {
+  --sb-canvas: #000000;
+  --sb-panel: #000000;
+  --sb-card: #121212;
+  --sb-raised: #1a1a1a;
+  --sb-well: #ffffff0a; /* white at 4% */
+  --sb-hover: #222222;
+  --sb-selected: #262626;
+  --sb-sunken: #0a0a0a;
+  --sb-strong: #ffffff;
+  --sb-fg: #e8e8e8;
+  --sb-soft: #c8c8c8;
+  --sb-muted: #a3a3a3;
+  --sb-faint: #8a8a8a;
+  --sb-ghost: #5c5c5c;
+  --sb-line: #262626;
+  --sb-line-strong: #3a3a3a;
+  --sb-accent: #8ab4f8; /* blue */
+  --sb-accent-hover: #a8c7fa;
+  --sb-on-accent: #000000;
+  --sb-accent-soft: #232932; /* blue 14% + card */
+  --sb-accent-line: #485b7a; /* blue 45% + card */
+  --sb-accent-text: #8ab4f8;
+  --sb-accent-mark: #8ab4f8;
+  --sb-focus: #8ab4f8;
+  --sb-danger: #f28b82;
+  --sb-danger-fill: #b3261e;
+  --sb-danger-fill-hover: #9c2019;
+  --sb-on-danger: #ffffff;
+  --sb-danger-soft: #2d211f; /* danger 12% + card */
+  --sb-inverse: #2a2a2a;
+  --sb-on-inverse: #e8e8e8;
+  --sb-inverse-strong: #ffffff;
+  --sb-inverse-muted: #c8c8c8;
+  --sb-inverse-accent: #a8c7fa;
+  --sb-scrim: #000000b3; /* 70% alpha */
+  --sb-shade: #000000;
+  --sb-brand-from: #a8c7fa;
+  --sb-brand-to: #8ab4f8;
+  --sb-brand-ink: #000000;
+  /* tints: hue 22% + card behind, hue 85% + white in front */
+  --sb-tint-0-bg: #453427;
+  --sb-tint-0-fg: #fcb985;
+  --sb-tint-1-bg: #463d24;
+  --sb-tint-1-fg: #fddc7a;
+  --sb-tint-2-bg: #2a3a2f;
+  --sb-tint-2-fg: #94d1a5;
+  --sb-tint-3-bg: #283e42;
+  --sb-tint-3-fg: #8cdfef;
+  --sb-tint-4-bg: #2c3645;
+  --sb-tint-4-fg: #9cbff9;
+  --sb-tint-5-bg: #392c45;
+  --sb-tint-5-fg: #ce9cfa;
+  --sb-tint-6-bg: #432d2b;
+  --sb-tint-6-fg: #f49c95;
+  --sb-tint-7-bg: #38383a;
+  --sb-tint-7-fg: #c7cacf;
+  /* gradients stay near black so the screen stays mostly off */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #0e1219 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #100b14 0%, transparent 70%),
+    #000000;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #0a1113 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #0a0d11 0%, transparent 68%),
+    #000000;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #111112 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #0b0e14 0%, transparent 70%),
+    #000000;
+}
+

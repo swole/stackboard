@@ -1,6 +1,6 @@
 // End-to-end check of the built Stackboard extension in Chrome for Testing.
 // Loads dist/ unpacked into a throwaway profile, seeds bookmarks through chrome.bookmarks,
-// and drives the new-tab page with real mouse and keyboard input. 79 checks, ~2 min.
+// and drives the new-tab page with real mouse and keyboard input. 92 checks, ~2 min.
 //
 // Setup (branded Chrome ignores --load-extension, so use Chrome for Testing):
 //   npm i puppeteer-core@24 @puppeteer/browsers@2
@@ -556,6 +556,9 @@ try {
   await popup.waitForSelector('[data-stash] button', { timeout: 15000 })
   const offer = await popup.evaluate(() => document.querySelector('[data-stash]')?.textContent ?? '')
   check('popup offers to stash the window', offer.includes('Stash and close 3 tabs') && offer.includes('1 pinned tab and 1 browser page stay open'), offer)
+  // 0.5.2: one highlighted tab keeps the popup exactly as it was.
+  const singleTitle = await popup.evaluate(() => document.querySelector('[data-popup-title]')?.textContent ?? '')
+  check('one highlighted tab keeps the single-tab popup', singleTitle === 'Save current tab' && !(await popup.$('[data-selected-tabs]')), singleTitle)
   const knownBefore = new Set(browser.targets())
   await clickText(popup, '[data-stash] button', 'Stash and close')
   const stashTab = await browser
@@ -577,6 +580,51 @@ try {
   check('stash closes the saved tabs only', stashed.left.join(',') === 'chrome-extension:,chrome-extension:,pinned' || stashed.left.join(',') === 'chrome-extension:,chrome:,pinned', stashed.left.join(','))
   const landed = stashTab ? await stashTab.evaluate(() => ({ h1: document.querySelector('main h1')?.textContent, toast: document.querySelector('.toast')?.textContent ?? '' })) : null
   check('stash opens a new tab on the Stash space', landed?.h1 === 'Stash' && landed.toast.includes('Stashed 3 tabs'), JSON.stringify(landed))
+
+  // ---------- 0.5.2: save selected tabs (C1) ----------
+  const selWin = await control.evaluate(async (ntpUrl) => {
+    const w = await chrome.windows.create({ url: ['https://example.com/?sel=1', 'about:blank', 'https://example.org/?sel=2', 'https://example.net/?sel=3'], focused: true })
+    const pop = await chrome.tabs.create({ windowId: w.id, url: ntpUrl.replace('newtab.html', 'popup.html?sel'), active: true })
+    return { windowId: w.id, popIndex: pop.index }
+  }, NTP)
+  const selPopup = await browser.waitForTarget((t) => t.url().endsWith('/popup.html?sel'), { timeout: 10000 }).then((t) => t.page())
+  await selPopup.waitForSelector('[data-popup-title]', { timeout: 10000 })
+  // Ctrl+click in the tab strip, done through the API: the popup tab (active) plus tabs 0-2.
+  await control.evaluate((w) => chrome.tabs.highlight({ windowId: w.windowId, tabs: [w.popIndex, 0, 1, 2] }), selWin)
+  await selPopup.reload()
+  await selPopup.waitForSelector('[data-selected-tabs]', { timeout: 10000 }).catch(() => {})
+  const selOffer = await selPopup.evaluate(() => ({
+    title: document.querySelector('[data-popup-title]')?.textContent ?? '',
+    list: [...document.querySelectorAll('[data-selected-tabs] li')].length,
+    note: document.querySelector('[data-selected-tabs]')?.textContent ?? '',
+    input: !!document.querySelector('input[type="text"]'),
+  }))
+  check('several highlighted tabs offer "Save 2 selected tabs"', selOffer.title === 'Save 2 selected tabs' && selOffer.list === 2 && !selOffer.input, JSON.stringify(selOffer))
+  check('browser pages in the selection are skipped', selOffer.note.includes("2 browser pages can't be saved"), selOffer.note)
+  const picked = await selPopup.evaluate(() => {
+    const space = [...document.querySelectorAll('button')].find((b) => b.querySelector('span.flex-1')?.textContent === 'Stash')
+    space?.click()
+    return !!space
+  })
+  await sleep(300)
+  const pickedStack = await selPopup.evaluate(() => {
+    const st = [...document.querySelectorAll('button')].find((b) => b.querySelector('span.truncate')?.textContent === 'Research')
+    st?.click()
+    return !!st
+  })
+  await sleep(500)
+  const selDone = await selPopup.evaluate(() => document.body.innerText.replace(/\s+/g, ' ')).catch(() => '')
+  await sleep(1000)
+  const selSaved = await control.evaluate(async () => {
+    const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+    const [sub] = await chrome.bookmarks.getSubTree(root.id)
+    const space = sub.children.find((c) => c.title === '📥 Stash')
+    const research = space?.children.find((st) => st.title === 'Research')
+    return (research?.children ?? []).map((b) => b.url).filter((u) => u.includes('?sel='))
+  })
+  check('the selected tabs land in the chosen stack', picked && pickedStack && selSaved.join(',') === 'https://example.com/?sel=1,https://example.org/?sel=2', JSON.stringify(selSaved))
+  check('the popup confirms how many were saved', selDone.includes('Saved 2 tabs to Stash › Research'), selDone.slice(0, 120))
+  await control.evaluate((id) => chrome.windows.remove(id), selWin.windowId).catch(() => {})
 
   // ---------- 0.5.1: tab bankruptcy (every window) ----------
   const bk = await control.evaluate(async (ntpUrl) => {
@@ -674,6 +722,13 @@ try {
   check('Nord stays dark when Light is picked, and says why', nordLight.scheme === 'dark' && nordLight.canvas === rgb('#2e3440') && modeNote.includes('only comes in dark'), modeNote)
   const saved = await control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance)
   check('appearance is saved in chrome.storage.local', saved?.palette === 'nord' && saved?.mode === 'light', JSON.stringify(saved))
+  // 0.5.2: True black, an OLED palette with a pure #000000 canvas (dark only, like Nord).
+  await pick('[data-palette-option="black"]')
+  const blackLook = await look(ntpA)
+  const blackNote = await ntpA.evaluate(() => document.querySelector('[data-mode-note]')?.textContent ?? '')
+  check('True black: pure black canvas, dark even in Light mode', blackLook.palette === 'black' && blackLook.scheme === 'dark' && blackLook.canvas === rgb('#000000') && blackLook.card === rgb('#121212') && blackLook.heading === rgb('#ffffff') && blackNote.includes('only comes in dark'), JSON.stringify(blackLook))
+  const blackSwatch = await ntpA.evaluate(() => document.querySelector('[data-palette-option="black"]')?.textContent ?? '')
+  check('True black swatch is named and marked dark only', blackSwatch.includes('True black') && blackSwatch.includes('Dark only'), blackSwatch)
 
   await pick('[data-palette-option="stackboard"]')
   await pick('[aria-label="Mode"] [data-option="system"]')
@@ -810,6 +865,39 @@ try {
       JSON.parse(fs.readFileSync(enMsgs, 'utf8')).extName.message === 'Stackboard: Bookmark Manager & New Tab Spaces',
     `${shipped.default_locale} ${shipped.name}`,
   )
+
+  // ---------- 0.5.2: writes survive a stuck root lock and say when they fail ----------
+  // A Brave user (r/startpages, 2026-10-11) had a frozen Stackboard tab holding 'stackboard-root':
+  // every load and create waited forever and the buttons looked dead.
+  {
+    const holder = await openNtp()
+    await holder.evaluate(() => { void navigator.locks.request('stackboard-root', () => new Promise(() => {})) })
+    await control.evaluate(() => chrome.storage.local.remove('stackableRootId')) // miss the fast path: load must take the lock
+    const t0 = Date.now()
+    const page = await openNtp().catch(() => null)
+    check('a stuck root lock no longer blocks loading', !!page, `${Date.now() - t0} ms`)
+    if (page) {
+      await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
+      await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+      await page.type('[role=dialog] input', 'Lock test')
+      await page.keyboard.press('Enter')
+      const made = await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Lock test', { timeout: 10000 }).then(() => true, () => false)
+      check('a stuck root lock no longer blocks New space', made)
+      await page.evaluate(() => {
+        Object.defineProperty(chrome.bookmarks, 'create', { value: () => Promise.reject(new Error('Bookmark write refused')), configurable: true, writable: true })
+        document.querySelector('button[aria-label="Add space"]').click()
+      })
+      await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+      await page.type('[role=dialog] input', 'Will fail')
+      await page.keyboard.press('Enter')
+      const toast = await page
+        .waitForFunction(() => document.querySelector('.toast')?.textContent?.includes("Couldn't create the space"), { timeout: 5000 })
+        .then(() => page.evaluate(() => document.querySelector('.toast').textContent), () => null)
+      check('a failed write shows the error', !!toast && toast.includes('Bookmark write refused'), String(toast))
+      await page.close()
+    }
+    await holder.close()
+  }
 } catch (e) {
   console.log('ERROR', e.message)
   results.push({ name: 'script error', ok: false })

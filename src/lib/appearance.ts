@@ -4,7 +4,7 @@
 
 export type Mode = 'system' | 'light' | 'dark'
 export type Scheme = 'light' | 'dark'
-export type PaletteId = 'stackboard' | 'catppuccin' | 'gruvbox' | 'nord'
+export type PaletteId = 'stackboard' | 'catppuccin' | 'gruvbox' | 'nord' | 'black'
 export type Density = 'comfortable' | 'compact'
 export type BgKind = 'solid' | 'gradient' | 'image'
 export type GradientId = 1 | 2 | 3
@@ -40,6 +40,8 @@ export const PALETTES: readonly PaletteInfo[] = [
   { id: 'catppuccin', name: 'Catppuccin', light: 'Catppuccin Latte', dark: 'Catppuccin Mocha' },
   { id: 'gruvbox', name: 'Gruvbox', light: 'Gruvbox Light', dark: 'Gruvbox Dark' },
   { id: 'nord', name: 'Nord', dark: 'Nord' },
+  // 0.5.2: pure #000000 canvas for OLED screens, dark only.
+  { id: 'black', name: 'True black', dark: 'True black' },
 ]
 
 export const DIM_MAX = 85

@@ -12,6 +12,7 @@ interface Props {
 export function StackMoveModal({ stackId, title, currentSpaceId }: Props) {
   const close = useStackableStore((s) => s.closeModal)
   const refresh = useStackableStore((s) => s.refresh)
+  const reportError = useStackableStore((s) => s.reportError)
   const tree = useStackableStore((s) => s.tree)
   const [movingTo, setMovingTo] = useState<string | null>(null)
 
@@ -25,6 +26,8 @@ export function StackMoveModal({ stackId, title, currentSpaceId }: Props) {
       await moveStack(stackId, spaceId, target?.stacks.length ?? 0)
       await refresh()
       close()
+    } catch (err) {
+      reportError('move the stack', err)
     } finally {
       setMovingTo(null)
     }

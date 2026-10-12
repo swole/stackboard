@@ -69,6 +69,8 @@ interface StackableState {
   closeModal: () => void
   toggleSidebar: () => void
   showToast: (t: Omit<ToastState, 'id'>) => void
+  /** "Couldn't <what> (<error>)": a failed write must never look like nothing happened. */
+  reportError: (what: string, err: unknown) => void
   dismissToast: (id: number) => void
   flashItem: (id: string) => void
   revealStack: (spaceId: string, stackId: string) => void
@@ -132,6 +134,11 @@ export const useStackableStore = create<StackableState>((set, get) => ({
     }),
 
   showToast: (t) => set({ toast: { ...t, id: ++cueSeq } }),
+  reportError: (what, err) => {
+    console.error(`Couldn't ${what}`, err)
+    const detail = (err instanceof Error ? err.message : String(err ?? '')).trim().slice(0, 140)
+    get().showToast({ verb: "Couldn't", title: what, detail: detail || undefined, duration: 10000 })
+  },
   celebrate: () => set((s) => ({ wins: s.wins + 1 })),
   dismissToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : {})),
 
@@ -153,10 +160,16 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   setOnboarding: (on) => set({ onboarding: on }),
 
   removeWithUndo: async (kind, id, title, detail) => {
-    const snapshot = await snapshotNode(id)
-    if (kind === 'space') await deleteSpace(id)
-    else if (kind === 'stack') await deleteStack(id)
-    else await deleteBookmark(id)
+    let snapshot: Awaited<ReturnType<typeof snapshotNode>>
+    try {
+      snapshot = await snapshotNode(id)
+      if (kind === 'space') await deleteSpace(id)
+      else if (kind === 'stack') await deleteStack(id)
+      else await deleteBookmark(id)
+    } catch (err) {
+      get().reportError(`delete ${title}`, err)
+      return
+    }
     await get().refresh()
 
     const restore = async () => {
