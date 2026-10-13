@@ -627,6 +627,13 @@ try {
   await control.evaluate((id) => chrome.windows.remove(id), selWin.windowId).catch(() => {})
 
   // ---------- 0.5.1: tab bankruptcy (every window) ----------
+  // 0.5.3: a fresh rating state one day in, so the saved certificate is a rating milestone.
+  await control.evaluate(() => {
+    localStorage.setItem('stackable:opens', '2')
+    localStorage.setItem('stackable:firstSeen', String(Date.now() - 2 * 86400000))
+    localStorage.setItem('stackable:stashes', '0')
+    localStorage.removeItem('stackable:rating')
+  })
   const bk = await control.evaluate(async (ntpUrl) => {
     const a = await chrome.windows.create({ url: ['https://example.com/?bk=1', 'https://example.org/?bk=2'], focused: false })
     const b = await chrome.windows.create({ url: ['https://example.com/?bk=3', 'https://example.com/?bk=3', 'https://example.net/?bk=4'], focused: true })
@@ -667,7 +674,30 @@ try {
         .catch(() => null)
     : null
   check('bankruptcy opens a new tab with the certificate', !!certified && /^\d+ tabs discharged$/.test(certified.h) && certified.w === 1200, JSON.stringify(certified))
-  if (certTab) await certTab.keyboard.press('Escape')
+  // ---------- 0.5.3: rating ask at a milestone (R1) ----------
+  let milestone = null
+  if (certTab) {
+    const askedOverCert = await certTab.evaluate(() => !!document.querySelector('[data-rating-prompt]'))
+    await clickText(certTab, '[data-certificate] button', 'Copy text')
+    await sleep(300)
+    await certTab.keyboard.press('Escape')
+    await certTab.waitForSelector('[data-rating-prompt]', { timeout: 4000 }).catch(() => {})
+    milestone = await certTab.evaluate(() => {
+      const card = document.querySelector('[data-rating-prompt]')
+      if (!card) return null
+      const r = card.getBoundingClientRect()
+      return { centred: Math.abs(r.left + r.width / 2 - innerWidth / 2) < 4, stars: card.querySelectorAll('svg.lucide-star').length, text: card.textContent }
+    })
+    await certTab.screenshot({ path: path.join(SHOTS, '30-rating-milestone.png') })
+    check('the ask waits while the certificate is open', !askedOverCert)
+    check('a saved certificate brings the ask after one day at 2 tabs', !!milestone, JSON.stringify(milestone))
+    check('the ask is a centred card with no stars', !!milestone && milestone.centred && milestone.stars === 0 && milestone.text.includes('open source'), JSON.stringify(milestone))
+    await certTab.keyboard.press('Escape')
+    await sleep(200)
+    check('esc retires the milestone ask', await certTab.evaluate(() => !document.querySelector('[data-rating-prompt]') && localStorage.getItem('stackable:rating') === 'dismissed'))
+  } else {
+    check('a saved certificate brings the ask after one day at 2 tabs', false, 'no certificate tab')
+  }
 
   // ---------- 0.5.0: appearance ----------
   const rgb = (hex) => {

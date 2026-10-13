@@ -61,6 +61,8 @@ interface StackableState {
   onboarding: boolean
   /** Bumped when something goes well (import, starter pack, stash): a good moment to ask for a rating (0.4.1). */
   wins: number
+  /** Bumped at a rating milestone: the first saved certificate or the third stash (0.5.3). */
+  milestones: number
 
   refresh: () => Promise<void>
   selectSpace: (id: string | null) => void
@@ -77,6 +79,7 @@ interface StackableState {
   setOpenTabs: (index: OpenTabIndex) => void
   setOnboarding: (on: boolean) => void
   celebrate: () => void
+  reachMilestone: () => void
   removeWithUndo: (kind: DeletableKind, id: string, title: string, detail?: string) => Promise<void>
 }
 
@@ -100,6 +103,7 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   openTabs: null,
   onboarding: false,
   wins: 0,
+  milestones: 0,
 
   refresh: async () => {
     try {
@@ -140,6 +144,7 @@ export const useStackableStore = create<StackableState>((set, get) => ({
     get().showToast({ verb: "Couldn't", title: what, detail: detail || undefined, duration: 10000 })
   },
   celebrate: () => set((s) => ({ wins: s.wins + 1 })),
+  reachMilestone: () => set((s) => ({ milestones: s.milestones + 1 })),
   dismissToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : {})),
 
   flashItem: (id) => {

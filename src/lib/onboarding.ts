@@ -44,6 +44,10 @@ export async function dismissKeepHint(): Promise<void> {
 export const RATING_MIN_OPENS = 15
 export const RATING_MIN_DAYS = 3
 export const RATING_LOAD_OPENS = 25
+// 0.5.3: a real milestone (the first saved bankruptcy certificate, or the third stash) asks
+// after one day, whatever the tab count.
+export const RATING_MILESTONE_DAYS = 1
+export const RATING_MILESTONE_STASHES = 3
 
 export function linkCount(tree: StackableTree | null): number {
   return tree ? tree.spaces.reduce((n, s) => n + s.stacks.reduce((m, st) => m + st.bookmarks.length, 0), 0) : 0
@@ -60,7 +64,8 @@ export function installedAt(firstSeen: number, rootDateAdded?: number): number {
 
 /**
  * Ask once, on a board with links in it, after 3 days of use: right after something went well
- * ('win', from 15 new tabs) or on a plain new tab ('load', from 25).
+ * ('win', from 15 new tabs) or on a plain new tab ('load', from 25). A milestone ('milestone':
+ * first saved certificate or third stash) asks after one day with no tab minimum.
  */
 export function shouldAskForRating(p: {
   opens: number
@@ -68,8 +73,11 @@ export function shouldAskForRating(p: {
   now: number
   answered: boolean
   links: number
-  trigger?: 'load' | 'win'
+  trigger?: 'load' | 'win' | 'milestone'
 }): boolean {
+  if (p.trigger === 'milestone') {
+    return !p.answered && p.links > 0 && p.now - p.firstSeen >= RATING_MILESTONE_DAYS * DAY
+  }
   const minOpens = p.trigger === 'win' ? RATING_MIN_OPENS : RATING_LOAD_OPENS
   return (
     !p.answered &&

@@ -31,6 +31,8 @@ import { useOpenTabs } from './hooks/useOpenTabs'
 import { IS_EXTENSION, moveSpace, moveStack, moveBookmark } from './lib/bookmarks'
 import { takeOpenSpaceNote } from './lib/stash'
 import { plural } from './lib/importPlan'
+import { prefs } from './lib/prefs'
+import { RATING_MILESTONE_STASHES } from './lib/onboarding'
 import type { Bookmark, Space, Stack } from './lib/types'
 
 type DragItem =
@@ -138,6 +140,8 @@ export default function App() {
       if (note.bankruptcy) setCertificate(note.bankruptcy)
       store.showToast({ verb: 'Stashed', title: plural(note.saved, 'tab'), duration: 4000 })
       store.celebrate()
+      // The third stash is a rating milestone; a bankruptcy waits for its certificate to close.
+      if (prefs.bumpStashes() >= RATING_MILESTONE_STASHES && !note.bankruptcy) store.reachMilestone()
     })
   }, [loaded])
 
@@ -266,7 +270,15 @@ export default function App() {
         <UndoToast />
         <KeepItHint />
         <RatingPrompt />
-        {certificate && <Certificate bankruptcy={certificate} onClose={() => setCertificate(null)} />}
+        {certificate && (
+          <Certificate
+            bankruptcy={certificate}
+            onClose={(saved) => {
+              setCertificate(null)
+              if (saved || prefs.stashes() >= RATING_MILESTONE_STASHES) useStackableStore.getState().reachMilestone()
+            }}
+          />
+        )}
         <DragOverlay dropAnimation={dropAnimation}>
           {dragging?.type === 'bookmark' && <BookmarkGhost bookmark={dragging.bookmark} />}
           {dragging?.type === 'stack' && <StackGhost stack={dragging.stack} />}

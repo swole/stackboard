@@ -7,6 +7,7 @@ const OPENS = 'stackable:opens'
 const FIRST_SEEN = 'stackable:firstSeen'
 const RATING = 'stackable:rating'
 const KEEP_HINT_SHOWN = 'stackable:keepHintShown'
+const STASHES = 'stackable:stashes'
 
 function read(key: string): string | null {
   try {
@@ -45,6 +46,13 @@ export const prefs = {
   /** 'rated' or 'dismissed' once the one-time rating ask has been answered. */
   rating: () => read(RATING),
   setRating: (answer: 'rated' | 'dismissed') => write(RATING, answer),
+  stashes: (): number => Number(read(STASHES)) || 0,
+  /** Counts a finished stash on this device and returns the new total (rating milestone, 0.5.3). */
+  bumpStashes: (): number => {
+    const n = (Number(read(STASHES)) || 0) + 1
+    write(STASHES, String(n))
+    return n
+  },
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

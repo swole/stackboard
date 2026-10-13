@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Copy, Check, X } from 'lucide-react'
 import { certificateText, type Bankruptcy } from '../lib/stashPlan'
 
@@ -49,9 +49,12 @@ function draw(canvas: HTMLCanvasElement, b: Bankruptcy, font: string) {
   g.fillText('Stackboard', 110, H - 110)
 }
 
-export function Certificate({ bankruptcy, onClose }: { bankruptcy: Bankruptcy; onClose: () => void }) {
+export function Certificate({ bankruptcy, onClose: close }: { bankruptcy: Bankruptcy; onClose: (saved: boolean) => void }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [copied, setCopied] = useState(false)
+  // Saving or copying it is a rating milestone (0.5.3), reported when the dialog closes.
+  const saved = useRef(false)
+  const onClose = useCallback(() => close(saved.current), [close])
   const text = useMemo(() => certificateText(bankruptcy), [bankruptcy])
 
   useEffect(() => {
@@ -69,11 +72,13 @@ export function Certificate({ bankruptcy, onClose }: { bankruptcy: Bankruptcy; o
     a.href = ref.current!.toDataURL('image/png')
     a.download = 'tab-bankruptcy.png'
     a.click()
+    saved.current = true
   }
 
   const copy = async () => {
     await navigator.clipboard.writeText(text.share).catch(() => {})
     setCopied(true)
+    saved.current = true
   }
 
   return (

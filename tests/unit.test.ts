@@ -147,6 +147,12 @@ eq('rating: not before 15 tabs, even after a win', shouldAskForRating({ ...ask, 
 eq('rating: not before 3 days', shouldAskForRating({ ...ask, firstSeen: now - 2 * DAY, trigger: 'win' }), false)
 eq('rating: never twice', shouldAskForRating({ ...ask, answered: true }), false)
 eq('rating: not on an empty board', shouldAskForRating({ ...ask, links: 0 }), false)
+// 0.5.3: a milestone (saved certificate, third stash) asks after one day at any tab count
+const ms = { ...ask, opens: 1, firstSeen: now - 1 * DAY, trigger: 'milestone' as const }
+eq('rating: a milestone asks after one day', shouldAskForRating(ms), true)
+eq('rating: a milestone waits for the first day', shouldAskForRating({ ...ms, firstSeen: now - DAY / 2 }), false)
+eq('rating: a milestone never asks twice', shouldAskForRating({ ...ms, answered: true }), false)
+eq('rating: a milestone needs links on the board', shouldAskForRating({ ...ms, links: 0 }), false)
 eq('install date: an older Stackboard folder counts', installedAt(now, now - 90 * DAY), now - 90 * DAY)
 eq('install date: a newer folder never moves it later', installedAt(now - 5 * DAY, now), now - 5 * DAY)
 eq('install date: no folder date keeps the first tab', installedAt(now, undefined), now)
