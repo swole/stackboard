@@ -281,13 +281,23 @@ const black = blocks.find((b) => b.palette === 'black' && b.scheme === 'dark')
 eq('palettes: True black has a dark block only', blocks.filter((b) => b.palette === 'black').map((b) => b.scheme), ['dark'])
 eq('palettes: True black canvas and panel are #000000', [black?.tokens.get('canvas'), black?.tokens.get('panel')], ['#000000', '#000000'])
 eq('palettes: True black gradients end on pure black', [1, 2, 3].map((g) => black?.tokens.get(`gradient-${g}`)?.trim().endsWith('#000000')), [true, true, true])
+// 0.5.4 (F2): Tokyo Night (Night + Day), Rosé Pine (main + Dawn), Dracula (dark only, like Nord).
+const schemesOf = (id: string) => blocks.filter((b) => b.palette === id).map((b) => b.scheme).sort()
+eq('palettes: Tokyo Night, Rosé Pine and Dracula are listed', ['tokyonight', 'rosepine', 'dracula'].map((id) => PALETTES.some((p) => p.id === id)), [true, true, true])
+eq('palettes: Tokyo Night and Rosé Pine have light and dark blocks, Dracula dark only', [schemesOf('tokyonight'), schemesOf('rosepine'), schemesOf('dracula')], [['dark', 'light'], ['dark', 'light'], ['dark']])
+eq('palettes: new variants use their official base colours', [['tokyonight', 'dark'], ['tokyonight', 'light'], ['rosepine', 'dark'], ['rosepine', 'light'], ['dracula', 'dark']].map(([p, s]) => blocks.find((b) => b.palette === p && b.scheme === s)?.tokens.get('canvas')), ['#1a1b26', '#e1e2e7', '#191724', '#faf4ed', '#282a36'])
+eq('scheme: variant names for the 0.5.4 palettes', [variantName('tokyonight', 'dark'), variantName('tokyonight', 'light'), variantName('rosepine', 'dark'), variantName('rosepine', 'light')], ['Tokyo Night', 'Tokyo Night Day', 'Rosé Pine', 'Rosé Pine Dawn'])
+eq('scheme: Dracula is dark only, like Nord', [resolveScheme('light', 'dracula', false), resolveScheme('system', 'dracula', false), onlyScheme('dracula'), variantName('dracula', 'light')], ['dark', 'dark', 'dark', 'Dracula'])
+eq('scheme: Tokyo Night and Rosé Pine follow the mode', [resolveScheme('light', 'tokyonight', true), resolveScheme('system', 'rosepine', false), onlyScheme('tokyonight'), onlyScheme('rosepine')], ['light', 'light', null, null])
+eq('mirror: Dracula boots dark, Rosé Pine boots either way', [bootMirror(parseAppearance({ palette: 'dracula' })).only, bootMirror(parseAppearance({ palette: 'rosepine' })).only], ['dark', null])
+eq('appearance: the 0.5.4 palettes survive storage', ['tokyonight', 'rosepine', 'dracula'].map((id) => parseAppearance({ palette: id }).palette), ['tokyonight', 'rosepine', 'dracula'])
 
 // Appearance settings: whatever storage holds comes back complete and in range.
 eq('appearance: nothing stored gives the defaults', parseAppearance(undefined), DEFAULT_APPEARANCE)
 eq('appearance: junk gives the defaults', parseAppearance('dark please'), DEFAULT_APPEARANCE)
 eq(
   'appearance: unknown palette, mode, density and kind fall back',
-  parseAppearance({ palette: 'dracula', mode: 'dim', density: 'cosy', bg: { kind: 'video' } }),
+  parseAppearance({ palette: 'solarized', mode: 'dim', density: 'cosy', bg: { kind: 'video' } }),
   DEFAULT_APPEARANCE,
 )
 eq(

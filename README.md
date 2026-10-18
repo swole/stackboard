@@ -8,7 +8,7 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 
 ## What it does
 
-- **Themes:** Catppuccin (Latte and Mocha), Gruvbox (light and dark), Nord, and the cream default with a dark version, all in their official colors, plus a true black for OLED screens. Light, dark or follow your system, plus gradients or your own wallpaper with dim and blur. Compact density for big boards, and keys 1 to 9 switch spaces.
+- **Themes:** Catppuccin (Latte and Mocha), Gruvbox (light and dark), Nord, Tokyo Night (Night and Day), Rosé Pine (main and Dawn), Dracula, and the cream default with a dark version, all in their official colors, plus a true black for OLED screens. Light, dark or follow your system, plus gradients or your own wallpaper with dim and blur. Compact density for big boards, and keys 1 to 9 switch spaces.
 - **First run:** copies your bookmarks bar and its folders into a board, one stack per folder. Your originals stay where they are. No bookmarks yet? Pick a starter pack.
 - **Drag everything:** spaces, stacks and links, within and across stacks.
 - **Undo every delete** with the toast or Ctrl+Z. Chrome has no trash for bookmarks, so this matters.

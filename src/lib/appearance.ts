@@ -4,7 +4,7 @@
 
 export type Mode = 'system' | 'light' | 'dark'
 export type Scheme = 'light' | 'dark'
-export type PaletteId = 'stackboard' | 'catppuccin' | 'gruvbox' | 'nord' | 'black'
+export type PaletteId = 'stackboard' | 'catppuccin' | 'gruvbox' | 'nord' | 'black' | 'tokyonight' | 'rosepine' | 'dracula'
 export type Density = 'comfortable' | 'compact'
 export type BgKind = 'solid' | 'gradient' | 'image'
 export type GradientId = 1 | 2 | 3
@@ -42,6 +42,10 @@ export const PALETTES: readonly PaletteInfo[] = [
   { id: 'nord', name: 'Nord', dark: 'Nord' },
   // 0.5.2: pure #000000 canvas for OLED screens, dark only.
   { id: 'black', name: 'True black', dark: 'True black' },
+  // 0.5.4 (backlog F2): Tokyo Night (Night/Day), Rosé Pine (main/Dawn), Dracula (dark only).
+  { id: 'tokyonight', name: 'Tokyo Night', light: 'Tokyo Night Day', dark: 'Tokyo Night' },
+  { id: 'rosepine', name: 'Rosé Pine', light: 'Rosé Pine Dawn', dark: 'Rosé Pine' },
+  { id: 'dracula', name: 'Dracula', dark: 'Dracula' },
 ]
 
 export const DIM_MAX = 85

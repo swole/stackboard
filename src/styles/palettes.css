@@ -14,7 +14,8 @@
  * WCAG AA on the surfaces it sits on (4.5:1; 3:1 for icons, focus rings and monogram letters).
  * Write colours as #rrggbb or #rrggbbaa (no names, no rgb()) so the parser can read them.
  *
- * Sources: catppuccin.com/palette, github.com/morhetz/gruvbox, nordtheme.com/docs/colors-and-palettes.
+ * Sources: catppuccin.com/palette, github.com/morhetz/gruvbox, nordtheme.com/docs/colors-and-palettes,
+ * github.com/folke/tokyonight.nvim, rosepinetheme.com/palette, draculatheme.com/contribute (0.5.4).
  */
 
 /* Stackboard. The original cream and peach look. */
@@ -589,3 +590,360 @@
     #000000;
 }
 
+/* 0.5.4: Tokyo Night, Rose Pine and Dracula. Mixes that move a colour off the official palette
+ * are there to clear the AA checks in tests/unit.test.ts. */
+
+/* Tokyo Night. Tokyo Night (Night style), official palette from folke/tokyonight.nvim. */
+[data-palette="tokyonight"][data-scheme="dark"] {
+  --sb-canvas: #1a1b26; /* bg */
+  --sb-panel: #16161e; /* bg_dark */
+  --sb-card: #24283b; /* bg_storm */
+  --sb-raised: #24283b; /* bg_storm */
+  --sb-well: #16161e73; /* bg_dark at 45% */
+  --sb-hover: #292e42; /* bg_highlight */
+  --sb-selected: #3b4261; /* fg_gutter */
+  --sb-sunken: #16161e; /* bg_dark */
+  --sb-strong: #c0caf5; /* fg */
+  --sb-fg: #c0caf5; /* fg */
+  --sb-soft: #a9b1d6; /* fg_dark */
+  --sb-muted: #99a0c6; /* fg_dark 70% + dark5 */
+  --sb-faint: #737aa2; /* dark5 */
+  --sb-ghost: #545c7e; /* dark3 */
+  --sb-line: #3b4261; /* fg_gutter */
+  --sb-line-strong: #414868; /* terminal_black */
+  --sb-accent: #7aa2f7; /* blue */
+  --sb-accent-hover: #8faef6; /* blue 70% + fg */
+  --sb-on-accent: #16161e; /* bg_dark */
+  --sb-accent-soft: #323c59; /* blue 16% + bg_storm */
+  --sb-accent-line: #3d59a1; /* blue0 */
+  --sb-accent-text: #7aa2f7; /* blue */
+  --sb-accent-mark: #ff9e64; /* orange */
+  --sb-focus: #7aa2f7; /* blue */
+  --sb-danger: #f7768e; /* red */
+  --sb-danger-fill: #f7768e; /* red */
+  --sb-danger-fill-hover: #ec87a3; /* red 80% + fg */
+  --sb-on-danger: #16161e; /* bg_dark */
+  --sb-danger-soft: #393043; /* red 10% + bg_storm */
+  --sb-inverse: #3b4261; /* fg_gutter */
+  --sb-on-inverse: #c0caf5; /* fg */
+  --sb-inverse-strong: #c0caf5; /* fg */
+  --sb-inverse-muted: #b4bee6; /* fg_dark 50% + fg */
+  --sb-inverse-accent: #7dcfff; /* cyan */
+  --sb-scrim: #16161ea6; /* bg_dark at 65% */
+  --sb-shade: #000000;
+  --sb-brand-from: #7aa2f7; /* blue */
+  --sb-brand-to: #bb9af7; /* magenta */
+  --sb-brand-ink: #16161e; /* bg_dark */
+  --sb-tint-0-bg: #544244; /* orange 22% + storm */
+  --sb-tint-0-fg: #ff9e64; /* orange */
+  --sb-tint-1-bg: #4d4645; /* yellow 22% + storm */
+  --sb-tint-1-fg: #e0af68; /* yellow */
+  --sb-tint-2-bg: #3f4d45; /* green 22% + storm */
+  --sb-tint-2-fg: #9ece6a; /* green */
+  --sb-tint-3-bg: #224950; /* teal 22% + storm */
+  --sb-tint-3-fg: #1abc9c; /* teal */
+  --sb-tint-4-bg: #374364; /* blue 22% + storm */
+  --sb-tint-4-fg: #7aa2f7; /* blue */
+  --sb-tint-5-bg: #454164; /* magenta 22% + storm */
+  --sb-tint-5-fg: #bb9af7; /* magenta */
+  --sb-tint-6-bg: #52394d; /* red 22% + storm */
+  --sb-tint-6-fg: #f7768e; /* red */
+  --sb-tint-7-bg: #353a52; /* dark5 22% + storm */
+  --sb-tint-7-fg: #a9b1d6; /* fg_dark */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #293147 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #342f47 0%, transparent 70%),
+    #1a1b26;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #2a3849 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #283a40 0%, transparent 68%),
+    #1a1b26;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #342f47 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #3f3030 0%, transparent 70%),
+    #1a1b26;
+}
+
+/* Tokyo Night Day. Tokyo Night (Day style), official palette from folke/tokyonight.nvim. */
+[data-palette="tokyonight"][data-scheme="light"] {
+  --sb-canvas: #e1e2e7; /* bg */
+  --sb-panel: #d0d5e3; /* bg_dark */
+  --sb-card: #f2f2f4; /* bg 45% + white */
+  --sb-raised: #f2f2f4; /* bg 45% + white */
+  --sb-well: #d0d5e3b3; /* bg_dark at 70% */
+  --sb-hover: #e1e2e7; /* bg */
+  --sb-selected: #c4c8da; /* bg_highlight */
+  --sb-sunken: #e1e2e7; /* bg */
+  --sb-strong: #2a417a; /* fg 55% + night */
+  --sb-fg: #2e4b91; /* fg 70% + night */
+  --sb-soft: #454f79; /* fg_dark 60% + night */
+  --sb-muted: #46517c; /* fg_dark 62% + night */
+  --sb-faint: #68709a; /* dark5 */
+  --sb-ghost: #8990b3; /* dark3 */
+  --sb-line: #c4c8da; /* bg_highlight */
+  --sb-line-strong: #a8aecb; /* fg_gutter */
+  --sb-accent: #2a69c2; /* blue 80% + night */
+  --sb-accent-hover: #2860ae; /* blue 70% + night */
+  --sb-on-accent: #f2f2f4; /* bg 45% + white */
+  --sb-accent-soft: #dee6f3; /* blue 10% + card */
+  --sb-accent-line: #90b5e8; /* blue 45% + bg */
+  --sb-accent-text: #2862b2; /* blue 72% + night */
+  --sb-accent-mark: #b15c00; /* orange */
+  --sb-focus: #2a69c2; /* blue 80% + night */
+  --sb-danger: #a43b3d; /* red1 80% + night */
+  --sb-danger-fill: #a43b3d; /* red1 80% + night */
+  --sb-danger-fill-hover: #92373a; /* red1 70% + night */
+  --sb-on-danger: #f2f2f4; /* bg 45% + white */
+  --sb-danger-soft: #f2e2e9; /* red 8% + card */
+  --sb-inverse: #263763; /* fg 40% + night */
+  --sb-on-inverse: #e1e2e7; /* bg */
+  --sb-inverse-strong: #f2f2f4; /* bg 45% + white */
+  --sb-inverse-muted: #c4c8da; /* bg_highlight */
+  --sb-inverse-accent: #92a6d5; /* blue7 */
+  --sb-scrim: #1a1b264d; /* night bg at 30% */
+  --sb-shade: #263763; /* fg 40% + night */
+  --sb-brand-from: #2e7de9; /* blue */
+  --sb-brand-to: #9854f1; /* magenta */
+  --sb-brand-ink: #f2f2f4; /* bg 45% + white */
+  --sb-tint-0-bg: #e6d7c8; /* orange 18% + card */
+  --sb-tint-0-fg: #b15c00; /* orange */
+  --sb-tint-1-bg: #e0dad3; /* yellow 18% + card */
+  --sb-tint-1-fg: #8c6c3e; /* yellow */
+  --sb-tint-2-bg: #d6dcd2; /* green 18% + card */
+  --sb-tint-2-fg: #587539; /* green */
+  --sb-tint-3-bg: #cae0dd; /* teal 18% + card */
+  --sb-tint-3-fg: #118c74; /* teal */
+  --sb-tint-4-bg: #cfddf2; /* blue 18% + card */
+  --sb-tint-4-fg: #2a69c2; /* blue 80% + night */
+  --sb-tint-5-bg: #dcd3ea; /* purple 18% + card */
+  --sb-tint-5-fg: #7847bd; /* purple */
+  --sb-tint-6-bg: #ead3d4; /* red1 18% + card */
+  --sb-tint-6-fg: #c64343; /* red1 */
+  --sb-tint-7-bg: #d9dbe4; /* dark5 18% + card */
+  --sb-tint-7-fg: #68709a; /* dark5 */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #cdd7e7 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #d9d2e8 0%, transparent 70%),
+    #e1e2e7;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #c8d6de 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #cad9da 0%, transparent 68%),
+    #e1e2e7;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #d9d2e8 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #dcd3ce 0%, transparent 70%),
+    #e1e2e7;
+}
+
+/* Rosé Pine. Rosé Pine main variant, official palette (rosepinetheme.com/palette). */
+[data-palette="rosepine"][data-scheme="dark"] {
+  --sb-canvas: #191724; /* base */
+  --sb-panel: #1f1d2e; /* surface */
+  --sb-card: #26233a; /* overlay */
+  --sb-raised: #26233a; /* overlay */
+  --sb-well: #19172466; /* base at 40% */
+  --sb-hover: #333046; /* hl_med 50% + overlay */
+  --sb-selected: #403d52; /* hl_med */
+  --sb-sunken: #191724; /* base */
+  --sb-strong: #e0def4; /* text */
+  --sb-fg: #e0def4; /* text */
+  --sb-soft: #b0adc8; /* subtle 60% + text */
+  --sb-muted: #9c98b5; /* subtle 85% + text */
+  --sb-faint: #7c7894; /* muted 60% + subtle */
+  --sb-ghost: #6e6a86; /* muted */
+  --sb-line: #403d52; /* hl_med */
+  --sb-line-strong: #524f67; /* hl_high */
+  --sb-accent: #c4a7e7; /* iris */
+  --sb-accent-hover: #ccb8eb; /* iris 70% + text */
+  --sb-on-accent: #191724; /* base */
+  --sb-accent-soft: #3f3856; /* iris 16% + overlay */
+  --sb-accent-line: #756590; /* iris 50% + overlay */
+  --sb-accent-text: #c4a7e7; /* iris */
+  --sb-accent-mark: #ebbcba; /* rose */
+  --sb-focus: #c4a7e7; /* iris */
+  --sb-danger: #eb6f92; /* love */
+  --sb-danger-fill: #eb6f92; /* love */
+  --sb-danger-fill-hover: #e985a6; /* love 80% + text */
+  --sb-on-danger: #191724; /* base */
+  --sb-danger-soft: #362941; /* love 8% + overlay */
+  --sb-inverse: #403d52; /* hl_med */
+  --sb-on-inverse: #e0def4; /* text */
+  --sb-inverse-strong: #e0def4; /* text */
+  --sb-inverse-muted: #b8b5cf; /* subtle 50% + text */
+  --sb-inverse-accent: #ebbcba; /* rose */
+  --sb-scrim: #191724a6; /* base at 65% */
+  --sb-shade: #000000;
+  --sb-brand-from: #ebbcba; /* rose */
+  --sb-brand-to: #c4a7e7; /* iris */
+  --sb-brand-ink: #191724; /* base */
+  --sb-tint-0-bg: #514556; /* rose 22% + overlay */
+  --sb-tint-0-fg: #ebbcba; /* rose */
+  --sb-tint-1-bg: #544647; /* gold 22% + overlay */
+  --sb-tint-1-fg: #f6c177; /* gold */
+  --sb-tint-2-bg: #40495d; /* foam 22% + overlay */
+  --sb-tint-2-fg: #9ccfd8; /* foam */
+  --sb-tint-3-bg: #28354d; /* pine 22% + overlay */
+  --sb-tint-3-fg: #71abbb; /* pine 40% + foam */
+  --sb-tint-4-bg: #494060; /* iris 22% + overlay */
+  --sb-tint-4-fg: #c4a7e7; /* iris */
+  --sb-tint-5-bg: #51344d; /* love 22% + overlay */
+  --sb-tint-5-fg: #eb6f92; /* love */
+  --sb-tint-6-bg: #3d3a53; /* subtle 22% + overlay */
+  --sb-tint-6-fg: #908caa; /* subtle */
+  --sb-tint-7-bg: #36334b; /* muted 22% + overlay */
+  --sb-tint-7-fg: #908caa; /* subtle */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #2c2739 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #302934 0%, transparent 70%),
+    #191724;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #1c2130 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #272b38 0%, transparent 68%),
+    #191724;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #302130 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #312a2d 0%, transparent 70%),
+    #191724;
+}
+
+/* Rosé Pine Dawn. Rosé Pine Dawn variant, official palette (rosepinetheme.com/palette). */
+[data-palette="rosepine"][data-scheme="light"] {
+  --sb-canvas: #faf4ed; /* base */
+  --sb-panel: #f2e9e1; /* overlay */
+  --sb-card: #fffaf3; /* surface */
+  --sb-raised: #fffaf3; /* surface */
+  --sb-well: #f2e9e1b3; /* overlay at 70% */
+  --sb-hover: #f4ede8; /* hl_low */
+  --sb-selected: #dfdad9; /* hl_med */
+  --sb-sunken: #faf4ed; /* base */
+  --sb-strong: #575279; /* text */
+  --sb-fg: #575279; /* text */
+  --sb-soft: #656083; /* subtle 40% + text */
+  --sb-muted: #656184; /* subtle 42% + text */
+  --sb-faint: #827e98; /* muted 30% + subtle */
+  --sb-ghost: #9893a5; /* muted */
+  --sb-line: #dfdad9; /* hl_med */
+  --sb-line-strong: #cecacd; /* hl_high */
+  --sb-accent: #746691; /* iris 50% + text */
+  --sb-accent-hover: #6b608a; /* iris 35% + text */
+  --sb-on-accent: #fffaf3; /* surface */
+  --sb-accent-soft: #f2ebea; /* iris 12% + surface */
+  --sb-accent-line: #c2b4ca; /* iris 55% + surface */
+  --sb-accent-text: #746691; /* iris 50% + text */
+  --sb-accent-mark: #d7827e; /* rose */
+  --sb-focus: #746691; /* iris 50% + text */
+  --sb-danger: #935d7a; /* love 65% + text */
+  --sb-danger-fill: #935d7a; /* love 65% + text */
+  --sb-danger-fill-hover: #865a7a; /* love 50% + text */
+  --sb-on-danger: #fffaf3; /* surface */
+  --sb-danger-soft: #f9eee9; /* love 8% + surface */
+  --sb-inverse: #575279; /* text */
+  --sb-on-inverse: #faf4ed; /* base */
+  --sb-inverse-strong: #fffaf3; /* surface */
+  --sb-inverse-muted: #dfdad9; /* hl_med */
+  --sb-inverse-accent: #efcac4; /* rose 40% + surface */
+  --sb-scrim: #5752794d; /* text at 30% */
+  --sb-shade: #575279; /* text */
+  --sb-brand-from: #d7827e; /* rose */
+  --sb-brand-to: #907aa9; /* iris */
+  --sb-brand-ink: #fffaf3; /* surface */
+  --sb-tint-0-bg: #f7e2dc; /* rose 20% + surface */
+  --sb-tint-0-fg: #9d6c7c; /* rose 55% + text */
+  --sb-tint-1-bg: #fbe7cd; /* gold 20% + surface */
+  --sb-tint-1-fg: #99745a; /* gold 45% + text */
+  --sb-tint-2-bg: #dde6e2; /* foam 20% + surface */
+  --sb-tint-2-fg: #567a90; /* foam 60% + text */
+  --sb-tint-3-bg: #d4dddd; /* pine 20% + surface */
+  --sb-tint-3-fg: #286983; /* pine */
+  --sb-tint-4-bg: #e9e0e4; /* iris 20% + surface */
+  --sb-tint-4-fg: #7f6e9b; /* iris 70% + text */
+  --sb-tint-5-bg: #f0dcdb; /* love 20% + surface */
+  --sb-tint-5-fg: #b4637a; /* love */
+  --sb-tint-6-bg: #e4dfe0; /* subtle 20% + surface */
+  --sb-tint-6-fg: #797593; /* subtle */
+  --sb-tint-7-bg: #eae5e3; /* muted 20% + surface */
+  --sb-tint-7-fg: #797593; /* subtle */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #ede5e5 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #f6e6e0 0%, transparent 70%),
+    #faf4ed;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #e6e8e4 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #e1e3e0 0%, transparent 68%),
+    #faf4ed;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #f8ead7 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #f2e3df 0%, transparent 70%),
+    #faf4ed;
+}
+
+/* Dracula. Dracula, official palette (draculatheme.com/contribute), dark only like Nord. */
+[data-palette="dracula"][data-scheme="dark"] {
+  --sb-canvas: #282a36; /* bg */
+  --sb-panel: #21222c; /* bg_dark */
+  --sb-card: #343746; /* bg_light */
+  --sb-raised: #343746; /* bg_light */
+  --sb-well: #191a2173; /* bg_darker at 45% */
+  --sb-hover: #424450; /* bg_lighter */
+  --sb-selected: #44475a; /* current */
+  --sb-sunken: #21222c; /* bg_dark */
+  --sb-strong: #f8f8f2; /* fg */
+  --sb-fg: #f8f8f2; /* fg */
+  --sb-soft: #d2d6de; /* fg 75% + comment */
+  --sb-muted: #bcc2d3; /* fg 60% + comment */
+  --sb-faint: #8894b8; /* comment 75% + fg */
+  --sb-ghost: #6272a4; /* comment */
+  --sb-line: #44475a; /* current */
+  --sb-line-strong: #535c7f; /* comment 50% + current */
+  --sb-accent: #bd93f9; /* purple */
+  --sb-accent-hover: #cfb1f7; /* purple 70% + fg */
+  --sb-on-accent: #282a36; /* bg */
+  --sb-accent-soft: #4a4663; /* purple 16% + bg_light */
+  --sb-accent-line: #7865a0; /* purple 50% + bg_light */
+  --sb-accent-text: #bd93f9; /* purple */
+  --sb-accent-mark: #ff79c6; /* pink */
+  --sb-focus: #bd93f9; /* purple */
+  --sb-danger: #fd8e8c; /* red 65% + fg */
+  --sb-danger-fill: #ff5555; /* red */
+  --sb-danger-fill-hover: #fe7674; /* red 80% + fg */
+  --sb-on-danger: #191a21; /* bg_darker */
+  --sb-danger-soft: #483a48; /* red 10% + bg_light */
+  --sb-inverse: #44475a; /* current */
+  --sb-on-inverse: #f8f8f2; /* fg */
+  --sb-inverse-strong: #f8f8f2; /* fg */
+  --sb-inverse-muted: #d2d6de; /* fg 75% + comment */
+  --sb-inverse-accent: #8be9fd; /* cyan */
+  --sb-scrim: #191a21a6; /* bg_darker at 65% */
+  --sb-shade: #000000;
+  --sb-brand-from: #ff79c6; /* pink */
+  --sb-brand-to: #bd93f9; /* purple */
+  --sb-brand-ink: #282a36; /* bg */
+  --sb-tint-0-bg: #61534e; /* orange 22% + bg_light */
+  --sb-tint-0-fg: #ffb86c; /* orange */
+  --sb-tint-1-bg: #5e6255; /* yellow 22% + bg_light */
+  --sb-tint-1-fg: #f1fa8c; /* yellow */
+  --sb-tint-2-bg: #3a6252; /* green 22% + bg_light */
+  --sb-tint-2-fg: #50fa7b; /* green */
+  --sb-tint-3-bg: #475e6e; /* cyan 22% + bg_light */
+  --sb-tint-3-fg: #8be9fd; /* cyan */
+  --sb-tint-4-bg: #524b6d; /* purple 22% + bg_light */
+  --sb-tint-4-fg: #bd93f9; /* purple */
+  --sb-tint-5-bg: #614662; /* pink 22% + bg_light */
+  --sb-tint-5-fg: #ff79c6; /* pink */
+  --sb-tint-6-bg: #613e49; /* red 22% + bg_light */
+  --sb-tint-6-fg: #fd7e7c; /* red 75% + fg */
+  --sb-tint-7-bg: #3e445b; /* comment 22% + bg_light */
+  --sb-tint-7-fg: #bcc2d3; /* comment 40% + fg */
+  --sb-gradient-1:
+    radial-gradient(95% 80% at 0% 0%, #403b55 0%, transparent 70%),
+    radial-gradient(85% 75% at 100% 100%, #4a374d 0%, transparent 70%),
+    #282a36;
+  --sb-gradient-2:
+    radial-gradient(130% 65% at 50% 0%, #384956 0%, transparent 72%),
+    radial-gradient(80% 70% at 0% 100%, #2e4b41 0%, transparent 68%),
+    #282a36;
+  --sb-gradient-3:
+    radial-gradient(110% 95% at 100% 0%, #4a374d 0%, transparent 74%),
+    radial-gradient(70% 60% at 15% 100%, #4a413f 0%, transparent 70%),
+    #282a36;
+}
