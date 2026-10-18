@@ -27,6 +27,14 @@ Coming from another tool? See [Stackboard as a OneTab alternative](https://getst
 
 No account, no server, no analytics. A few preferences (last space opened, your theme, whether you've answered the one-time rating ask) stay in local storage on your device, and a wallpaper you pick stays in the browser's local database on that device. [Privacy policy](https://stackboard.vercel.app/privacy)
 
+## Free bookmark tools
+
+Moving tabs out of another app, or cleaning up the bookmarks you already have? These run in your browser at [getstackboard.com/tools](https://getstackboard.com/tools), and your files never leave your computer:
+
+- [OneTab export to bookmarks](https://getstackboard.com/tools/onetab-to-bookmarks): paste OneTab's export and get a bookmarks file, a CSV or a Stackboard backup.
+- [Bookmarks to CSV or Excel](https://getstackboard.com/tools/bookmarks-to-csv): folder, title, URL and date added for every bookmark.
+- [Duplicate bookmark finder](https://getstackboard.com/tools/duplicate-bookmark-finder): find pages you saved twice and download a clean file.
+
 ## Permissions
 
 | Permission | Why |
