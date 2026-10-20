@@ -1,4 +1,5 @@
 import { declareBankruptcy, stashWindow } from './lib/stash'
+import { uninstallUrl } from './lib/uninstall'
 
 // Service worker (0.4.0).
 // 1. On a fresh install, open a new tab so people land on Stackboard straight away: the welcome
@@ -9,6 +10,10 @@ import { declareBankruptcy, stashWindow } from './lib/stash'
 
 // Keep in sync with FRESH_KEY in src/lib/onboarding.ts.
 const FRESH_KEY = 'stackboardFresh'
+
+// 3. (0.5.5) If the extension is removed, Chrome opens getstackboard.com/bye with our version, so
+//    people learn their bookmarks are safe and can say why they left. Set on every worker start.
+chrome.runtime.setUninstallURL(uninstallUrl(chrome.runtime.getManifest().version), () => void chrome.runtime.lastError)
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason !== chrome.runtime.OnInstalledReason.INSTALL) return

@@ -22,6 +22,7 @@ import {
   variantName,
 } from '../src/lib/appearance'
 import { spaceIndexForKey } from '../src/lib/shortcuts'
+import { UNINSTALL_PAGE, uninstallUrl } from '../src/lib/uninstall'
 import { glyphOf } from '../src/lib/favicon'
 import palettesCss from '../src/styles/palettes.css'
 import { contrastRatio, gradientStops, mix, over, readPalettes } from './contrast'
@@ -356,6 +357,11 @@ for (const [loc, m] of Object.entries(LOCALES)) {
   eq(`locale ${loc}: summary fits 132`, [...m.extDescription.message].length <= 132, true)
 }
 eq('locale en: the English title is unchanged', msgEn.extName.message, 'Stackboard: Bookmark Manager & New Tab Spaces')
+
+// Uninstall page (0.5.5): our own domain, the version in the query, under Chrome's 1023-character cap.
+eq('uninstall: url carries the version', uninstallUrl('0.5.5'), 'https://getstackboard.com/bye?v=0.5.5')
+eq('uninstall: page is on getstackboard.com over https', UNINSTALL_PAGE.startsWith('https://getstackboard.com/'), true)
+eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x').includes('beta%26x'), uninstallUrl('9'.repeat(40)).length < 1023], [true, true])
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)
