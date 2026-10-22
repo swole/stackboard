@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: bokmärkeshanterare och ny flik",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Din nya flik som en tavla med bokmärken: snabbval, ytor och sök, sparat som Chrome-bokmärken. Synkas, inget konto.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

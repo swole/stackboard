@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard：書籤管理員與新分頁",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "把新分頁變成書籤看板：快速撥號、空間和搜尋，全部儲存為 Chrome 書籤。自動同步，離線可用，無需帳號。",
+    "description": "Store summary, 132 characters at most"
+  }
+}

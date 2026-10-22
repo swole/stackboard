@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: менеджер закладок і нова вкладка",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Нова вкладка як дошка закладок: експрес-панель, простори та пошук, усе в закладках Chrome. Синхронізація, без акаунта.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

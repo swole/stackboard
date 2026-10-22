@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: menedżer zakładek i nowa karta",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Nowa karta jako tablica zakładek: szybkie wybieranie, przestrzenie i wyszukiwanie, w zakładkach Chrome. Synchronizacja, bez konta.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

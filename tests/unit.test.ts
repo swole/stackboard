@@ -37,6 +37,16 @@ import msgKo from '../public/_locales/ko/messages.json'
 import msgZhCN from '../public/_locales/zh_CN/messages.json'
 import msgId from '../public/_locales/id/messages.json'
 import msgTr from '../public/_locales/tr/messages.json'
+import msgRu from '../public/_locales/ru/messages.json'
+import msgUk from '../public/_locales/uk/messages.json'
+import msgPl from '../public/_locales/pl/messages.json'
+import msgNl from '../public/_locales/nl/messages.json'
+import msgCs from '../public/_locales/cs/messages.json'
+import msgSv from '../public/_locales/sv/messages.json'
+import msgRo from '../public/_locales/ro/messages.json'
+import msgVi from '../public/_locales/vi/messages.json'
+import msgZhTW from '../public/_locales/zh_TW/messages.json'
+import msgTh from '../public/_locales/th/messages.json'
 
 let fails = 0
 function eq(label: string, got: unknown, want: unknown) {
@@ -349,6 +359,7 @@ eq('monogram: the tint follows the host', [monogram('A', 'https://x.io/1').tint 
 // and the name at 75; the brand stays first and the short name is never translated.
 const LOCALES: Record<string, Record<string, { message: string }>> = {
   en: msgEn, es: msgEs, pt_BR: msgPtBR, de: msgDe, fr: msgFr, it: msgIt, ja: msgJa, ko: msgKo, zh_CN: msgZhCN, id: msgId, tr: msgTr,
+  ru: msgRu, uk: msgUk, pl: msgPl, nl: msgNl, cs: msgCs, sv: msgSv, ro: msgRo, vi: msgVi, zh_TW: msgZhTW, th: msgTh, // 0.5.6
 }
 for (const [loc, m] of Object.entries(LOCALES)) {
   eq(`locale ${loc}: has every message`, ['extName', 'extShortName', 'extDescription'].map((k) => typeof m[k]?.message === 'string' && m[k].message.length > 0), [true, true, true])
@@ -356,7 +367,7 @@ for (const [loc, m] of Object.entries(LOCALES)) {
   eq(`locale ${loc}: short name stays Stackboard`, m.extShortName.message, 'Stackboard')
   eq(`locale ${loc}: summary fits 132`, [...m.extDescription.message].length <= 132, true)
 }
-eq('locale en: the English title is unchanged', msgEn.extName.message, 'Stackboard: Bookmark Manager & New Tab Spaces')
+eq('locale en: the English title is the store-search test title (S2, 0.5.6)', msgEn.extName.message, 'Stackboard: New Tab Bookmarks & Visual Bookmark Manager')
 
 // Uninstall page (0.5.5): our own domain, the version in the query, under Chrome's 1023-character cap.
 eq('uninstall: url carries the version', uninstallUrl('0.5.5'), 'https://getstackboard.com/bye?v=0.5.5')

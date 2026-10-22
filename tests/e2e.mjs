@@ -905,9 +905,12 @@ try {
   check(
     'store name and summary come from _locales (en default)',
     shipped.default_locale === 'en' && shipped.name === '__MSG_extName__' && fs.existsSync(enMsgs) &&
-      JSON.parse(fs.readFileSync(enMsgs, 'utf8')).extName.message === 'Stackboard: Bookmark Manager & New Tab Spaces',
+      JSON.parse(fs.readFileSync(enMsgs, 'utf8')).extName.message === 'Stackboard: New Tab Bookmarks & Visual Bookmark Manager',
     `${shipped.default_locale} ${shipped.name}`,
   )
+  // 0.5.6: ten more store languages (backlog S4); each one is its own store-search shelf
+  const shippedLocales = fs.readdirSync(path.join(EXT, '_locales'))
+  check('21 store languages ship', shippedLocales.length === 21 && ['ru', 'zh_TW', 'th'].every((l) => shippedLocales.includes(l)), shippedLocales.join(' '))
 
   // ---------- 0.5.2: writes survive a stuck root lock and say when they fail ----------
   // A Brave user (r/startpages, 2026-10-11) had a frozen Stackboard tab holding 'stackboard-root':

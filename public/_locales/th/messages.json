@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: ตัวจัดการบุ๊กมาร์กและแท็บใหม่",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "เปลี่ยนแท็บใหม่ให้เป็นบอร์ดบุ๊กมาร์ก: สปีดไดอัล พื้นที่ และการค้นหา บันทึกเป็นบุ๊กมาร์ก Chrome ซิงค์ได้ ไม่ต้องมีบัญชี",
+    "description": "Store summary, 132 characters at most"
+  }
+}

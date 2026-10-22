@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: správce záložek a nová karta",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Nová karta jako nástěnka záložek: rychlá volba, prostory a vyhledávání, uložené jako záložky Chrome. Synchronizace, bez účtu.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

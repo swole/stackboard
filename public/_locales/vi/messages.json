@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: Trình quản lý dấu trang và thẻ mới",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Biến thẻ mới thành bảng dấu trang: quay số nhanh, không gian và tìm kiếm, lưu thành dấu trang Chrome. Đồng bộ, không cần tài khoản.",
+    "description": "Store summary, 132 characters at most"
+  }
+}

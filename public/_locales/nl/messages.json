@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Stackboard: bladwijzerbeheer en nieuw tabblad",
+    "description": "Store title and extension name"
+  },
+  "extShortName": {
+    "message": "Stackboard",
+    "description": "Short name, never translated"
+  },
+  "extDescription": {
+    "message": "Je nieuwe tabblad als bord met bladwijzers: speed dial, ruimtes en zoeken, als Chrome-bladwijzers. Gesynchroniseerd, geen account.",
+    "description": "Store summary, 132 characters at most"
+  }
+}
