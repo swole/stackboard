@@ -2,6 +2,8 @@ import type { Bookmark, Space, Stack, StackableTree, BookmarkBackup } from './ty
 import { buildSpaceTitle, parseSpaceTitle } from './icon'
 import { DEMO_TREE } from './demoTree'
 import { batchFlags } from './fresh'
+import { TODO_MARKER_TITLE, newTodoId, parseList, todoIdFromUrl, todoMarkerUrl } from './todoPlan'
+import { loadList, saveList } from './todos'
 
 const ROOT_TITLE = 'Stackboard'
 // The folder was "Stackable" before 0.3.0; ensureRoot renames it in place.
@@ -174,6 +176,17 @@ export async function readTree(): Promise<StackableTree> {
       const stacks: Stack[] = stackNodes
         .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
         .map((stackNode) => {
+          // A to-do stack is a folder holding a marker bookmark; its items live in storage.sync.
+          const marker = (stackNode.children ?? []).find((c) => todoIdFromUrl(c.url))
+          if (marker) {
+            return {
+              id: stackNode.id,
+              title: stackNode.title,
+              parentSpaceId: spaceNode.id,
+              bookmarks: [],
+              todo: { id: todoIdFromUrl(marker.url)!, anchorId: marker.id },
+            }
+          }
           const bookmarkNodes = (stackNode.children ?? []).filter((c) => !!c.url)
           const sorted = bookmarkNodes.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
           const batch = batchFlags(sorted.map((b) => b.dateAdded))
@@ -237,6 +250,14 @@ export async function moveSpace(id: string, newIndex: number): Promise<void> {
 export async function createStack(spaceId: string, title: string): Promise<string> {
   if (!IS_EXTENSION) return 'demo-noop'
   const node = await chrome.bookmarks.create({ parentId: spaceId, title })
+  return node.id
+}
+
+/** A to-do stack (0.6.0): a folder plus the marker bookmark that keys its items. Returns the folder id. */
+export async function createTodoStack(spaceId: string, title: string, id = newTodoId()): Promise<string> {
+  if (!IS_EXTENSION) return 'demo-noop'
+  const node = await chrome.bookmarks.create({ parentId: spaceId, title })
+  await chrome.bookmarks.create({ parentId: node.id, title: TODO_MARKER_TITLE, url: todoMarkerUrl(id) })
   return node.id
 }
 
@@ -355,14 +376,21 @@ export async function exportBackup(): Promise<BookmarkBackup> {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    spaces: tree.spaces.map((s) => ({
-      emoji: s.emoji,
-      name: s.name,
-      stacks: s.stacks.map((st) => ({
-        name: st.title,
-        bookmarks: st.bookmarks.map((b) => ({ title: b.title, url: b.url })),
+    spaces: await Promise.all(
+      tree.spaces.map(async (s) => ({
+        emoji: s.emoji,
+        name: s.name,
+        stacks: await Promise.all(
+          s.stacks.map(async (st) => ({
+            name: st.title,
+            bookmarks: st.bookmarks.map((b) => ({ title: b.title, url: b.url })),
+            ...(st.todo
+              ? { todo: (await loadList(st.todo.id)).items.map((it) => ({ text: it.text, done: it.done })) }
+              : {}),
+          })),
+        ),
       })),
-    })),
+    ),
   }
 }
 
@@ -378,6 +406,15 @@ export async function importBackup(backup: BookmarkBackup): Promise<void> {
       title: buildSpaceTitle(space.emoji, space.name),
     })
     for (const stack of space.stacks) {
+      if (Array.isArray(stack.todo)) {
+        // A new id each time, so importing the same backup twice makes two separate lists.
+        const id = newTodoId()
+        await createTodoStack(spaceNode.id, stack.name, id)
+        const now = Date.now()
+        const items = stack.todo.map((it, i) => ({ id: newTodoId(), text: String(it?.text ?? ''), done: it?.done === true, at: now + i }))
+        await saveList(id, parseList({ items }))
+        continue
+      }
       const stackNode = await chrome.bookmarks.create({
         parentId: spaceNode.id,
         title: stack.name,

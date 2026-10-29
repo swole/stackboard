@@ -23,6 +23,30 @@ import {
 } from '../src/lib/appearance'
 import { spaceIndexForKey } from '../src/lib/shortcuts'
 import { UNINSTALL_PAGE, uninstallUrl } from '../src/lib/uninstall'
+import {
+  ORPHAN_GRACE_MS,
+  TODO_MAX_ITEMS,
+  TODO_MAX_TEXT,
+  TodoFullError,
+  addItem,
+  cleanText,
+  clearDone,
+  countOpen,
+  editItem,
+  emptyList,
+  listBytes,
+  newTodoId,
+  ordered,
+  parseList,
+  planSweep,
+  removeItem,
+  restoreItem,
+  todoIdFromUrl,
+  todoKey,
+  todoMarkerUrl,
+  toggleItem,
+  type TodoList,
+} from '../src/lib/todoPlan'
 import { glyphOf } from '../src/lib/favicon'
 import palettesCss from '../src/styles/palettes.css'
 import { contrastRatio, gradientStops, mix, over, readPalettes } from './contrast'
@@ -373,6 +397,66 @@ eq('locale en: the English title is the store-search test title (S2, 0.5.6)', ms
 eq('uninstall: url carries the version', uninstallUrl('0.5.5'), 'https://getstackboard.com/bye?v=0.5.5')
 eq('uninstall: page is on getstackboard.com over https', UNINSTALL_PAGE.startsWith('https://getstackboard.com/'), true)
 eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x').includes('beta%26x'), uninstallUrl('9'.repeat(40)).length < 1023], [true, true])
+
+// To-do stacks (0.6.0): the marker bookmark, item edits, parsing what storage holds, the orphan sweep.
+{
+  const id = newTodoId()
+  eq('todo: new id is 16 lowercase base-36 chars', /^[a-z0-9]{16}$/.test(id), true)
+  eq('todo: marker url round-trips', todoIdFromUrl(todoMarkerUrl(id)), id)
+  eq('todo: other urls are not markers', [todoIdFromUrl('https://getstackboard.com/todo'), todoIdFromUrl('https://getstackboard.com/todo#short'), todoIdFromUrl('https://example.com/todo#abcdefgh12'), todoIdFromUrl(undefined)], [null, null, null, null])
+  eq('todo: marker id rejects odd characters', todoIdFromUrl('https://getstackboard.com/todo#abc/def-ghi'), null)
+  eq('todo: storage key', todoKey('abcdefgh12'), 'todo:abcdefgh12')
+
+  eq('todo: cleanText folds whitespace and newlines', cleanText('  buy\n milk \t now '), 'buy milk now')
+  eq('todo: cleanText caps length by characters', [...cleanText('😀'.repeat(400))].length, TODO_MAX_TEXT)
+
+  let l: TodoList = emptyList()
+  l = addItem(l, 'one', 1, 'a1')
+  l = addItem(l, 'two', 2, 'a2')
+  l = addItem(l, '   ', 3, 'a3')
+  eq('todo: blank text adds nothing', l.items.map((i) => i.id), ['a1', 'a2'])
+  l = toggleItem(l, 'a1')
+  eq('todo: done items sink, open ones keep their order', ordered(l.items).map((i) => i.id), ['a2', 'a1'])
+  eq('todo: countOpen', countOpen(l), 1)
+  eq('todo: toggling back restores the original order', ordered(toggleItem(l, 'a1').items).map((i) => i.id), ['a1', 'a2'])
+  eq('todo: edit trims', editItem(l, 'a2', '  second ').items[1].text, 'second')
+  eq('todo: editing to empty removes', editItem(l, 'a2', '  ').items.map((i) => i.id), ['a1'])
+  const removed = l.items[0]
+  const r = removeItem(l, 'a1')
+  eq('todo: undo puts the item back at its index', restoreItem(r, removed, 0).items.map((i) => i.id), ['a1', 'a2'])
+  eq('todo: undo twice does not duplicate', restoreItem(restoreItem(r, removed, 0), removed, 0).items.length, 2)
+  eq('todo: clearDone keeps open items', clearDone(l).items.map((i) => i.id), ['a2'])
+
+  let full: TodoList = emptyList()
+  for (let i = 0; i < TODO_MAX_ITEMS; i++) full = addItem(full, `task ${i}`, i, `id${i}xxxxxx`)
+  let threw = false
+  try {
+    addItem(full, 'one more', 0)
+  } catch (e) {
+    threw = e instanceof TodoFullError
+  }
+  eq('todo: a full list refuses another item', threw, true)
+  eq('todo: 100 short items fit the 8 KB sync item', listBytes(todoKey('abcdefgh12345678'), full) < 8000, true)
+
+  eq('todo: parseList survives junk', parseList(null), emptyList())
+  eq('todo: parseList drops bad items and duplicates', parseList({ items: [{ id: 'x', text: 'ok', done: true, at: 5 }, { id: 'x', text: 'dup' }, { text: 'no id' }, { id: 'y', text: '   ' }, 7] }).items, [{ id: 'x', text: 'ok', done: true, at: 5 }])
+  eq('todo: parseList keeps the orphan mark', parseList({ items: [], orphanSince: 9 }).orphanSince, 9)
+
+  const now = 10 * ORPHAN_GRACE_MS
+  const stored: Record<string, TodoList> = {
+    live: { v: 1, items: [] },
+    liveMarked: { v: 1, items: [], orphanSince: now - 1000 },
+    goneSeen: { v: 1, items: [] },
+    goneUnseen: { v: 1, items: [] },
+    goneMarkedFresh: { v: 1, items: [], orphanSince: now - 1000 },
+    goneMarkedOld: { v: 1, items: [], orphanSince: now - ORPHAN_GRACE_MS },
+  }
+  const plan = planSweep(stored, ['live', 'liveMarked', 'newHere'], ['goneSeen', 'goneMarkedOld', 'deletedLongAgo'], now)
+  eq('todo sweep: marks only lists this device saw and lost', plan.mark, ['goneSeen'])
+  eq('todo sweep: unmarks a list whose stack came back', plan.unmark, ['liveMarked'])
+  eq('todo sweep: drops after the grace period, from any device', plan.drop, ['goneMarkedOld'])
+  eq('todo sweep: seen = live plus still-stored seen lists', plan.seen.sort(), ['goneSeen', 'live', 'liveMarked', 'newHere'])
+}
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)

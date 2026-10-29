@@ -30,6 +30,7 @@ import { useBookmarkTree } from './hooks/useBookmarkTree'
 import { useOpenTabs } from './hooks/useOpenTabs'
 import { IS_EXTENSION, moveSpace, moveStack, moveBookmark } from './lib/bookmarks'
 import { takeOpenSpaceNote } from './lib/stash'
+import { sweepOrphans } from './lib/todos'
 import { plural } from './lib/importPlan'
 import { prefs } from './lib/prefs'
 import { RATING_MILESTONE_STASHES } from './lib/onboarding'
@@ -143,6 +144,19 @@ export default function App() {
       // The third stash is a rating milestone; a bankruptcy waits for its certificate to close.
       if (prefs.bumpStashes() >= RATING_MILESTONE_STASHES && !note.bankruptcy) store.reachMilestone()
     })
+  }, [loaded])
+
+  // Lists whose to-do stack is gone get marked, then dropped a week later (todos.ts). Once per
+  // new tab, a few seconds in, so it reads the tree after any sync burst has landed.
+  useEffect(() => {
+    if (!loaded || !IS_EXTENSION) return
+    const timer = setTimeout(() => {
+      const t = useStackableStore.getState().tree
+      if (!t) return
+      const live = t.spaces.flatMap((sp) => sp.stacks.flatMap((st) => (st.todo ? [st.todo.id] : [])))
+      void sweepOrphans(live).catch((err) => console.warn('Stackboard: to-do sweep failed', err))
+    }, 5000)
+    return () => clearTimeout(timer)
   }, [loaded])
 
   const sensors = useSensors(

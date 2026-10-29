@@ -14,6 +14,8 @@ export interface Stack {
   title: string
   parentSpaceId: string
   bookmarks: Bookmark[]
+  /** Set on a to-do stack (0.6.0): `id` keys its items in chrome.storage.sync, `anchorId` is the marker bookmark. */
+  todo?: { id: string; anchorId: string }
 }
 
 export interface Space {
@@ -40,6 +42,8 @@ export interface BookmarkBackup {
     stacks: Array<{
       name: string
       bookmarks: Array<{ title: string; url: string }>
+      /** A to-do stack's items (0.6.0); older versions import it as an empty stack. */
+      todo?: Array<{ text: string; done: boolean }>
     }>
   }>
 }

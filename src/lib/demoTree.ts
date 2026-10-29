@@ -36,6 +36,14 @@ export const DEMO_TREE: StackableTree = {
           ],
         },
         {
+          id: 'st-work-todo',
+          parentSpaceId: 'sp-work',
+          title: 'This week',
+          bookmarks: [],
+          // Items come from the demo seed in todos.ts.
+          todo: { id: 'demo', anchorId: 'bm-todo' },
+        },
+        {
           id: 'st-work-dashboards',
           parentSpaceId: 'sp-work',
           title: 'Dashboards',

@@ -112,3 +112,35 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 export function Label({ children }: { children: ReactNode }) {
   return <label className="mb-1 block text-xs font-medium text-soft">{children}</label>
 }
+
+export function Segmented<T extends string>(props: {
+  label: string
+  value: T
+  options: Array<{ value: T; label: string; icon?: ReactNode }>
+  onChange: (value: T) => void
+}) {
+  const { label, value, options, onChange } = props
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex w-fit flex-wrap rounded-lg bg-sunken p-0.5 ring-1 ring-line">
+      {options.map((o) => {
+        const on = o.value === value
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            data-option={o.value}
+            onClick={() => onChange(o.value)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+              on ? 'bg-card text-strong shadow-xs ring-1 ring-line' : 'text-muted hover:text-fg'
+            }`}
+          >
+            {o.icon}
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}

@@ -93,7 +93,11 @@ export default function SaveTabPopup() {
     }
   }
 
-  const spaces = useMemo(() => tree?.spaces ?? [], [tree])
+  // To-do stacks (0.6.0) hold checklist items, not links, so the popup never offers them.
+  const spaces = useMemo(
+    () => (tree?.spaces ?? []).map((sp) => ({ ...sp, stacks: sp.stacks.filter((st) => !st.todo) })),
+    [tree],
+  )
 
   return (
     <div className="w-[340px] bg-canvas p-4 font-sans text-fg">

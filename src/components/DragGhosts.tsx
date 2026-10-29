@@ -1,3 +1,4 @@
+import { ListChecks } from 'lucide-react'
 import type { Bookmark, Stack } from '../lib/types'
 import { parseBookmarkTitle } from '../lib/icon'
 import { displayTitle } from '../lib/title'
@@ -28,6 +29,7 @@ export function StackGhost({ stack }: { stack: Stack }) {
       className="flex w-[260px] items-center gap-2 rounded-xl border border-accent-line bg-card px-3 py-2 text-sm"
     >
       <span className="flex-1 truncate font-semibold text-fg">{stack.title}</span>
+      {stack.todo && <ListChecks className="h-4 w-4 text-faint" aria-label="To-do list" />}
       <span className="flex -space-x-1">
         {preview.map((b) => {
           const { emoji, text } = parseBookmarkTitle(b.title)
@@ -38,7 +40,7 @@ export function StackGhost({ stack }: { stack: Stack }) {
           )
         })}
       </span>
-      <span className="rounded bg-selected px-1.5 text-xs text-soft">{stack.bookmarks.length}</span>
+      {!stack.todo && <span className="rounded bg-selected px-1.5 text-xs text-soft">{stack.bookmarks.length}</span>}
     </div>
   )
 }

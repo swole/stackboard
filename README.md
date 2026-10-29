@@ -16,6 +16,7 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 - **Search every space** from the sidebar (press `/`).
 - **Stash this window** (Alt+Shift+S or the toolbar popup): saves every open tab as a stack, one per tab group, and can close them. Open the stack later and they come back as a tab group.
 - **Tab bankruptcy** (toolbar popup, under Stash this window): stashes every tab in every window, closes them all and gives you a certificate you can save as an image.
+- **To-do lists:** pick To-do list when you add a stack and it sits on the board with your links. Enter adds an item, checked items sink to the bottom, and Clear done tidies up.
 - **Save selected tabs:** Ctrl or Shift+click a few tabs in the tab strip, open the toolbar popup, and one tap on a stack saves them all.
 - **Nothing fails silently:** if a bookmark write fails, a message says what went wrong.
 
@@ -24,6 +25,8 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 Everything is plain Chrome bookmarks under **Other bookmarks → Stackboard** (space folders, then stack folders, then bookmarks). So it syncs through Chrome sync, works offline, and if you uninstall the extension your bookmarks stay put.
 
 Coming from another tool? See [Stackboard as a OneTab alternative](https://getstackboard.com/onetab-alternative) or [as a Toby alternative](https://getstackboard.com/toby-alternative), and the [Catppuccin, Gruvbox and Nord themes](https://getstackboard.com/themes).
+
+To-do items are the one exception: they live in Chrome's extension sync storage, so they sync through Chrome with your extension settings, and uninstalling Stackboard deletes them. Each list keeps one bookmark in its stack folder so every device knows which list goes where.
 
 No account, no server, no analytics. A few preferences (last space opened, your theme, whether you've answered the one-time rating ask) stay in local storage on your device, and a wallpaper you pick stays in the browser's local database on that device. [Privacy policy](https://stackboard.vercel.app/privacy)
 
@@ -41,7 +44,7 @@ Moving tabs out of another app, or cleaning up the bookmarks you already have? T
 |---|---|
 | `bookmarks` | Read and write the Stackboard folder; read your other folders only when you choose to copy them in |
 | `tabs`, `tabGroups` | The "already open" dot, saving the current tab, stashing a window and reopening it as a group |
-| `storage` | A few local flags (first-run hints) and your appearance settings |
+| `storage` | A few local flags (first-run hints), your appearance settings and your to-do items |
 | `favicon` | Site icons from Chrome's own favicon cache |
 
 ## Build it yourself

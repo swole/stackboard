@@ -2,13 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ExternalLink, FolderInput, GripVertical, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, FolderInput, GripVertical, ListChecks, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import type { Stack } from '../lib/types'
 import { useStackableStore } from '../store/useStackableStore'
 import { openAllInTabs } from '../lib/tabs'
 import { glow, reducedMotion } from '../lib/motion'
 import { useTwoStep } from '../hooks/useTwoStep'
 import { BookmarkCard } from './BookmarkCard'
+import { TodoItems } from './TodoItems'
+import { useTodoList } from '../hooks/useTodoList'
+import { clearDone, countOpen } from '../lib/todoPlan'
+import { plural } from '../lib/importPlan'
 
 interface Props {
   stack: Stack
@@ -24,6 +28,11 @@ export function StackColumn({ stack }: Props) {
   const columnRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const count = stack.bookmarks.length
+  // A to-do stack (0.6.0) keeps the header, drag and menu; its body is a checklist.
+  const todo = stack.todo
+  const { list, change } = useTodoList(todo?.id ?? null)
+  const open = countOpen(list)
+  const done = list ? list.items.length - open : 0
 
   const { attributes, listeners, setNodeRef: setSortNode, transform, transition, isDragging } =
     useSortable({
@@ -34,6 +43,7 @@ export function StackColumn({ stack }: Props) {
   const { setNodeRef: setDropNode, isOver } = useDroppable({
     id: `stack-drop:${stack.id}`,
     data: { type: 'stack-drop', stackId: stack.id },
+    disabled: !!todo, // links can't be dropped into a checklist
   })
 
   useEffect(() => {
@@ -94,20 +104,27 @@ export function StackColumn({ stack }: Props) {
         >
           {stack.title}
         </h3>
-        <button
-          onClick={onOpenAll}
-          disabled={count === 0}
-          className={`flex items-center gap-1 rounded p-0.5 disabled:opacity-30 ${
-            openAll.armed
-              ? 'bg-accent px-1.5 text-on-accent hover:bg-accent-hover'
-              : 'text-faint opacity-0 hover:bg-card/60 hover:text-fg focus-visible:opacity-100 group-hover/stack:opacity-100'
-          }`}
-          aria-label={`Open all ${count} bookmark${count === 1 ? '' : 's'} as tabs`}
-          title={openAll.armed ? 'Click again to open them all' : `Open all ${count} bookmarks as tabs`}
-        >
-          <ExternalLink className="h-4 w-4" />
-          {openAll.armed && <span className="text-xs font-medium">Open {count}?</span>}
-        </button>
+        {todo && open > 0 && (
+          <span className="text-xs text-faint" aria-label={plural(open, 'to-do') + ' left'}>
+            {open}
+          </span>
+        )}
+        {!todo && (
+          <button
+            onClick={onOpenAll}
+            disabled={count === 0}
+            className={`flex items-center gap-1 rounded p-0.5 disabled:opacity-30 ${
+              openAll.armed
+                ? 'bg-accent px-1.5 text-on-accent hover:bg-accent-hover'
+                : 'text-faint opacity-0 hover:bg-card/60 hover:text-fg focus-visible:opacity-100 group-hover/stack:opacity-100'
+            }`}
+            aria-label={`Open all ${count} bookmark${count === 1 ? '' : 's'} as tabs`}
+            title={openAll.armed ? 'Click again to open them all' : `Open all ${count} bookmarks as tabs`}
+          >
+            <ExternalLink className="h-4 w-4" />
+            {openAll.armed && <span className="text-xs font-medium">Open {count}?</span>}
+          </button>
+        )}
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
@@ -120,7 +137,7 @@ export function StackColumn({ stack }: Props) {
           </button>
           {menuOpen && (
             <div
-              className="absolute right-0 top-7 z-30 w-32 overflow-hidden rounded-md border border-line bg-raised shadow-md"
+              className="absolute right-0 top-7 z-30 w-36 overflow-hidden rounded-md border border-line bg-raised shadow-md"
               onMouseLeave={() => setMenuOpen(false)}
             >
               <button
@@ -148,6 +165,18 @@ export function StackColumn({ stack }: Props) {
                 <FolderInput className="h-3.5 w-3.5" />
                 Move to…
               </button>
+              {todo && done > 0 && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false)
+                    void change('clear the done to-dos', clearDone)
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-hover"
+                >
+                  <ListChecks className="h-3.5 w-3.5" />
+                  Clear {done} done
+                </button>
+              )}
               <button
                 onClick={() => {
                   setMenuOpen(false)
@@ -155,7 +184,7 @@ export function StackColumn({ stack }: Props) {
                     'stack',
                     stack.id,
                     stack.title,
-                    `${count} link${count === 1 ? '' : 's'}`,
+                    todo ? plural(open, 'to-do') : `${count} link${count === 1 ? '' : 's'}`,
                   )
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-danger hover:bg-danger-soft"
@@ -177,25 +206,31 @@ export function StackColumn({ stack }: Props) {
           isOver ? 'border-accent-line bg-accent-soft/60' : 'border-transparent bg-well wallpaper:bg-transparent'
         }`}
       >
-        <SortableContext
-          items={stack.bookmarks.map((b) => `bm:${b.id}`)}
-          strategy={verticalListSortingStrategy}
-        >
-          {stack.bookmarks.map((b) => (
-            <BookmarkCard key={b.id} bookmark={b} />
-          ))}
-        </SortableContext>
+        {todo ? (
+          <TodoItems stack={stack} list={list} change={change} revealSeq={revealSeq} />
+        ) : (
+          <>
+            <SortableContext
+              items={stack.bookmarks.map((b) => `bm:${b.id}`)}
+              strategy={verticalListSortingStrategy}
+            >
+              {stack.bookmarks.map((b) => (
+                <BookmarkCard key={b.id} bookmark={b} />
+              ))}
+            </SortableContext>
 
-        <button
-          onClick={() => openModal({ kind: 'bookmark-add', stackId: stack.id })}
-          // Quiet at rest: the dashed outline shows on hover, or always on an empty stack.
-          className={`mt-1 flex items-center gap-2 rounded-lg border border-dashed px-2.5 py-2 text-xs text-muted hover:border-accent-line hover:bg-accent-soft/60 hover:text-accent-text compact:py-1.5 ${
-            count === 0 ? 'border-line-strong' : 'border-transparent group-hover/stack:border-line-strong'
-          }`}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add bookmark
-        </button>
+            <button
+              onClick={() => openModal({ kind: 'bookmark-add', stackId: stack.id })}
+              // Quiet at rest: the dashed outline shows on hover, or always on an empty stack.
+              className={`mt-1 flex items-center gap-2 rounded-lg border border-dashed px-2.5 py-2 text-xs text-muted hover:border-accent-line hover:bg-accent-soft/60 hover:text-accent-text compact:py-1.5 ${
+                count === 0 ? 'border-line-strong' : 'border-transparent group-hover/stack:border-line-strong'
+              }`}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add bookmark
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

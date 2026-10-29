@@ -912,6 +912,139 @@ try {
   const shippedLocales = fs.readdirSync(path.join(EXT, '_locales'))
   check('21 store languages ship', shippedLocales.length === 21 && ['ru', 'zh_TW', 'th'].every((l) => shippedLocales.includes(l)), shippedLocales.join(' '))
 
+  // ---------- 0.6.0: to-do stacks ----------
+  // A stack folder holding one marker bookmark; the items live in chrome.storage.sync.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const items = (page) => page.evaluate(() => [...document.querySelectorAll('[data-todo-item]')].map((r) => `${r.dataset.todoItem}:${r.textContent.trim()}`))
+    const stored = () => control.evaluate(async () => {
+      const all = await chrome.storage.sync.get(null)
+      return Object.entries(all).filter(([k]) => k.startsWith('todo:')).map(([k, v]) => ({ k, v }))
+    })
+
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
+    await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+    await page.type('[role=dialog] input', 'Todo test')
+    await page.keyboard.press('Enter')
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Todo test')
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Add empty Stack').click())
+    await page.waitForSelector('[role=dialog] [data-option="todo"]', { timeout: 5000 })
+    await page.click('[role=dialog] [data-option="todo"]')
+    await page.type('[role=dialog] input', 'This week')
+    await page.keyboard.press('Enter')
+    const made = await until(page, () => !!document.querySelector('[data-todo-input]'))
+    check('to-do: a new to-do stack shows its input', made)
+    const marker = await control.evaluate(async () => {
+      const [folder] = (await chrome.bookmarks.search({ title: 'This week' })).filter((n) => !n.url)
+      const kids = folder ? await chrome.bookmarks.getChildren(folder.id) : []
+      return kids.map((k) => k.url)
+    })
+    check('to-do: the folder holds one marker bookmark', marker.length === 1 && /^https:\/\/getstackboard\.com\/todo#[a-z0-9]{16}$/.test(marker[0]), marker.join(' '))
+    const listId = marker[0]?.split('#')[1]
+    check('to-do: the input takes focus on create', await until(page, () => document.activeElement?.hasAttribute('data-todo-input')))
+
+    await page.keyboard.type('Buy milk')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('Call the bank')
+    await page.keyboard.press('Enter')
+    await until(page, () => document.querySelectorAll('[data-todo-item]').length === 2)
+    check('to-do: Enter adds items and keeps focus', JSON.stringify(await items(page)) === JSON.stringify(['open:Buy milk', 'open:Call the bank']) &&
+      (await page.evaluate(() => document.activeElement?.hasAttribute('data-todo-input'))), JSON.stringify(await items(page)))
+    const s1 = await stored()
+    check('to-do: items are saved in storage.sync under todo:<id>', s1.length === 1 && s1[0].k === `todo:${listId}` && s1[0].v.items.length === 2, JSON.stringify(s1))
+
+    await page.evaluate(() => document.querySelector('[data-todo-item] [data-todo-toggle]').click())
+    await until(page, () => document.querySelector('[data-todo-item]:last-child')?.dataset.todoItem === 'done')
+    check('to-do: a done item sinks below the open ones', JSON.stringify(await items(page)) === JSON.stringify(['open:Call the bank', 'done:Buy milk']), JSON.stringify(await items(page)))
+    const head = await page.evaluate(() => [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'This week')?.querySelector('h3 + span')?.textContent)
+    check('to-do: the header counts open items', head === '1', String(head))
+
+    // Another tab sees the list, and a change there reaches this tab.
+    const other = await openNtp()
+    await other.evaluate(() => [...document.querySelectorAll('aside button, nav button, button')].find((b) => b.textContent.includes('Todo test'))?.click())
+    const seen = await until(other, () => document.querySelectorAll('[data-todo-item]').length === 2)
+    check('to-do: a second tab shows the same items', seen, JSON.stringify(await items(other)))
+    await other.evaluate(() => document.querySelector('[data-todo-input]').focus())
+    await other.keyboard.type('From tab two')
+    await other.keyboard.press('Enter')
+    check('to-do: a change in one tab shows in the other', await until(page, () => document.body.innerText.includes('From tab two')))
+    await sleep(5500) // let a sweep run while the list is live, so this device records it as seen
+    await other.close()
+
+    // Delete with Undo.
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('[data-todo-item]')].find((r) => r.textContent.includes('Call the bank')).querySelector('[data-todo-delete]').click())
+    await until(page, () => document.querySelector('.toast')?.textContent?.includes('Call the bank'))
+    check('to-do: delete removes the item and offers Undo', !(await page.evaluate(() => document.querySelector('main').innerText.includes('Call the bank\n'))) &&
+      (await page.evaluate(() => !![...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')))))
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
+    check('to-do: Undo puts it back in place', await until(page, () => [...document.querySelectorAll('[data-todo-item]')][0]?.textContent.includes('Call the bank')), JSON.stringify(await items(page)))
+
+    // Clear done from the stack menu.
+    await page.evaluate(() => [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'This week').querySelector('button[aria-label="Stack options"]').click())
+    await sleep(150)
+    const clearBtn = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Clear 1 done')
+      b?.click()
+      return !!b
+    })
+    check('to-do: Clear done removes finished items', clearBtn && (await until(page, () => ![...document.querySelectorAll('[data-todo-item]')].some((r) => r.dataset.todoItem === 'done'))))
+
+    // The toolbar popup never offers a to-do stack as a place to save a tab.
+    // A popup opened as a tab would try to save itself, so a web tab is highlighted beside it.
+    const tdWin = await control.evaluate(async (ntpUrl) => {
+      const w = await chrome.windows.create({ url: 'https://example.com/?todo=1', focused: true })
+      const pop = await chrome.tabs.create({ windowId: w.id, url: ntpUrl.replace('newtab.html', 'popup.html?todo'), active: true })
+      await chrome.tabs.highlight({ windowId: w.id, tabs: [pop.index, 0] })
+      return w.id
+    }, NTP)
+    const popup = await browser.waitForTarget((t) => t.url().endsWith('/popup.html?todo'), { timeout: 10000 }).then((t) => t.page())
+    await popup.reload()
+    await popup.waitForSelector('[data-popup-title]', { timeout: 10000 })
+    await popup.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.querySelector('span.flex-1')?.textContent === 'Todo test')?.click())
+    await sleep(300)
+    const popupText = await popup.evaluate(() => document.body.innerText)
+    check('to-do: the save popup leaves to-do stacks out', popupText.includes('No stacks in this space.') && !popupText.includes('This week'), popupText.slice(0, 200))
+    await control.evaluate((id) => chrome.windows.remove(id), tdWin)
+
+    // Deleting the stack, then Undo, brings the same list back (same marker, same items).
+    await page.evaluate(() => [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'This week').querySelector('button[aria-label="Stack options"]').click())
+    await sleep(150)
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Delete').click())
+    await until(page, () => document.querySelector('.toast')?.textContent?.includes('This week'))
+    const toastText = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    check('to-do: stack delete toast counts to-dos', toastText.includes('2 to-dos'), toastText)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
+    check('to-do: undoing a stack delete brings its items back', await until(page, () => document.querySelectorAll('[data-todo-item]').length === 2), JSON.stringify(await items(page)))
+
+    // A list whose stack is gone for good is marked on the next new tab, not dropped at once.
+    await control.evaluate(async () => {
+      const [folder] = (await chrome.bookmarks.search({ title: 'This week' })).filter((n) => !n.url)
+      await chrome.bookmarks.removeTree(folder.id)
+    })
+    const later = await openNtp()
+    let marked = null
+    for (let t = 0; t < 9000 && !marked; t += 300) {
+      const s = await stored()
+      marked = s.find((x) => x.k === `todo:${listId}` && typeof x.v.orphanSince === 'number') ?? null
+      await sleep(300)
+    }
+    check('to-do: an orphaned list is marked, its items kept for the grace week', !!marked && marked.v.items.length === 2, JSON.stringify(marked))
+    await later.close()
+
+    const perms = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8')).permissions ?? []
+    check('to-do: no new permissions', JSON.stringify(perms) === JSON.stringify(['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups']), perms.join(' '))
+    await page.close()
+  }
+
   // ---------- 0.5.2: writes survive a stuck root lock and say when they fail ----------
   // A Brave user (r/startpages, 2026-10-11) had a frozen Stackboard tab holding 'stackboard-root':
   // every load and create waited forever and the buttons looked dead.
