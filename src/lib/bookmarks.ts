@@ -1,9 +1,10 @@
-import type { Bookmark, Space, Stack, StackableTree, BookmarkBackup } from './types'
-import { buildSpaceTitle, parseSpaceTitle } from './icon'
+import type { StackableTree, BookmarkBackup } from './types'
+import { buildSpaceTitle } from './icon'
 import { DEMO_TREE } from './demoTree'
-import { batchFlags } from './fresh'
-import { TODO_MARKER_TITLE, newTodoId, parseList, todoIdFromUrl, todoMarkerUrl } from './todoPlan'
+import { TODO_MARKER_TITLE, newTodoId, parseList, todoMarkerUrl } from './todoPlan'
+import { dueForBackup, dueFromBackup } from './duePlan'
 import { loadList, saveList } from './todos'
+import { backupStack, mapTree, writeBackupStack, type CreateApi } from './folderPlan'
 
 const ROOT_TITLE = 'Stackboard'
 // The folder was "Stackable" before 0.3.0; ensureRoot renames it in place.
@@ -158,63 +159,13 @@ async function ensureRootNow(): Promise<string> {
 }
 
 /**
- * Build the entire Stackboard tree as a typed object.
+ * Build the entire Stackboard tree as a typed object (the mapping is folderPlan.ts's mapTree).
  * Cheap — the subtree is small (hundreds of items, not thousands).
  */
 export async function readTree(): Promise<StackableTree> {
   if (!IS_EXTENSION) return DEMO_TREE
-  const rootId = await ensureRoot()
-  const subtree = await chrome.bookmarks.getSubTree(rootId)
-  const root = subtree[0]
-  const spaceNodes = (root.children ?? []).filter(isFolder)
-
-  const spaces: Space[] = spaceNodes
-    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .map((spaceNode) => {
-      const parsed = parseSpaceTitle(spaceNode.title)
-      const stackNodes = (spaceNode.children ?? []).filter(isFolder)
-      const stacks: Stack[] = stackNodes
-        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-        .map((stackNode) => {
-          // A to-do stack is a folder holding a marker bookmark; its items live in storage.sync.
-          const marker = (stackNode.children ?? []).find((c) => todoIdFromUrl(c.url))
-          if (marker) {
-            return {
-              id: stackNode.id,
-              title: stackNode.title,
-              parentSpaceId: spaceNode.id,
-              bookmarks: [],
-              todo: { id: todoIdFromUrl(marker.url)!, anchorId: marker.id },
-            }
-          }
-          const bookmarkNodes = (stackNode.children ?? []).filter((c) => !!c.url)
-          const sorted = bookmarkNodes.sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-          const batch = batchFlags(sorted.map((b) => b.dateAdded))
-          const bookmarks: Bookmark[] = sorted.map((b, i) => ({
-            id: b.id,
-            title: b.title || b.url || 'Untitled',
-            url: b.url!,
-            parentStackId: stackNode.id,
-            dateAdded: b.dateAdded,
-            batch: batch[i],
-          }))
-          return {
-            id: stackNode.id,
-            title: stackNode.title,
-            parentSpaceId: spaceNode.id,
-            bookmarks,
-          }
-        })
-      return {
-        id: spaceNode.id,
-        rawTitle: spaceNode.title,
-        name: parsed.name,
-        emoji: parsed.emoji,
-        stacks,
-      }
-    })
-
-  return { rootId, rootDateAdded: root.dateAdded, spaces }
+  const [root] = await chrome.bookmarks.getSubTree(await ensureRoot())
+  return mapTree(root)
 }
 
 // ---------- Spaces ----------
@@ -261,6 +212,14 @@ export async function createTodoStack(spaceId: string, title: string, id = newTo
   return node.id
 }
 
+/** A folder inside a stack, or inside another folder (0.8.0). Goes last; the board shows folders after links. */
+export async function createFolder(parentId: string, title: string): Promise<string> {
+  if (!IS_EXTENSION) return 'demo-noop'
+  const node = await chrome.bookmarks.create({ parentId, title })
+  return node.id
+}
+
+/** Renames a stack, or a folder inside one. */
 export async function renameStack(id: string, title: string): Promise<void> {
   if (!IS_EXTENSION) return
   await chrome.bookmarks.update(id, { title })
@@ -271,13 +230,14 @@ export async function deleteStack(id: string): Promise<void> {
   await chrome.bookmarks.removeTree(id)
 }
 
+/** Moves a stack to a space folder at a folder index (folderPlan's moveIndex); without one it goes last. */
 export async function moveStack(
   id: string,
   newSpaceId: string,
-  newIndex: number,
+  newIndex?: number,
 ): Promise<void> {
   if (!IS_EXTENSION) return
-  await chrome.bookmarks.move(id, { parentId: newSpaceId, index: newIndex })
+  await chrome.bookmarks.move(id, newIndex === undefined ? { parentId: newSpaceId } : { parentId: newSpaceId, index: newIndex })
 }
 
 // ---------- Bookmarks ----------
@@ -306,13 +266,17 @@ export async function deleteBookmark(id: string): Promise<void> {
   await chrome.bookmarks.remove(id)
 }
 
+/** Moves a link into a stack or folder at a folder index (folderPlan's moveIndex); without one it goes last. */
 export async function moveBookmark(
   id: string,
   newStackId: string,
-  newIndex: number,
+  newIndex?: number,
 ): Promise<void> {
   if (!IS_EXTENSION) return
-  await chrome.bookmarks.move(id, { parentId: newStackId, index: newIndex })
+  await chrome.bookmarks.move(
+    id,
+    newIndex === undefined ? { parentId: newStackId } : { parentId: newStackId, index: newIndex },
+  )
 }
 
 // ---------- Undo ----------
@@ -320,6 +284,8 @@ export async function moveBookmark(
 // Everything needed to recreate a deleted node and its subtree in place. Chrome keeps no
 // bookmark trash, so the undo toast holds one of these for a few seconds after a delete.
 export interface NodeSnapshot {
+  /** The id it had, so what was keyed by it (an open folder, 0.8.0) can follow it to its new id. */
+  id?: string
   parentId: string
   index: number
   title: string
@@ -329,6 +295,7 @@ export interface NodeSnapshot {
 
 function toSnapshot(n: Node): NodeSnapshot {
   return {
+    id: n.id,
     parentId: n.parentId ?? '',
     index: n.index ?? 0,
     title: n.title,
@@ -352,21 +319,26 @@ export async function snapshotNode(id: string): Promise<NodeSnapshot | null> {
 async function createFromSnapshot(
   s: NodeSnapshot,
   parentId: string,
-  index?: number,
+  index: number | undefined,
+  ids?: Map<string, string>,
 ): Promise<string> {
   const node = await chrome.bookmarks.create({ parentId, index, title: s.title, url: s.url })
+  if (s.id) ids?.set(s.id, node.id)
   for (const child of s.children ?? []) {
-    await createFromSnapshot(child, node.id)
+    await createFromSnapshot(child, node.id, undefined, ids)
   }
   return node.id
 }
 
-/** Recreates a deleted node where it was. Returns the new id (ids never come back). */
-export async function restoreSnapshot(s: NodeSnapshot): Promise<string | null> {
+/**
+ * Recreates a deleted node and everything in it where it was. Returns the new id (ids never come
+ * back); `ids`, when given, fills with each old id and its new one, folders inside included.
+ */
+export async function restoreSnapshot(s: NodeSnapshot, ids?: Map<string, string>): Promise<string | null> {
   if (!IS_EXTENSION) return null
   // Siblings may have been deleted since, so clamp the original index.
   const siblings = await chrome.bookmarks.getChildren(s.parentId)
-  return createFromSnapshot(s, s.parentId, Math.min(s.index, siblings.length))
+  return createFromSnapshot(s, s.parentId, Math.min(s.index, siblings.length), ids)
 }
 
 // ---------- Backup ----------
@@ -382,10 +354,9 @@ export async function exportBackup(): Promise<BookmarkBackup> {
         name: s.name,
         stacks: await Promise.all(
           s.stacks.map(async (st) => ({
-            name: st.title,
-            bookmarks: st.bookmarks.map((b) => ({ title: b.title, url: b.url })),
+            ...backupStack(st), // links, then folders inside the stack, nested (0.8.0)
             ...(st.todo
-              ? { todo: (await loadList(st.todo.id)).items.map((it) => ({ text: it.text, done: it.done })) }
+              ? { todo: (await loadList(st.todo.id)).items.map((it) => ({ text: it.text, done: it.done, ...dueForBackup(it) })) }
               : {}),
           })),
         ),
@@ -411,21 +382,12 @@ export async function importBackup(backup: BookmarkBackup): Promise<void> {
         const id = newTodoId()
         await createTodoStack(spaceNode.id, stack.name, id)
         const now = Date.now()
-        const items = stack.todo.map((it, i) => ({ id: newTodoId(), text: String(it?.text ?? ''), done: it?.done === true, at: now + i }))
+        const items = stack.todo.map((it, i) => ({ id: newTodoId(), text: String(it?.text ?? ''), done: it?.done === true, at: now + i, ...dueFromBackup(it) }))
         await saveList(id, parseList({ items }))
         continue
       }
-      const stackNode = await chrome.bookmarks.create({
-        parentId: spaceNode.id,
-        title: stack.name,
-      })
-      for (const bm of stack.bookmarks) {
-        await chrome.bookmarks.create({
-          parentId: stackNode.id,
-          title: bm.title,
-          url: bm.url,
-        })
-      }
+      // The stack, its links, then its folders (0.8.0); older backups have no folders.
+      await writeBackupStack(chrome.bookmarks as unknown as CreateApi, spaceNode.id, stack)
     }
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { listSources, createPlannedSpace, type ImportSource } from '../lib/importChrome'
 import { deleteSpace } from '../lib/bookmarks'
-import { plural } from '../lib/importPlan'
+import { countPlannedFolders, plural } from '../lib/importPlan'
 import { useStackableStore } from '../store/useStackableStore'
 
 /** Chrome's folders with links in them; null while loading. */
@@ -50,6 +50,8 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
   const chosen = useMemo(() => sources.filter((s) => picked.has(s.id)), [sources, picked])
   const links = chosen.reduce((n, s) => n + s.plan.links, 0)
   const stacks = chosen.reduce((n, s) => n + s.plan.space.stacks.length, 0)
+  // Folders deeper down stay folders inside their stack (0.8.0).
+  const nested = chosen.reduce((n, s) => n + s.plan.space.stacks.reduce((m, st) => m + countPlannedFolders(st.folders).folders, 0), 0)
   const skipped = chosen.reduce((n, s) => n + s.plan.skipped, 0)
 
   const toggle = (id: string) =>
@@ -132,7 +134,9 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
 
       <p className="mt-3 text-xs leading-relaxed text-muted">
         {links
-          ? `${chosen.length === 1 ? 'A new space' : `${chosen.length} new spaces`} with ${plural(stacks, 'stack')}, one per folder. Your originals stay where they are.`
+          ? `${chosen.length === 1 ? 'A new space' : `${chosen.length} new spaces`} with ${plural(stacks, 'stack')}, one per folder${
+              nested ? `, and ${plural(nested, 'folder')} inside them` : ''
+            }. Your originals stay where they are.`
           : 'Tick a folder to copy it into a space.'}
         {skipped > 0 &&
           ` ${plural(skipped, 'bookmarklet or browser page', 'bookmarklets or browser pages')} ${skipped === 1 ? 'stays' : 'stay'} behind: a new tab can't open ${skipped === 1 ? 'it' : 'them'}.`}

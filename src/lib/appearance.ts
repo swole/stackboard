@@ -1,11 +1,17 @@
-// Appearance settings (0.5.0): palette, light/dark mode, density and the board's background.
-// Pure: no DOM, no chrome.*, so tests/unit.test.ts can cover all of it. The DOM side lives in
-// store/useAppearance.ts; the colours themselves live in styles/palettes.css.
+// Appearance settings (0.5.0): palette, light/dark mode, density and the board's background; the
+// stack layout since 0.8.0. Pure: no DOM, no chrome.*, so tests/unit.test.ts can cover all of it.
+// The DOM side lives in store/useAppearance.ts; the colours themselves live in styles/palettes.css.
+// The Pro looks (0.7.0: accent, font, tile size, wallpaper) live in looks.ts and ride along in the
+// boot mirror.
+
+import { DEFAULT_LOOKS, lookMirror, normalizeHex, parseLooks, type LookMirror, type Looks } from './looks'
 
 export type Mode = 'system' | 'light' | 'dark'
 export type Scheme = 'light' | 'dark'
 export type PaletteId = 'stackboard' | 'catppuccin' | 'gruvbox' | 'nord' | 'black' | 'tokyonight' | 'rosepine' | 'dracula'
 export type Density = 'comfortable' | 'compact'
+/** 0.8.0: Packed tucks each stack under the one above it (lib/packPlan.ts); Rows is the plain grid. */
+export type Layout = 'packed' | 'rows'
 export type BgKind = 'solid' | 'gradient' | 'image'
 export type GradientId = 1 | 2 | 3
 
@@ -24,6 +30,13 @@ export interface Appearance {
   mode: Mode
   palette: PaletteId
   density: Density
+  /**
+   * Packed on a new install; a board with settings from before 0.8.0 keeps Rows
+   * (parseSavedAppearance, and background.ts on the update). Not a boot attribute: the stacks
+   * render after the store has the settings (the mirror's, or storage's when there is no mirror),
+   * so the first board already has it.
+   */
+  layout: Layout
   bg: Background
 }
 
@@ -55,6 +68,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   mode: 'system',
   palette: 'stackboard',
   density: 'comfortable',
+  layout: 'packed',
   bg: { kind: 'solid', gradient: 1, dim: 35, blur: 0, imageRev: 0 },
 }
 
@@ -102,6 +116,7 @@ export function variantName(palette: PaletteId, scheme: Scheme): string {
 
 const MODES: readonly Mode[] = ['system', 'light', 'dark']
 const DENSITIES: readonly Density[] = ['comfortable', 'compact']
+const LAYOUTS: readonly Layout[] = ['packed', 'rows']
 const KINDS: readonly BgKind[] = ['solid', 'gradient', 'image']
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -126,6 +141,7 @@ export function parseAppearance(raw: unknown): Appearance {
     mode: pick(o.mode, MODES, d.mode),
     palette: pick(o.palette, PALETTES.map((p) => p.id), d.palette),
     density: pick(o.density, DENSITIES, d.density),
+    layout: pick(o.layout, LAYOUTS, d.layout),
     bg: {
       kind: pick(b.kind, KINDS, d.bg.kind),
       gradient: clampInt(b.gradient, 1, 3, d.bg.gradient) as GradientId,
@@ -136,10 +152,42 @@ export function parseAppearance(raw: unknown): Appearance {
   }
 }
 
+/** Packed is the default for new installs only: a board updated from before this keeps Rows. */
+export const PACKED_VERSION = '0.8.0'
+
+/** Saved settings with no layout key were saved before 0.8.0. */
+function savedBeforeLayout(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && !('layout' in raw)
+}
+
+/**
+ * Saved settings as they come back from chrome.storage.local or the boot copy. Settings saved
+ * before 0.8.0 have no layout, and those boards keep Rows; nothing saved at all is a new board,
+ * which gets Packed. A layout someone picked always stands.
+ */
+export function parseSavedAppearance(raw: unknown): Appearance {
+  const a = parseAppearance(raw)
+  return savedBeforeLayout(raw) ? { ...a, layout: 'rows' } : a
+}
+
+/**
+ * What an update from before 0.8.0 writes to chrome.storage.local["appearance"] (background.ts,
+ * like the early-user mark): the saved settings with Rows, or just Rows when nothing was saved.
+ * Null when a layout is saved already, since someone picked it.
+ */
+export function rowsForOldBoard(saved: unknown): Record<string, unknown> | null {
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+    return savedBeforeLayout(saved) ? { ...(saved as Record<string, unknown>), layout: 'rows' } : null
+  }
+  return { layout: 'rows' }
+}
+
 /**
  * The localStorage copy that public/theme-boot.js reads to theme the first frame, before any
  * module loads. The script knows no palettes, so the one-scheme case is worked out here. The full
  * settings ride along so the store starts from them without waiting for chrome.storage.
+ * 0.7.0: `look` is the Pro look on screen (empty while Pro is off), `looks` the saved Pro looks and
+ * `pro` the last known Pro state, so a lapsed key never flashes Pro looks on the first frame.
  */
 export interface BootMirror {
   palette: PaletteId
@@ -149,9 +197,14 @@ export interface BootMirror {
   bg: BgKind
   gradient: GradientId
   settings: Appearance
+  look: LookMirror
+  looks: Looks
+  pro: boolean
+  /** Teams T8 (0.8.0): the company's accent from Chrome policy, when one is set. */
+  policyAccent?: string
 }
 
-export function bootMirror(a: Appearance): BootMirror {
+export function bootMirror(a: Appearance, looks: Looks = DEFAULT_LOOKS, pro = false, policyAccent: string | null = null): BootMirror {
   return {
     palette: a.palette,
     mode: a.mode,
@@ -160,6 +213,32 @@ export function bootMirror(a: Appearance): BootMirror {
     bg: a.bg.kind,
     gradient: a.bg.gradient,
     settings: a,
+    look: lookMirror(looks, pro, policyAccent),
+    looks,
+    pro,
+    ...(policyAccent ? { policyAccent } : {}),
+  }
+}
+
+/** The company accent the last page saw, so the next one paints it on the first frame. */
+export function policyAccentFromMirror(json: string | null): string | null {
+  if (!json) return null
+  try {
+    const m = JSON.parse(json) as Partial<BootMirror> | null
+    return normalizeHex(m?.policyAccent)
+  } catch {
+    return null
+  }
+}
+
+/** The saved Pro looks and the last known Pro state from the mirror; defaults when there are none. */
+export function looksFromMirror(json: string | null): { looks: Looks; pro: boolean } {
+  if (!json) return { looks: DEFAULT_LOOKS, pro: false }
+  try {
+    const m = JSON.parse(json) as Partial<BootMirror> | null
+    return { looks: parseLooks(m?.looks), pro: m?.pro === true }
+  } catch {
+    return { looks: DEFAULT_LOOKS, pro: false }
   }
 }
 
@@ -168,7 +247,8 @@ export function settingsFromMirror(json: string | null): Appearance {
   if (!json) return DEFAULT_APPEARANCE
   try {
     const m = JSON.parse(json) as Partial<BootMirror> | null
-    return parseAppearance(m?.settings)
+    // A copy written before 0.8.0 has no layout: that board keeps Rows from its first frame.
+    return parseSavedAppearance(m?.settings)
   } catch {
     return DEFAULT_APPEARANCE
   }

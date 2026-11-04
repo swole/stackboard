@@ -10,7 +10,7 @@ export default defineManifest({
   default_locale: 'en',
   name: '__MSG_extName__',
   short_name: '__MSG_extShortName__',
-  version: '0.6.0',
+  version: '0.8.0',
   description: '__MSG_extDescription__',
   chrome_url_overrides: {
     newtab: 'newtab.html',
@@ -29,7 +29,22 @@ export default defineManifest({
     default_popup: 'popup.html',
     default_title: 'Save current tab to Stackboard',
   },
-  permissions: ['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups'],
+  // 0.8.0: `search` lets a go link with no match fall back to the person's default search engine.
+  // Chrome shows no install warning for it (permissions list, and checked in Chrome for Testing
+  // with getPermissionWarningsByManifest in the e2e suite), so updating needs no new consent.
+  permissions: ['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups', 'search'],
+  // 0.8.0 (Teams): an IT admin can set a company board through Chrome policy (Google Admin,
+  // Intune, Group Policy, a macOS profile). The schema adds no permission and no install
+  // warning; the extension reads the values with chrome.storage.managed.
+  storage: { managed_schema: 'managed_schema.json' },
+  // 0.8.0 (share a stack, T4): getstackboard.com/s may ask whether Stackboard is installed and
+  // hand it a shared stack, which the person then confirms in a Stackboard tab. No permission and
+  // no install warning. Listing only web pages also stops other extensions messaging this one,
+  // which nothing relied on. Tests reach it by serving the page from that origin in puppeteer.
+  externally_connectable: { matches: ['https://getstackboard.com/*'] },
+  // 0.8.0 (Teams T6, free for everyone): go links. Typing "go" and a space in the address bar hands
+  // the rest to the service worker, which suggests links by name. A manifest key, no permission.
+  omnibox: { keyword: 'go' },
   icons: {
     16: 'icons/16.png',
     48: 'icons/48.png',

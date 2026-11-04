@@ -16,8 +16,14 @@ Your Chrome bookmarks as a board on the new tab page. Spaces down the side, stac
 - **Search every space** from the sidebar (press `/`).
 - **Stash this window** (Alt+Shift+S or the toolbar popup): saves every open tab as a stack, one per tab group, and can close them. Open the stack later and they come back as a tab group.
 - **Tab bankruptcy** (toolbar popup, under Stash this window): stashes every tab in every window, closes them all and gives you a certificate you can save as an image.
-- **To-do lists:** pick To-do list when you add a stack and it sits on the board with your links. Enter adds an item, checked items sink to the bottom, and Clear done tidies up.
+- **To-do lists (Pro):** pick To-do list when you add a stack and it sits on the board with your links. Enter adds an item, checked items sink to the bottom, and Clear done tidies up.
 - **Save selected tabs:** Ctrl or Shift+click a few tabs in the tab strip, open the toolbar popup, and one tap on a stack saves them all.
+- **Folders inside stacks:** a stack can hold folders, and they open and close in place.
+- **Packed layout:** closes the gaps under short stacks (Settings > Appearance > Layout).
+- **Share a stack as a link:** the links travel inside the link itself, after the #, which browsers never send to a server.
+- **Go links:** type `go`, a space and part of a link's name in the address bar to open it.
+- **Teams:** IT can add company spaces and an announcement line through Chrome policy. They show read-only next to your own spaces.
+- **Stackboard Pro (optional, $4.99 a year, with a 14-day trial in Settings):** to-do lists, auto-archive for idle tabs, daily snapshots of your board, more looks, clean-up (duplicates, links you never open, sites that no longer load), due dates and repeats with a Today list, and AI tidy with a paid key.
 - **Nothing fails silently:** if a bookmark write fails, a message says what went wrong.
 
 ## Where your data lives
@@ -28,7 +34,9 @@ Coming from another tool? See [Stackboard as a OneTab alternative](https://getst
 
 To-do items are the one exception: they live in Chrome's extension sync storage, so they sync through Chrome with your extension settings, and uninstalling Stackboard deletes them. Each list keeps one bookmark in its stack folder so every device knows which list goes where.
 
-No account, no server, no analytics. A few preferences (last space opened, your theme, whether you've answered the one-time rating ask) stay in local storage on your device, and a wallpaper you pick stays in the browser's local database on that device. [Privacy policy](https://stackboard.vercel.app/privacy)
+No account and no analytics, and the free extension contacts no server. A few preferences (last space opened, your theme, whether you've answered the one-time rating ask) stay in local storage on your device, and a wallpaper you pick stays in the browser's local database on that device.
+
+Pro goes online only for its own features: it checks your license key with Polar, the payment provider, every few days; AI tidy sends one space's link titles and addresses to getstackboard.com, which asks Anthropic's API to sort them, only when you press Tidy; and clean-up's link check asks each site whether it still loads. The [privacy policy](https://getstackboard.com/privacy) has the details.
 
 ## Free bookmark tools
 
@@ -44,8 +52,11 @@ Moving tabs out of another app, or cleaning up the bookmarks you already have? T
 |---|---|
 | `bookmarks` | Read and write the Stackboard folder; read your other folders only when you choose to copy them in |
 | `tabs`, `tabGroups` | The "already open" dot, saving the current tab, stashing a window and reopening it as a group |
-| `storage` | A few local flags (first-run hints), your appearance settings and your to-do items |
+| `storage` | A few local flags (first-run hints), your appearance settings, your to-do items, and the Pro key and settings |
 | `favicon` | Site icons from Chrome's own favicon cache |
+| `search` | Go links: when nothing on your board matches, the text goes to your default search engine |
+
+`externally_connectable` lets two getstackboard.com pages talk to the extension: a shared-stack page can add the stack to your board, and the page after checkout hands over your Pro key.
 
 ## Build it yourself
 

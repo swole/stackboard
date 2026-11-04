@@ -1,6 +1,8 @@
 import { buildSpaceTitle } from './icon'
 import { ensureRoot } from './bookmarks'
 import { bankruptcyStackTitle, planStash, stashLabel, type Bankruptcy, type StashPlan } from './stashPlan'
+import { ARCHIVE_EVERY_MS, archiveStackTitle, isIdle, planArchive, type ArchiveTab } from './archivePlan'
+import { tabSeen } from './tabSeen'
 
 // "Stash this window" (0.4.0): save every tab into stacks in a "📥 Stash" space, newest first,
 // then optionally close them. Runs from the popup and from the keyboard shortcut (background.ts).
@@ -103,6 +105,51 @@ export async function declareBankruptcy(): Promise<Bankruptcy | null> {
   await chrome.tabs.create({ windowId: all[0].windowId, active: true })
   await chrome.tabs.remove(tabIds)
   return bankruptcy
+}
+
+/** When this computer last ran auto-archive (storage.local, ms). */
+const ARCHIVE_RAN_KEY = 'archiveRanAt'
+let archiving = false
+
+/**
+ * Auto-archive (Pro, 0.7.0): saves idle tabs into today's "Archived" stack in the Stash space,
+ * newest stack first, then closes them. Runs in the service worker so a new tab that closes
+ * right away can't cut it short; at most once every 15 minutes, one run at a time.
+ */
+export async function archiveIdleTabs(afterMs: number, now = Date.now()): Promise<{ archived: number; spaceId?: string }> {
+  if (archiving) return { archived: 0 }
+  archiving = true
+  try {
+    const ran = (await chrome.storage.local.get(ARCHIVE_RAN_KEY))[ARCHIVE_RAN_KEY]
+    if (typeof ran === 'number' && now - ran < ARCHIVE_EVERY_MS && ran <= now) return { archived: 0 }
+    await chrome.storage.local.set({ [ARCHIVE_RAN_KEY]: now })
+
+    // Incognito windows stay out: their tabs would land in synced bookmarks.
+    const wins = (await chrome.windows.getAll({ windowTypes: ['normal'], populate: true })).filter((w) => !w.incognito)
+    const seen = await tabSeen(now)
+    const plan = planArchive(wins.flatMap((w) => (w.tabs ?? []) as ArchiveTab[]), afterMs, now, seen)
+    if (!plan.tabIds.length) return { archived: 0 }
+
+    const spaceId = await stashSpaceId()
+    const title = archiveStackTitle(new Date(now))
+    const kids = await chrome.bookmarks.getChildren(spaceId)
+    const stack = kids.find((k) => !k.url && k.title === title) ?? (await chrome.bookmarks.create({ parentId: spaceId, index: 0, title }))
+    const have = new Set((await chrome.bookmarks.getChildren(stack.id)).map((b) => b.url))
+    for (const link of plan.links) {
+      if (have.has(link.url)) continue
+      await chrome.bookmarks.create({ parentId: stack.id, title: link.title, url: link.url })
+    }
+
+    // A tab someone switched to while the links were saving stays open.
+    const now2 = Date.now()
+    const seen2 = await tabSeen(now2)
+    const still = await Promise.all(plan.tabIds.map((id) => chrome.tabs.get(id).catch(() => null)))
+    const close = still.filter((t): t is chrome.tabs.Tab => !!t && !t.incognito && isIdle(t as ArchiveTab, afterMs, now2, seen2)).map((t) => t.id!)
+    if (close.length) await chrome.tabs.remove(close)
+    return { archived: close.length, spaceId }
+  } finally {
+    archiving = false
+  }
 }
 
 /** For a freshly opened new tab: the stash it should show, if one just happened. */

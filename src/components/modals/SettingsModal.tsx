@@ -7,12 +7,15 @@ import { REVIEWS_URL, SHARE_URL } from '../../lib/onboarding'
 import { prefs } from '../../lib/prefs'
 import type { BookmarkBackup } from '../../lib/types'
 import { useStackableStore } from '../../store/useStackableStore'
-import { AppearanceSettings } from '../AppearanceSettings'
+import { AppearanceSettings, LayoutSetting } from '../AppearanceSettings'
+import { ProSection } from '../ProSection'
 
 export function SettingsModal() {
   const close = useStackableStore((s) => s.closeModal)
   const openModal = useStackableStore((s) => s.openModal)
   const refresh = useStackableStore((s) => s.refresh)
+  // Teams T8: settings the company's policy has switched off.
+  const lock = useStackableStore((s) => s.tree?.company?.lock)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
@@ -71,28 +74,50 @@ export function SettingsModal() {
       footer={<SecondaryButton onClick={close}>Close</SecondaryButton>}
     >
       <div className="flex flex-col gap-5">
-        <AppearanceSettings />
+        {lock?.appearance ? (
+          <section data-managed-setting="Appearance">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Appearance</h3>
+            <p className="mb-2.5 text-xs text-muted">Your company manages the look of your board. The layout is still yours.</p>
+            <LayoutSetting />
+          </section>
+        ) : (
+          <AppearanceSettings />
+        )}
 
+        <ProSection />
+
+        {lock?.importExport && lock.starterPacks ? (
+          <Managed title="Add to your board" />
+        ) : (
         <section>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
             Add to your board
           </h3>
           <div className="flex flex-wrap gap-2">
+            {!lock?.importExport && (
             <SecondaryButton onClick={() => openModal({ kind: 'import' })}>
               <span className="inline-flex items-center gap-1.5">
                 <FolderInput className="h-3.5 w-3.5" />
                 Copy from Chrome bookmarks
               </span>
             </SecondaryButton>
+            )}
+            {!lock?.starterPacks && (
             <SecondaryButton onClick={() => openModal({ kind: 'packs' })}>
               <span className="inline-flex items-center gap-1.5">
                 <Package className="h-3.5 w-3.5" />
                 Starter packs
               </span>
             </SecondaryButton>
+            )}
           </div>
+          {(lock?.importExport || lock?.starterPacks) && <p className="mt-1.5 text-xs text-muted">Your company manages the rest of this setting.</p>}
         </section>
+        )}
 
+        {lock?.importExport ? (
+          <Managed title="Backup" />
+        ) : (
         <section>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
             Backup
@@ -116,6 +141,7 @@ export function SettingsModal() {
             </SecondaryButton>
           </div>
         </section>
+        )}
 
         <KeysSection />
 
@@ -153,6 +179,16 @@ export function SettingsModal() {
   )
 }
 
+/** A section the company's Chrome policy has taken over (Teams T8, 0.8.0). */
+function Managed({ title }: { title: string }) {
+  return (
+    <section data-managed-setting={title}>
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{title}</h3>
+      <p className="text-xs text-muted">Your company manages this setting.</p>
+    </section>
+  )
+}
+
 /** The board's keyboard shortcuts, plus the stash shortcut as Chrome has it set. */
 function KeysSection() {
   const [stash, setStash] = useState('')
@@ -170,6 +206,8 @@ function KeysSection() {
     ['Esc', 'Clear the search'],
   ]
   if (stash) rows.push([stash, 'Stash this window, from any tab'])
+  // Teams T6 (free for everyone): the omnibox keyword in manifest.config.ts.
+  rows.push(['go', "Go links: type go and a space in the address bar, then a link's name"])
 
   return (
     <section data-keys>

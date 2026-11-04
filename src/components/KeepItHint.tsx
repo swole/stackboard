@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { dismissKeepHint, shouldShowKeepHint } from '../lib/onboarding'
+import { useStackableStore } from '../store/useStackableStore'
+import { dismissedAnnouncements } from '../lib/company'
+import { showAnnouncement } from '../lib/managedPlan'
 
 /**
  * First new tabs after an install (0.4.0): Chrome asks whether to keep an extension's new
@@ -8,6 +11,8 @@ import { dismissKeepHint, shouldShowKeepHint } from '../lib/onboarding'
  */
 export function KeepItHint() {
   const [show, setShow] = useState(false)
+  // A company announcement line (Teams, 0.8.0) holds the top edge: sit just below it.
+  const belowLine = useStackableStore((s) => showAnnouncement(s.tree?.company?.announcement, dismissedAnnouncements()))
 
   useEffect(() => {
     let live = true
@@ -28,7 +33,7 @@ export function KeepItHint() {
     <div
       role="note"
       data-keep-hint
-      className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-4"
+      className={`pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4 ${belowLine ? 'top-12' : 'top-3'}`}
     >
       <div className="pop-in pointer-events-auto flex items-center gap-3 rounded-full bg-inverse py-1.5 pl-4 pr-1.5 text-sm text-on-inverse shadow-toast ring-1 ring-on-inverse/10 ring-inset">
         <span>

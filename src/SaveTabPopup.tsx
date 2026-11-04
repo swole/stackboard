@@ -6,6 +6,7 @@ import { planAllWindows, planWindow } from './lib/stash'
 import { useTwoStep } from './hooks/useTwoStep'
 import { planSelected, staysNote, type SelectionPlan, type StashPlan } from './lib/stashPlan'
 import { plural } from './lib/importPlan'
+import { allLinks } from './lib/folderPlan'
 
 interface CurrentTab {
   url: string
@@ -215,8 +216,9 @@ export default function SaveTabPopup() {
                             className="flex w-full items-center justify-between gap-2 px-6 py-1.5 text-left text-sm text-soft hover:bg-card hover:text-strong disabled:opacity-50"
                           >
                             <span className="truncate">{st.title}</span>
+                            {/* Saves go to the stack itself; the count takes in its folders, as on the board (0.8.0). */}
                             <span className="text-[11px] text-faint">
-                              {st.bookmarks.length}
+                              {allLinks(st).length}
                             </span>
                           </button>
                         ))

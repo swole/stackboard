@@ -1,13 +1,18 @@
 // Per-device UI memory. localStorage is synchronous, so the first paint already shows the
 // right space with no flicker. Bookmark ids are per-device too, so nothing here should sync.
 
+import { parseOpenFolders, OPEN_FOLDERS_MAX } from './folderPlan'
+
 const LAST_SPACE = 'stackable:lastSpaceId'
+const OPEN_FOLDERS = 'stackable:openFolders'
 const SIDEBAR_COLLAPSED = 'stackable:sidebarCollapsed'
 const OPENS = 'stackable:opens'
 const FIRST_SEEN = 'stackable:firstSeen'
 const RATING = 'stackable:rating'
 const KEEP_HINT_SHOWN = 'stackable:keepHintShown'
 const STASHES = 'stackable:stashes'
+const WHATS_NEW = 'stackable:whatsNew070'
+const WHATS_NEW_080 = 'stackable:whatsNew080'
 
 function read(key: string): string | null {
   try {
@@ -31,6 +36,9 @@ export const prefs = {
   setLastSpaceId: (id: string | null) => write(LAST_SPACE, id),
   sidebarCollapsed: () => read(SIDEBAR_COLLAPSED) === '1',
   setSidebarCollapsed: (collapsed: boolean) => write(SIDEBAR_COLLAPSED, collapsed ? '1' : null),
+  /** Folders inside stacks that are open on this device, by id (0.8.0); the rest show folded. */
+  openFolders: (): string[] => parseOpenFolders(read(OPEN_FOLDERS)),
+  setOpenFolders: (ids: string[]) => write(OPEN_FOLDERS, ids.length ? JSON.stringify(ids.slice(-OPEN_FOLDERS_MAX)) : null),
 
   /** Counts this new tab (call once per page load). Nothing here leaves the device. */
   countOpen: (now = Date.now()): { opens: number; firstSeen: number } => {
@@ -53,6 +61,12 @@ export const prefs = {
     write(STASHES, String(n))
     return n
   },
+  /** New tabs that showed the 0.7.0 what's-new note; -1 once it was answered (0.7.0). */
+  whatsNewShows: (): number => Number(read(WHATS_NEW)) || 0,
+  setWhatsNewShows: (n: number) => write(WHATS_NEW, String(n)),
+  /** The same for the 0.8.0 note (0.8.0). */
+  whatsNew080Shows: (): number => Number(read(WHATS_NEW_080)) || 0,
+  setWhatsNew080Shows: (n: number) => write(WHATS_NEW_080, String(n)),
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

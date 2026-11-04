@@ -34,6 +34,27 @@ export const DEMO_TREE: StackableTree = {
             { id: 'bm-7b', parentStackId: 'st-work-docs', title: 'Rewards Experience Design Phase 2 – Figma', url: 'https://www.figma.com/design/demo/rewards', dateAdded: Date.now() - 60 * 60 * 1000 },
             { id: 'bm-7c', parentStackId: 'st-work-docs', title: '💎 Crown Jewel', url: 'https://example.com/crown-jewel' },
           ],
+          // Folders inside a stack (0.8.0): folded until opened, a second level inside the first.
+          folders: [
+            {
+              id: 'fd-work-clients',
+              parentId: 'st-work-docs',
+              title: 'Clients',
+              bookmarks: [
+                { id: 'bm-7d', parentStackId: 'fd-work-clients', title: 'Acme brief', url: 'https://example.com/acme' },
+                { id: 'bm-7e', parentStackId: 'fd-work-clients', title: 'Globex contract', url: 'https://example.com/globex' },
+              ],
+              folders: [
+                {
+                  id: 'fd-work-archive',
+                  parentId: 'fd-work-clients',
+                  title: 'Archive',
+                  bookmarks: [{ id: 'bm-7f', parentStackId: 'fd-work-archive', title: 'Initech (2025)', url: 'https://example.com/initech' }],
+                  folders: [],
+                },
+              ],
+            },
+          ],
         },
         {
           id: 'st-work-todo',

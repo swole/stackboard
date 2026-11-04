@@ -1,11 +1,20 @@
+import { isDay, isMonthDay, isRepeat, type Repeat } from './duePlan'
+
 // To-do stacks (0.6.0). A to-do stack is an ordinary stack folder holding one marker bookmark,
 // https://getstackboard.com/todo#<id>. The folder gives the list its name, its space and its
 // place on the board, all synced with the bookmarks; the items live in chrome.storage.sync under
 // todo:<id>, because a to-do is not a link. Pure helpers only: todos.ts does the I/O.
+//
+// 0.8.0: due days, repeats and month anchors live apart, under todoDue:<id> ({ [itemId]: entry }).
+// 0.7.0 rewrites todo:<id> with only id/text/done/at whenever it saves a list, so a computer that
+// hasn't updated yet would erase them if they sat on the items; it never touches todoDue:<id>.
+// parseList also keeps item fields it doesn't know, so later versions don't lose data to this one.
 
 export const TODO_MARKER_BASE = 'https://getstackboard.com/todo#'
 export const TODO_MARKER_TITLE = 'Stackboard to-do list'
 export const TODO_KEY_PREFIX = 'todo:'
+/** Due data per list (0.8.0). Doesn't start with TODO_KEY_PREFIX, so 0.7.0's sweep never sees it. */
+export const TODO_DUE_PREFIX = 'todoDue:'
 export const TODO_MAX_ITEMS = 100
 export const TODO_MAX_TEXT = 280
 // chrome.storage.sync allows 8,192 bytes per item, key included; keep a margin.
@@ -21,6 +30,16 @@ export interface TodoItem {
   done: boolean
   /** ms since epoch, when it was added */
   at: number
+  /** Due day, local 'YYYY-MM-DD' (Pro, 0.7.1; duePlan.ts). Absent on undated items. */
+  d?: string
+  /** Repeat rule, only with a due day (Pro, 0.7.1). */
+  r?: Repeat
+  /**
+   * Monthly repeats only: the day of the month it was set for (1-31), so a date clamped into a
+   * short month (28 Feb) goes back to the 28th, 30th or 31st after it. Items saved before it
+   * existed step from their date as before.
+   */
+  md?: number
 }
 
 export interface TodoList {
@@ -49,6 +68,81 @@ export function todoKey(id: string): string {
   return TODO_KEY_PREFIX + id
 }
 
+export function todoDueKey(id: string): string {
+  return TODO_DUE_PREFIX + id
+}
+
+/** A to-do's due day, repeat and month anchor, stored apart from the item (0.8.0). */
+export interface DueEntry {
+  d: string
+  r?: Repeat
+  md?: number
+}
+
+export type DueMap = Record<string, DueEntry>
+
+/** The item fields this version knows; parseList keeps every other field as it found it. */
+const KNOWN_ITEM_FIELDS = new Set(['id', 'text', 'done', 'at', 'd', 'r', 'md'])
+
+function dueEntry(raw: unknown): DueEntry | null {
+  const r = raw as Partial<DueEntry> | null | undefined
+  if (!r || !isDay(r.d)) return null
+  const e: DueEntry = { d: r.d }
+  if (isRepeat(r.r)) e.r = r.r
+  if (e.r === 'm' && isMonthDay(r.md)) e.md = r.md
+  return e
+}
+
+/** Whatever todoDue:<id> holds, as valid entries only. */
+export function parseDue(raw: unknown): DueMap {
+  const out: DueMap = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    const e = dueEntry(v)
+    if (e) out[id] = e
+  }
+  return out
+}
+
+/**
+ * The list as stored: the items without their due fields (todo:<id>) and the due fields by item
+ * id (todoDue:<id>). Entries exist only for items on the list, so a due entry whose item was
+ * deleted (say on a computer still on 0.7.0) drops out at the next save.
+ */
+export function splitDue(list: TodoList): { items: TodoList; due: DueMap } {
+  const due: DueMap = {}
+  const items = list.items.map((it) => {
+    const { d, r, md, ...rest } = it
+    const e = dueEntry({ d, r, md })
+    if (e) due[it.id] = e
+    return rest as TodoItem
+  })
+  return { items: { ...list, items }, due }
+}
+
+/**
+ * The list as the board uses it: due fields back on their items. The todoDue entry wins; an item
+ * without one keeps a due day saved on the item itself (0.8.0 test builds), which the next save
+ * moves over. Entries for items that are gone are ignored.
+ */
+export function mergeDue(list: TodoList, rawDue: unknown): TodoList {
+  const due = parseDue(rawDue)
+  if (!Object.keys(due).length) return list
+  return {
+    ...list,
+    items: list.items.map((it) => {
+      const e = due[it.id]
+      if (!e) return it
+      const { d: _d, r: _r, md: _md, ...rest } = it
+      return { ...rest, ...e }
+    }),
+  }
+}
+
+export function dueBytes(key: string, due: DueMap): number {
+  return new TextEncoder().encode(key + JSON.stringify(due)).length
+}
+
 export function emptyList(): TodoList {
   return { v: 1, items: [] }
 }
@@ -71,7 +165,17 @@ export function parseList(raw: unknown): TodoList {
     const text = cleanText(it.text)
     if (!text) continue
     seen.add(it.id)
-    out.items.push({ id: it.id, text, done: it.done === true, at: Number(it.at) || 0 })
+    // Fields from a later version ride along untouched, so saving here never strips them.
+    const extra: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(it)) if (!KNOWN_ITEM_FIELDS.has(k)) extra[k] = v
+    const item = { ...extra, id: it.id, text, done: it.done === true, at: Number(it.at) || 0 } as TodoItem
+    // 0.7.1: a due day and a repeat ride along when valid; a repeat needs a day.
+    if (isDay(it.d)) {
+      item.d = it.d
+      if (isRepeat(it.r)) item.r = it.r
+      if (item.r === 'm' && isMonthDay(it.md)) item.md = it.md
+    }
+    out.items.push(item)
     if (out.items.length >= TODO_MAX_ITEMS) break
   }
   if (typeof r.orphanSince === 'number') out.orphanSince = r.orphanSince

@@ -1,5 +1,5 @@
-import { IS_EXTENSION, createBookmark, createSpace, createStack, ensureRoot, rootTitles } from './bookmarks'
-import { planFolder, type FolderNode, type Plan, type PlannedSpace } from './importPlan'
+import { IS_EXTENSION, createBookmark, createFolder, createSpace, createStack, ensureRoot, rootTitles } from './bookmarks'
+import { planFolder, type FolderNode, type Plan, type PlannedFolder, type PlannedLink, type PlannedSpace } from './importPlan'
 
 // Chrome's own top-level folders as import sources for the welcome screen and Settings.
 // Everything is copied: the originals are never moved or changed.
@@ -44,6 +44,7 @@ const DEMO_SOURCES: ImportSource[] = [
             children: [
               { id: 'd', title: 'Jira', url: 'https://www.atlassian.com/software/jira' },
               { id: 'e', title: 'Figma', url: 'https://www.figma.com/' },
+              { id: 'f', title: 'Clients', children: [{ id: 'g', title: 'Acme', url: 'https://example.com/acme' }] },
             ],
           },
         ],
@@ -99,12 +100,24 @@ export async function createPlannedSpace(
 ): Promise<string> {
   const spaceId = await createSpace(space.name, space.emoji)
   let done = 0
-  for (const stack of space.stacks) {
-    const stackId = await createStack(spaceId, stack.title)
-    for (const link of stack.links) {
-      await createBookmark(stackId, link.title, link.url)
+  const addLinks = async (parentId: string, links: PlannedLink[]) => {
+    for (const link of links) {
+      await createBookmark(parentId, link.title, link.url)
       onProgress?.(++done)
     }
+  }
+  // Folders inside a stack keep their place in it (0.8.0), after the stack's own links.
+  const addFolders = async (parentId: string, folders: PlannedFolder[] = []) => {
+    for (const f of folders) {
+      const id = await createFolder(parentId, f.title)
+      await addLinks(id, f.links)
+      await addFolders(id, f.folders)
+    }
+  }
+  for (const stack of space.stacks) {
+    const stackId = await createStack(spaceId, stack.title)
+    await addLinks(stackId, stack.links)
+    await addFolders(stackId, stack.folders)
   }
   return spaceId
 }

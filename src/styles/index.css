@@ -126,6 +126,167 @@
     0 1px 12px color-mix(in srgb, var(--sb-canvas) 90%, transparent);
 }
 
+/* ---------- Packed stacks (0.8.0) ----------
+   The space between a stack and the one under it, set on the stack grid per density and wallpaper
+   (SpaceView.tsx). Rows uses it as the row gap; Packed (hooks/usePackedGrid.ts) adds it to each
+   stack's span. Typed, so getComputedStyle hands it back in px. */
+@property --stack-gap {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+/* ---------- Pro looks (0.7.0) ----------
+   lib/looks.ts works out the numbers; store/useAppearance.ts (and theme-boot.js on the first frame)
+   puts them on <html> while Pro or the trial is on. */
+
+/* A custom accent: the colour, its button text and hover shade, plus text and mark shades already
+   pushed light or dark enough to read on every palette's surfaces. */
+:root[data-accent="custom"][data-scheme] {
+  --sb-accent: var(--sb-custom-accent);
+  --sb-accent-hover: var(--sb-custom-accent-hover);
+  --sb-on-accent: var(--sb-custom-on-accent);
+  --sb-accent-soft: color-mix(in srgb, var(--sb-custom-accent) 14%, var(--sb-canvas));
+  --sb-accent-line: color-mix(in srgb, var(--sb-custom-accent) 50%, var(--sb-canvas));
+  --sb-accent-text: var(--sb-custom-text-light);
+  --sb-accent-mark: var(--sb-custom-mark-light);
+  --sb-focus: var(--sb-custom-mark-light);
+  /* Toasts sit on a dark inverse surface in every palette. */
+  --sb-inverse-accent: var(--sb-custom-text-dark);
+}
+:root[data-accent="custom"][data-scheme="dark"] {
+  --sb-accent-text: var(--sb-custom-text-dark);
+  --sb-accent-mark: var(--sb-custom-mark-dark);
+  --sb-focus: var(--sb-custom-mark-dark);
+}
+
+/* Tile size: Small and Large rescale the stack grid and its cards; Medium is the stock board. */
+:root[data-tile="small"] [data-stack-grid] {
+  grid-template-columns: repeat(auto-fill, minmax(204px, 1fr));
+  column-gap: 1.125rem;
+}
+:root[data-tile="small"][data-density="compact"] [data-stack-grid] {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  column-gap: 0.875rem;
+}
+:root[data-tile="large"] [data-stack-grid] {
+  grid-template-columns: repeat(auto-fill, minmax(304px, 1fr));
+  column-gap: 1.75rem;
+}
+:root[data-tile="large"][data-density="compact"] [data-stack-grid] {
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  column-gap: 1.25rem;
+}
+:root[data-tile="small"] [data-card] {
+  font-size: 12.5px;
+}
+:root[data-tile="small"] [data-card] > a {
+  padding-block: 0.3125rem;
+}
+:root[data-tile="small"][data-density="compact"] [data-card] {
+  font-size: 12px;
+}
+:root[data-tile="small"][data-density="compact"] [data-card] > a {
+  padding-block: 0.1875rem;
+}
+:root[data-tile="small"] [data-card] > a > span:first-child {
+  zoom: 0.875;
+}
+:root[data-tile="large"] [data-card] {
+  font-size: 15px;
+}
+:root[data-tile="large"] [data-card] > a {
+  padding-block: 0.6875rem;
+  gap: 0.625rem;
+}
+:root[data-tile="large"][data-density="compact"] [data-card] {
+  font-size: 14px;
+}
+:root[data-tile="large"][data-density="compact"] [data-card] > a {
+  padding-block: 0.4375rem;
+}
+:root[data-tile="large"] [data-card] > a > span:first-child {
+  zoom: 1.25;
+}
+:root[data-tile="large"] [data-stack-grid] h3 {
+  font-size: 15px;
+}
+
+/* Wallpapers: patterns drawn from the palette's own tokens, so each suits every palette in light
+   and dark. CSS only, so theme-boot.js shows them on the first frame. The swatches in Settings
+   ([data-wallpaper-preview]) reuse the same rules. */
+:root[data-bg="wallpaper"][data-wallpaper="dots"] body,
+[data-wallpaper-preview="dots"] {
+  background:
+    radial-gradient(circle, var(--sb-line-strong) 1.3px, transparent 1.8px) 0 0 / 22px 22px,
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="grid"] body,
+[data-wallpaper-preview="grid"] {
+  background:
+    linear-gradient(var(--sb-line-strong) 1px, transparent 1px) -1px -1px / 140px 140px,
+    linear-gradient(90deg, var(--sb-line-strong) 1px, transparent 1px) -1px -1px / 140px 140px,
+    linear-gradient(var(--sb-line) 1px, transparent 1px) -1px -1px / 28px 28px,
+    linear-gradient(90deg, var(--sb-line) 1px, transparent 1px) -1px -1px / 28px 28px,
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="stripes"] body,
+[data-wallpaper-preview="stripes"] {
+  background:
+    repeating-linear-gradient(135deg, transparent 0 13px, var(--sb-line) 13px 15px),
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="rings"] body,
+[data-wallpaper-preview="rings"] {
+  background:
+    radial-gradient(circle at 100% 0%, transparent 25%, var(--sb-canvas) 85%),
+    repeating-radial-gradient(circle at 100% 0%, transparent 0 26px, var(--sb-line-strong) 26px 27.5px),
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="paper"] body,
+[data-wallpaper-preview="paper"] {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 180px,
+    radial-gradient(130% 100% at 50% 0%, transparent 55%, color-mix(in srgb, var(--sb-shade) 12%, transparent)),
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="aurora"] body,
+[data-wallpaper-preview="aurora"] {
+  background:
+    radial-gradient(55% 45% at 12% 8%, color-mix(in srgb, var(--sb-accent) 24%, transparent), transparent 72%),
+    radial-gradient(50% 45% at 88% 16%, color-mix(in srgb, var(--sb-tint-5-bg) 85%, transparent), transparent 70%),
+    radial-gradient(60% 50% at 72% 100%, color-mix(in srgb, var(--sb-tint-3-bg) 80%, transparent), transparent 72%),
+    radial-gradient(45% 40% at 18% 92%, color-mix(in srgb, var(--sb-tint-1-bg) 70%, transparent), transparent 70%),
+    var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="glow"] body,
+[data-wallpaper-preview="glow"] {
+  background:
+    radial-gradient(70% 55% at 50% -10%, color-mix(in srgb, var(--sb-accent) 30%, transparent), transparent 70%),
+    radial-gradient(40% 35% at 100% 100%, color-mix(in srgb, var(--sb-accent) 12%, transparent), transparent 70%),
+    var(--sb-canvas);
+}
+/* Waves are an SVG line used as a mask, so the line itself can take the palette's colour. */
+:root[data-bg="wallpaper"][data-wallpaper="waves"] body,
+[data-wallpaper-preview="waves"] {
+  background: var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="waves"] body::before,
+[data-wallpaper-preview="waves"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--sb-line-strong);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='22'%3E%3Cpath d='M0 11c11-7 33-7 44 0s33 7 44 0' fill='none' stroke='%23000' stroke-width='1.3'/%3E%3C/svg%3E") 0 0 / 88px 22px repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='22'%3E%3Cpath d='M0 11c11-7 33-7 44 0s33 7 44 0' fill='none' stroke='%23000' stroke-width='1.3'/%3E%3C/svg%3E") 0 0 / 88px 22px repeat;
+}
+[data-wallpaper-preview="waves"]::before {
+  position: absolute;
+  z-index: 0;
+}
+
 /* A theme switch should land in one frame: the store sets this attribute while it swaps the
    palette, so hover fades and the like don't animate the change. */
 [data-theme-switching] *,

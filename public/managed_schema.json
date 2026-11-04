@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "properties": {
+    "companyName": {
+      "title": "Company name",
+      "description": "Label above the company spaces in the Stackboard sidebar.",
+      "type": "string"
+    },
+    "spaces": {
+      "title": "Company spaces",
+      "description": "Read-only spaces shown first on every new tab, each with stacks of links.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "title": "Space name", "type": "string" },
+          "emoji": { "title": "Space icon (one emoji)", "type": "string" },
+          "onboarding": {
+            "title": "Start here space",
+            "description": "Opens first and carries a Start here badge for a person's first 30 days, then moves after the other company spaces.",
+            "type": "boolean"
+          },
+          "stacks": {
+            "title": "Stacks",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "title": "Stack name", "type": "string" },
+                "links": {
+                  "title": "Links",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "title": { "title": "Link title", "type": "string" },
+                      "url": { "title": "Address (http or https)", "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "announcement": {
+      "title": "Announcement",
+      "description": "One line across the top of every new tab.",
+      "type": "object",
+      "properties": {
+        "id": { "title": "Announcement id (change it to show a dismissed line again)", "type": "string" },
+        "text": { "title": "Text", "type": "string" },
+        "url": { "title": "Link (http or https)", "type": "string" },
+        "dismissible": { "title": "People can dismiss it", "type": "boolean" }
+      }
+    },
+    "showManagedBookmarks": {
+      "title": "Show the ManagedBookmarks policy folder as a space",
+      "description": "On unless set to false.",
+      "type": "boolean"
+    },
+    "goLinks": {
+      "title": "Go links",
+      "description": "Short names people type after go and a space in the address bar, each with the address it opens (http or https). Names use letters, numbers, dots, dashes, underscores and slashes.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "brand": {
+      "title": "Brand",
+      "description": "The company's name in the sidebar header and its accent colour, for everyone.",
+      "type": "object",
+      "properties": {
+        "name": { "title": "Name in the sidebar header", "type": "string" },
+        "accent": { "title": "Accent colour (#rrggbb)", "type": "string" }
+      }
+    },
+    "lock": {
+      "title": "Locked settings",
+      "description": "Settings Stackboard hides, with a line saying the company manages them.",
+      "type": "object",
+      "properties": {
+        "appearance": { "title": "Lock appearance (palette, mode, background, looks)", "type": "boolean" },
+        "starterPacks": { "title": "Hide starter packs", "type": "boolean" },
+        "importExport": { "title": "Hide copying bookmarks in, backups and snapshot downloads", "type": "boolean" }
+      }
+    }
+  }
+}

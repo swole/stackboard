@@ -1,5 +1,6 @@
 import type { Bookmark } from './types'
 import { findOpenTab, switchToTab, type OpenTabIndex } from './openTabs'
+import { recordOpens } from './opens'
 
 /** Open a URL in a new tab next to this one, the way Ctrl+click on a link does. */
 export async function openInNewTab(url: string, active = false): Promise<void> {
@@ -36,6 +37,7 @@ export async function openHere(url: string, openTabs: OpenTabIndex | null): Prom
  */
 export async function openAllInTabs(bookmarks: Bookmark[], groupTitle?: string): Promise<void> {
   if (bookmarks.length === 0) return
+  recordOpens(bookmarks.map((b) => b.url))
 
   const created: chrome.tabs.Tab[] = []
   for (const bm of bookmarks) {

@@ -3,6 +3,8 @@
 // first frame, so a dark board never flashes cream. Extension pages allow no inline script, hence
 // this file. It reads the localStorage mirror that store/useAppearance.ts writes (the settings
 // themselves live in chrome.storage.local, which is async and too late for the first paint).
+// 0.7.0: the mirror's `look` is the Pro look on screen (accent colours, font, tile size,
+// wallpaper), worked out in lib/looks.ts; it is empty while Pro is off.
 ;(function () {
   var root = document.documentElement
   var saved = null
@@ -24,9 +26,24 @@
   root.setAttribute('data-mode', mode)
   root.setAttribute('data-scheme', scheme)
   root.setAttribute('data-density', a.density === 'compact' ? 'compact' : 'comfortable')
+
+  var look = a.look && typeof a.look === 'object' ? a.look : {}
+  var hex = /^#[0-9a-f]{6}$/i
+  if (typeof look.accent === 'string' && hex.test(look.accent) && look.vars && typeof look.vars === 'object') {
+    for (var name in look.vars) {
+      if (name.indexOf('--sb-custom-') === 0 && hex.test(look.vars[name])) root.style.setProperty(name, look.vars[name])
+    }
+    root.setAttribute('data-accent', 'custom')
+  }
+  if (typeof look.fontStack === 'string' && look.fontStack) root.style.setProperty('--font-sans', look.fontStack)
+  root.setAttribute('data-font', typeof look.font === 'string' ? look.font : 'default')
+  root.setAttribute('data-tile', look.tile === 'small' || look.tile === 'large' ? look.tile : 'medium')
+
   // Backgrounds belong to the board only, never the toolbar popup.
   if (root.hasAttribute('data-board')) {
-    root.setAttribute('data-bg', a.bg === 'gradient' || a.bg === 'image' ? a.bg : 'solid')
+    var wallpaper = typeof look.wallpaper === 'string' && /^[a-z]{2,16}$/.test(look.wallpaper) ? look.wallpaper : null
+    root.setAttribute('data-bg', wallpaper ? 'wallpaper' : a.bg === 'gradient' || a.bg === 'image' ? a.bg : 'solid')
     root.setAttribute('data-gradient', a.gradient === 2 || a.gradient === 3 ? String(a.gradient) : '1')
+    if (wallpaper) root.setAttribute('data-wallpaper', wallpaper)
   }
 })()

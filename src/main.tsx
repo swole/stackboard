@@ -4,6 +4,9 @@ import App from './App'
 import './styles/index.css'
 import { useStackableStore } from './store/useStackableStore'
 import { initAppearance } from './store/useAppearance'
+import { initPro } from './lib/pro'
+import { initArchive } from './lib/autoArchive'
+import { initToday } from './lib/today'
 
 // Dev server only: lets the browser console poke the store (fake open tabs, toasts).
 if (import.meta.env.DEV) {
@@ -13,6 +16,13 @@ if (import.meta.env.DEV) {
 // Palette, mode, density and background: theme-boot.js already put them on <html> for the first
 // frame; this catches up with chrome.storage and follows the OS and other tabs from here on.
 initAppearance()
+
+// Stackboard Pro (0.7.0): license, trial and the early-user mark, checked with Polar when due.
+initPro()
+void initArchive()
+
+// Due dates (0.8.0): the day moves on at local midnight in a tab left open.
+initToday()
 
 // A failed bookmark write must never look like "nothing happened" (a Brave user on r/startpages,
 // 2026-10-11, clicked New space and a starter pack with no effect). Show the error so people can

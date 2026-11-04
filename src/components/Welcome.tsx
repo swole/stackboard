@@ -12,8 +12,10 @@ const delay = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` })
  */
 export function Welcome() {
   const openModal = useStackableStore((s) => s.openModal)
+  // Teams T8: a company can switch off copying bookmarks in and the starter packs.
+  const lock = useStackableStore((s) => s.tree?.company?.lock)
   const sources = useImportSources()
-  const hasSources = !!sources && sources.length > 0
+  const hasSources = !!sources && sources.length > 0 && !lock?.importExport
 
   return (
     <div className="h-full overflow-y-auto">
@@ -41,7 +43,7 @@ export function Welcome() {
           </section>
         )}
 
-        {sources !== null && (
+        {sources !== null && !lock?.starterPacks && (
           <section data-welcome="packs" className="rise mt-7" style={delay(hasSources ? 270 : 210)}>
             <h3 className="on-wallpaper mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">
               {hasSources ? 'Or start from a pack' : 'Start from a pack'}
@@ -64,7 +66,7 @@ export function Welcome() {
         )}
 
         <p className="rise on-wallpaper mt-12 text-xs text-muted" style={delay(390)}>
-          Saved under Other bookmarks › Stackboard. No account, and nothing leaves your browser.
+          Saved under Other bookmarks › Stackboard. No account, and your bookmarks stay in your browser.
         </p>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { displayTitle, splitTitle } from '../src/lib/title'
-import { urlKey, buildIndex, findOpenTab } from '../src/lib/openTabs'
+import { urlKey, buildIndex, findOpenTab, sameIndex } from '../src/lib/openTabs'
 import { parseBookmarkTitle } from '../src/lib/icon'
 import { monogram } from '../src/lib/favicon'
 import { planFolder, isImportableUrl, countPlanned, type FolderNode } from '../src/lib/importPlan'
@@ -7,6 +7,35 @@ import { installedAt, shouldAskForRating } from '../src/lib/onboarding'
 import { STARTER_PACKS } from '../src/lib/starterPacks'
 import { batchFlags } from '../src/lib/fresh'
 import { bankruptcyStackTitle, certificateText, planSelected, planStash, staysNote } from '../src/lib/stashPlan'
+import { ARCHIVE_AFTER, archiveStackTitle, archivedNote, isIdle, parseArchiveAfter, planArchive } from '../src/lib/archivePlan'
+import { tracksTabs } from '../src/lib/tabSeen'
+import { WHATS_NEW_SHOWS, pickWhatsNew, proNoteText, showProLine, stillPending, whatsNew080 } from '../src/lib/whatsNewPlan'
+import {
+  UNUSED_MS,
+  checkTargets,
+  countingNote,
+  duplicatesSummary,
+  extraCopies,
+  findDuplicates,
+  findUnused,
+  groupBySite,
+  isCheckable,
+  isUnused,
+  lastOpened,
+  locationLabel,
+  looksOffline,
+  normalizeUrl,
+  openedWords,
+  readCheckError,
+  removeButtonLabel,
+  secondProbe,
+  siteOf,
+  skippedNote,
+  stillCounting,
+  unreachableLinks,
+  unusedSummary,
+  type CleanLink,
+} from '../src/lib/cleanupPlan'
 import {
   BLUR_MAX,
   DEFAULT_APPEARANCE,
@@ -22,6 +51,23 @@ import {
   variantName,
 } from '../src/lib/appearance'
 import { spaceIndexForKey } from '../src/lib/shortcuts'
+import {
+  SNAPSHOT_KEEP_SHRUNK,
+  countBackup,
+  countSpace,
+  countsText,
+  dayKey,
+  dayLabel,
+  isEmptyBoard,
+  keysToPrune,
+  parseSnapshot,
+  restoredName,
+  shortDay,
+  sortSnapshots,
+  summaryLine,
+  type Snapshot,
+} from '../src/lib/snapshotPlan'
+import type { BookmarkBackup } from '../src/lib/types'
 import { UNINSTALL_PAGE, uninstallUrl } from '../src/lib/uninstall'
 import {
   ORPHAN_GRACE_MS,
@@ -45,9 +91,108 @@ import {
   todoKey,
   todoMarkerUrl,
   toggleItem,
+  dueBytes,
+  mergeDue,
+  parseDue,
+  splitDue,
+  todoDueKey,
   type TodoList,
 } from '../src/lib/todoPlan'
+import {
+  addDays,
+  checkItem,
+  countDue,
+  dueForBackup,
+  dueFromBackup,
+  dueLabel,
+  dueToday,
+  isDue,
+  isOverdue,
+  localDay,
+  nextDue,
+  parseDay,
+  quickDay,
+  setDue,
+  setRepeat,
+  spokenDue,
+  stepDue,
+  unrollItem,
+} from '../src/lib/duePlan'
 import { glyphOf } from '../src/lib/favicon'
+import {
+  CHECKOUT,
+  FOUNDING_ENDS,
+  OFFLINE_GRACE_MS,
+  PRO_BENEFIT_ID,
+  PRO_CUTOFF,
+  RECHECK_MS,
+  canMakeTodo,
+  decideEarlyTodo,
+  keepsTodoFree,
+  readEarlyTodo,
+  checkoutUrl,
+  cleanKey,
+  compareVersions,
+  hasPro,
+  isEarlyUser,
+  maskKey,
+  needsCheck,
+  priceLabel,
+  proState,
+  readActivation,
+  readValidation,
+  trialDaysLeft,
+  CHECKOUT_PENDING_MS,
+  checkoutPending,
+  currentPeriodEnd,
+  daysAgo,
+  money,
+  proCard,
+  readSub,
+  shortDate,
+} from '../src/lib/proPlan'
+import {
+  COMPANY_EMOJI,
+  DISMISSED_MAX,
+  LIMITS as MANAGED_LIMITS,
+  addDismissed,
+  companyLabel,
+  companySpaces,
+  isEmptyConfig,
+  managedFolderSpace,
+  parseAnnouncement,
+  parseDismissed,
+  parseManagedConfig,
+  safeUrl,
+  showAnnouncement,
+  textHash,
+  ONBOARDING_MS,
+  anyLock,
+  arrangeOnboarding,
+  cleanGoName,
+  onboardingActive,
+  parseBrand,
+  parseGoLinks,
+  parseLocks,
+} from '../src/lib/managedPlan'
+import { escapeXml, goDescription, goEntries, goSuggestions, looksLikeUrl, rankGo, readSearchHash, searchDisposition, searchHash } from '../src/lib/goLinks'
+import { policyAccentFromMirror } from '../src/lib/appearance'
+import {
+  MAX_LINKS as SHARE_MAX_LINKS,
+  MAX_SHARE_URL,
+  MAX_TITLE as SHARE_MAX_TITLE,
+  SHARE_PAGE,
+  bytesToBase64Url,
+  cleanText as shareCleanText,
+  decodeShare,
+  deflate,
+  encodeShare,
+  isShareableUrl,
+  parsePayload as parseSharePayload,
+  shareNote,
+  toPayload as sharePayload,
+} from '../src/lib/sharePlan'
+import { decodeShare as pageDecodeShare, isShareableUrl as pageIsShareableUrl, monogram as pageMonogram } from '../site/s/share-core.js'
 import palettesCss from '../src/styles/palettes.css'
 import { contrastRatio, gradientStops, mix, over, readPalettes } from './contrast'
 import msgEn from '../public/_locales/en/messages.json'
@@ -136,6 +281,12 @@ eq('sharepoint same doc', hit('https://contoso.sharepoint.com/:p:/r/sites/x/_lay
 eq('youtube other video', hit('https://youtube.com/watch?v=2'), null)
 eq('youtube same video ignores t', hit('https://youtube.com/watch?v=1'), 5)
 eq('non-http never matches', urlKey('chrome://settings'), null)
+// unchanged tab set: no redraw (B4)
+const idx2 = buildIndex([tab(1, 'https://slack.com/client/T1', 50), tab(2, 'https://example.com/a', 60)])
+eq('same tabs, newer lastAccessed', sameIndex(idx2, buildIndex([tab(1, 'https://slack.com/client/T1', 90), tab(2, 'https://example.com/a', 95)])), true)
+eq('new tab changes index', sameIndex(idx2, buildIndex([tab(1, 'https://slack.com/client/T1'), tab(2, 'https://example.com/a'), tab(3, 'https://x.io/')])), false)
+eq('navigated tab changes index', sameIndex(idx2, buildIndex([tab(1, 'https://slack.com/client/T1'), tab(2, 'https://example.com/b')])), false)
+eq('null never same', sameIndex(null, idx2), false)
 
 // import planner (0.4.0)
 const bar: FolderNode = {
@@ -159,11 +310,14 @@ const bar: FolderNode = {
   ],
 }
 const plan = planFolder(bar, { name: 'Bookmarks bar', emoji: '⭐', looseTitle: 'On the bar', exclude: new Set(['x']) })
-eq('plan: stacks follow the tree', plan.space.stacks.map((s) => s.title), ['On the bar', 'Work', 'Work › Clients', 'Only folders › Deep'])
+// 0.8.0: a folder in the source is a stack; folders below that stay folders inside it (they were path-named stacks).
+eq('plan: folders straight in the source become stacks', plan.space.stacks.map((s) => s.title), ['On the bar', 'Work', 'Only folders'])
+eq('plan: deeper folders stay nested in their stack, empty ones go', plan.space.stacks.map((s) => (s.folders ?? []).map((f) => `${f.title}:${f.links.length}`)), [[], ['Clients:1'], ['Deep:1']])
+eq('plan: a stack can hold only folders', plan.space.stacks[2].links, [])
 eq('plan: counts links', [plan.links, countPlanned(plan.space)], [4, 4])
 eq('plan: skips bookmarklets and chrome pages', plan.skipped, 2)
-eq('plan: blank title falls back to the url', plan.space.stacks[2].links[0].title, 'https://acme.example.com/')
-eq('plan: never copies Stackboard into itself', plan.space.stacks.some((s) => s.links.some((l) => l.url.includes('ours'))), false)
+eq('plan: blank title falls back to the url', plan.space.stacks[1].folders?.[0].links[0].title, 'https://acme.example.com/')
+eq('plan: never copies Stackboard into itself', JSON.stringify(plan.space).includes('ours'), false)
 eq('plan: empty folder gives no stacks', planFolder({ id: 'z', title: 'Z', children: [] }, { name: 'Z', emoji: '📁', looseTitle: 'Links' }).space.stacks, [])
 eq('importable: http', isImportableUrl('http://a.b/'), true)
 eq('importable: HTTPS', isImportableUrl('HTTPS://A.B'), true)
@@ -344,7 +498,7 @@ eq('appearance: blur caps at its maximum', parseAppearance({ bg: { blur: 99 } })
 eq('appearance: gradient choice stays 1-3', [parseAppearance({ bg: { gradient: 0 } }).bg.gradient, parseAppearance({ bg: { gradient: 7 } }).bg.gradient, parseAppearance({ bg: { gradient: 2.4 } }).bg.gradient], [1, 3, 2])
 eq('appearance: numbers stored as text still read', parseAppearance({ bg: { dim: '42', blur: ' 6 ' } }).bg, { ...DEFAULT_APPEARANCE.bg, dim: 42, blur: 6 })
 eq('appearance: NaN and Infinity fall back', parseAppearance({ bg: { dim: NaN, blur: Infinity } }).bg, DEFAULT_APPEARANCE.bg)
-const picked = { mode: 'dark', palette: 'nord', density: 'compact', bg: { kind: 'image', gradient: 2, dim: 50, blur: 8, imageRev: 1791200000000 } }
+const picked = { mode: 'dark', palette: 'nord', density: 'compact', layout: 'rows', bg: { kind: 'image', gradient: 2, dim: 50, blur: 8, imageRev: 1791200000000 } }
 eq('appearance: a full image setup survives a round trip', parseAppearance(JSON.parse(JSON.stringify(picked))), picked)
 eq('appearance: merging a slider keeps the rest of the background', mergeAppearance(parseAppearance(picked), { bg: { dim: 20 } }).bg, { ...picked.bg, dim: 20 })
 eq('appearance: merging clamps too', mergeAppearance(DEFAULT_APPEARANCE, { bg: { dim: 999 } }).bg.dim, DIM_MAX)
@@ -456,6 +610,1419 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   eq('todo sweep: unmarks a list whose stack came back', plan.unmark, ['liveMarked'])
   eq('todo sweep: drops after the grace period, from any device', plan.drop, ['goneMarkedOld'])
   eq('todo sweep: seen = live plus still-stored seen lists', plan.seen.sort(), ['goneSeen', 'live', 'liveMarked', 'newHere'])
+}
+
+// ---------- 0.7.0: auto-archive ----------
+{
+  const H = 60 * 60 * 1000
+  const now = Date.UTC(2026, 10, 2, 12)
+  const old = now - 13 * H
+  const tab = (o: Record<string, unknown>) => ({ id: 1, url: 'https://a.com/', title: 'A', lastAccessed: old, groupId: -1, ...o })
+  const after = 12 * H
+  eq('archive: an old plain tab is idle', isIdle(tab({}), after, now), true)
+  eq('archive: exactly the limit counts', isIdle(tab({ lastAccessed: now - after }), after, now), true)
+  eq('archive: a recent tab stays', isIdle(tab({ lastAccessed: now - 11 * H }), after, now), false)
+  eq('archive: pinned, on screen and playing sound stay', [isIdle(tab({ pinned: true }), after, now), isIdle(tab({ active: true }), after, now), isIdle(tab({ audible: true }), after, now)], [false, false, false])
+  eq('archive: a tab in a group stays', isIdle(tab({ groupId: 4 }), after, now), false)
+  eq('archive: browser pages stay', isIdle(tab({ url: 'chrome://settings/' }), after, now), false)
+  eq('archive: a tab Chrome can\'t date stays', [isIdle(tab({ lastAccessed: undefined }), after, now), isIdle(tab({ lastAccessed: 0 }), after, now)], [false, false])
+  const plan = planArchive(
+    [
+      tab({ id: 1 }),
+      tab({ id: 2, active: true }),
+      tab({ id: 3, url: 'https://b.com/', title: '  ' }),
+      tab({ id: 4 }),
+      tab({ id: 5, pinned: true }),
+    ],
+    after,
+    now,
+  )
+  eq('archive: a URL open twice is saved once and both close', plan, { links: [{ title: 'A', url: 'https://a.com/' }, { title: 'https://b.com/', url: 'https://b.com/' }], tabIds: [1, 3, 4] })
+  eq('archive: nothing idle, nothing planned', planArchive([tab({ lastAccessed: now })], after, now), { links: [], tabIds: [] })
+  eq('archive: stored choices read back', ARCHIVE_AFTER.map((c) => parseArchiveAfter({ afterMs: c.ms })), ARCHIVE_AFTER.map((c) => c.ms))
+  eq('archive: junk settings mean off', [parseArchiveAfter(null), parseArchiveAfter({ afterMs: 5 }), parseArchiveAfter({ afterMs: '43200000' }), parseArchiveAfter('x')], [null, null, null, null])
+  eq('archive: 12 hours is a choice', ARCHIVE_AFTER.some((c) => c.ms === 12 * H), true)
+  eq('archive: one dated stack a day', archiveStackTitle(new Date(2026, 10, 2, 9)) === archiveStackTitle(new Date(2026, 10, 2, 23)) && archiveStackTitle(new Date(2026, 10, 2)).startsWith('Archived '), true)
+  eq('archive: toast wording', [archivedNote(1), archivedNote(3)], ['1 idle tab', '3 idle tabs'])
+  // 3 Nov fix: lastAccessed only moves when a tab comes on screen, so the time it was left counts.
+  const seenOld = { since: now - 48 * H, left: {} as Record<string, number> }
+  eq('archive: a tab on screen all day and just left stays', isIdle(tab({ id: 7 }), after, now, { since: now - 48 * H, left: { 7: now - 60_000 } }), false)
+  eq('archive: a tab left long ago goes', isIdle(tab({ id: 7 }), after, now, { since: now - 48 * H, left: { 7: now - 13 * H } }), true)
+  eq('archive: no record yet counts from when the record began', [isIdle(tab({ id: 8 }), after, now, { since: now - 2 * H, left: {} }), isIdle(tab({ id: 8 }), after, now, seenOld)], [false, true])
+  eq('archive: the plan uses the left times', planArchive([tab({ id: 1 }), tab({ id: 2, url: 'https://b.com/' })], after, now, { since: now - 48 * H, left: { 1: now - 5 * H } }).tabIds, [2])
+  // 0.8.0: tab switches are recorded only while auto-archive is on.
+  eq('archive: tab switches are recorded only while auto-archive is on', [tracksTabs({ afterMs: 12 * H }), tracksTabs(null), tracksTabs(undefined), tracksTabs({ afterMs: 5 })], [true, false, false, false])
+}
+
+// ---------- Stackboard Pro (0.7.0) ----------
+{
+  const DAY = 86_400_000
+  const now = Date.UTC(2026, 11, 1)
+  const good = { key: 'SB-1', activationId: 'a', status: 'granted' as const, checkedAt: now, okAt: now }
+  eq('pro: nothing at all is free', proState({ license: null, trialStartedAt: null, now }), { kind: 'free', trialUsed: false })
+  eq('pro: a granted key is pro', proState({ license: good, trialStartedAt: null, now }), { kind: 'pro' })
+  eq('pro: trial day 1 shows 14 days', proState({ license: null, trialStartedAt: now, now }), { kind: 'trial', daysLeft: 14 })
+  eq('pro: trial last hours show 1 day', trialDaysLeft(now - 14 * DAY + 3_600_000, now), 1)
+  eq('pro: an ended trial is free and used', proState({ license: null, trialStartedAt: now - 14 * DAY, now }), { kind: 'free', trialUsed: true })
+  eq('pro: a running trial beats a key with a problem', proState({ license: { key: 'x', status: 'revoked' }, trialStartedAt: now - DAY, now }).kind, 'trial')
+  eq('pro: a good key beats a trial', proState({ license: good, trialStartedAt: now, now }).kind, 'pro')
+  eq('pro: revoked pauses as ended', proState({ license: { ...good, status: 'revoked' }, trialStartedAt: null, now }), { kind: 'paused', reason: 'ended' })
+  eq('pro: past expires_at pauses as ended', proState({ license: { ...good, expiresAt: now - 1 }, trialStartedAt: null, now }), { kind: 'paused', reason: 'ended' })
+  eq('pro: offline 13 days keeps pro', proState({ license: { ...good, okAt: now - 13 * DAY }, trialStartedAt: null, now }).kind, 'pro')
+  eq('pro: offline 15 days pauses', proState({ license: { ...good, okAt: now - OFFLINE_GRACE_MS - DAY }, trialStartedAt: null, now }), { kind: 'paused', reason: 'offline' })
+  eq('pro: a key never answered is checking', proState({ license: { key: 'SB-1' }, trialStartedAt: null, now }), { kind: 'paused', reason: 'checking' })
+  for (const r of ['disabled', 'unknown-key', 'device-limit', 'removed'] as const) {
+    eq(`pro: ${r} pauses with that reason`, proState({ license: { key: 'k', status: r }, trialStartedAt: null, now }), { kind: 'paused', reason: r })
+  }
+  eq(
+    'pro: hasPro for pro and trial only',
+    [{ kind: 'pro' }, { kind: 'trial', daysLeft: 3 }, { kind: 'free', trialUsed: false }, { kind: 'paused', reason: 'offline' }].map((s) => hasPro(s as never)),
+    [true, true, false, false],
+  )
+  eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
+  eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
+  // 0.8.0 (3 Nov): to-do lists join Pro for early users too, unless they already had a list.
+  eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
+  eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
+  eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
+  eq('pro: no list anywhere means to-do lists need Pro (due keys alone are no list)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todoDue:abc', 'todoish'] }), { keep: false, write: true })
+  eq('pro: a stored decision stands, lists or not', [decideEarlyTodo({ stored: { keep: false, at: 1 }, hasLists: true, syncKeys: ['todo:x'] }), decideEarlyTodo({ stored: { keep: true, at: 1 }, hasLists: false, syncKeys: [] })], [{ keep: false, write: false }, { keep: true, write: false }])
+  eq('pro: only early users keep to-do lists free', [keepsTodoFree({ early: true, earlyTodo: true }), keepsTodoFree({ early: true, earlyTodo: false }), keepsTodoFree({ early: true, earlyTodo: null }), keepsTodoFree({ early: false, earlyTodo: true })], [true, false, false, false])
+
+  eq('pro: needsCheck when never checked', needsCheck({ key: 'k' }, now), true)
+  eq('pro: no check within three days', needsCheck({ ...good, checkedAt: now - RECHECK_MS + 1 }, now), false)
+  eq('pro: check again after three days', needsCheck({ ...good, checkedAt: now - RECHECK_MS }, now), true)
+  eq('pro: no key, no check', needsCheck(null, now), false)
+
+  eq('pro: versions compare numerically', [compareVersions('0.6.1', '0.7.0'), compareVersions('0.10.0', '0.9.9'), compareVersions('0.7', '0.7.0'), compareVersions('1.0.0', '0.7.0')], [-1, 1, 0, 1])
+  eq('pro: an update from 0.6.1 is early', isEarlyUser({ updatedFrom: '0.6.1' }), true)
+  eq('pro: an update from 0.7.0 is not early', isEarlyUser({ updatedFrom: '0.7.0', installedAt: PRO_CUTOFF + DAY }), false)
+  eq('pro: a board older than Pro is early', isEarlyUser({ installedAt: PRO_CUTOFF - DAY }), true)
+  eq('pro: a new board is not early', isEarlyUser({ installedAt: PRO_CUTOFF + DAY }), false)
+
+  eq('pro: early users always get the early link', [checkoutUrl(true, now), checkoutUrl(true, FOUNDING_ENDS + DAY)], [CHECKOUT.early, CHECKOUT.early])
+  eq('pro: founding link until 31 Dec, regular after', [checkoutUrl(false, FOUNDING_ENDS), checkoutUrl(false, FOUNDING_ENDS + 1)], [CHECKOUT.founding, CHECKOUT.regular])
+  eq('pro: price labels', [priceLabel(true, FOUNDING_ENDS + DAY), priceLabel(false, now), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$2.99 a year', '$4.99 a year'])
+
+  eq('pro: cleanKey trims spaces, quotes and line breaks', cleanKey(' "SB-1A2B3C4D-AAAA-BBBB"\n'), 'SB-1A2B3C4D-AAAA-BBBB')
+  eq('pro: cleanKey refuses junk', [cleanKey(''), cleanKey('short'), cleanKey('SB-<script>')], [null, null, null])
+  eq('pro: maskKey keeps the prefix and last four', maskKey('SB-1A2B3C4D-AAAA-BBBB-9F2C'), 'SB-...-9F2C')
+
+  eq('pro: activation id read', readActivation(200, { id: 'act-1' }), { activationId: 'act-1' })
+  eq('pro: five computers already', readActivation(403, { error: 'NotPermitted' }), { error: 'device-limit' })
+  eq('pro: unknown key on activate', [readActivation(404, {}), readActivation(422, {})], [{ error: 'unknown-key' }, { error: 'unknown-key' }])
+  eq('pro: offline on activate', readActivation(0, null), { error: 'network' })
+  const prev = { key: 'SB-1', activationId: 'a', status: 'granted' as const, checkedAt: now - 5 * DAY, okAt: now - 5 * DAY }
+  const ok = readValidation(200, { benefit_id: PRO_BENEFIT_ID, status: 'granted', expires_at: null }, prev, now)
+  eq('pro: a granted answer refreshes both stamps', [ok.status, ok.checkedAt, ok.okAt, ok.expiresAt], ['granted', now, now, null])
+  const gone = readValidation(200, { benefit_id: PRO_BENEFIT_ID, status: 'revoked', expires_at: '2026-11-30T00:00:00Z' }, prev, now)
+  eq('pro: revoked keeps the last good stamp', [gone.status, gone.okAt, gone.expiresAt], ['revoked', prev.okAt, Date.parse('2026-11-30T00:00:00Z')])
+  eq('pro: a key for another product is unknown', readValidation(200, { benefit_id: 'other', status: 'granted' }, prev, now).status, 'unknown-key')
+  eq('pro: 404 means unknown key', readValidation(404, { error: 'ResourceNotFound' }, prev, now).status, 'unknown-key')
+  eq('pro: offline leaves the license alone', readValidation(0, null, prev, now), prev)
+  eq('pro: a server error leaves the license alone', readValidation(503, null, prev, now), prev)
+  // 3 Nov fix: Polar's own words (license_key service.py) tell an ended key from an unknown one.
+  eq('pro: activation limit reached', readActivation(403, { error: 'NotPermitted', detail: 'License key activation limit already reached' }), { error: 'device-limit' })
+  eq('pro: activating a refunded or lapsed key says it ended', [readActivation(403, { detail: 'License key is no longer active. ' }), readActivation(403, { detail: 'License key has expired.' })], [{ error: 'ended' }, { error: 'ended' }])
+  eq('pro: a key without activations is no usable key', readActivation(403, { detail: 'This license key does not support activations. ' }), { error: 'unknown-key' })
+  eq('pro: an unknown key still reads as unknown', readActivation(404, { error: 'ResourceNotFound', detail: 'Not found' }), { error: 'unknown-key' })
+  eq('pro: validating a refunded key pauses Pro as ended', [readValidation(404, { detail: 'License key is no longer active.' }, prev, now).status, readValidation(404, { detail: 'License key has expired.' }, prev, now).status], ['revoked', 'revoked'])
+  eq('pro: validating an unknown key', readValidation(404, { error: 'ResourceNotFound', detail: 'Not found' }, prev, now).status, 'unknown-key')
+  eq('pro: an ended key shows Renew', proState({ license: { ...prev, status: 'revoked' }, trialStartedAt: null, now }), { kind: 'paused', reason: 'ended' })
+  eq('snapshots: a shrunken board keeps 30 days', keysToPrune(Array.from({ length: 32 }, (_, i) => `2026-10-${String(i % 31 + 1).padStart(2, '0')}`).slice(0, 31), SNAPSHOT_KEEP_SHRUNK).length, 1)
+}
+
+// ---------- 0.7.0: daily snapshots ----------
+{
+  eq('snapshots: dayKey is the local calendar day', dayKey(new Date(2026, 10, 2, 23, 59)), '2026-11-02')
+  eq('snapshots: dayKey pads month and day', dayKey(new Date(2027, 0, 5, 0, 0)), '2027-01-05')
+  const keys = Array.from({ length: 16 }, (_, i) => dayKey(new Date(2026, 10, 1 + i)))
+  eq('snapshots: the newest 14 stay', keysToPrune(keys), ['2026-11-01', '2026-11-02'])
+  eq('snapshots: nothing to prune at 14', keysToPrune(keys.slice(0, 14)), [])
+  eq('snapshots: keys that are not days always go', keysToPrune(['2026-11-02', 'oops']), ['oops'])
+  eq('snapshots: pruning ignores the order keys arrive in', keysToPrune(['2026-11-03', '2026-11-01', '2026-11-02'], 2), ['2026-11-01'])
+  eq('snapshots: a restored copy carries the day', restoredName('Work', '2026-11-02'), 'Work (2 Nov)')
+  eq('snapshots: a copy restored again swaps the date', restoredName('Work (2 Nov)', '2026-11-03'), 'Work (3 Nov)')
+  eq('snapshots: day labels', [shortDay('2026-11-02'), dayLabel('2026-11-02'), dayLabel('2027-01-01')], ['2 Nov', 'Mon, 2 Nov', 'Fri, 1 Jan'])
+
+  const backup: BookmarkBackup = {
+    version: 1,
+    exportedAt: '2026-11-02T00:00:00.000Z',
+    spaces: [
+      {
+        emoji: '⚡',
+        name: 'Work',
+        stacks: [
+          { name: 'Docs', bookmarks: [{ title: 'A', url: 'https://a.example' }, { title: 'B', url: 'https://b.example' }] },
+          { name: 'Today', bookmarks: [], todo: [{ text: 'Ship it', done: false }, { text: 'Sleep', done: true }] },
+        ],
+      },
+      { emoji: '📚', name: 'Reading', stacks: [{ name: 'Later', bookmarks: [{ title: 'C', url: 'https://c.example' }] }] },
+    ],
+  }
+  const counts = countBackup(backup)
+  eq('snapshots: counts', counts, { spaces: 2, stacks: 3, links: 3, lists: 1, items: 2 })
+  eq('snapshots: summary line', summaryLine({ day: '2026-11-02', counts }), 'Mon, 2 Nov: 2 spaces, 3 links, 1 to-do list')
+  eq('snapshots: a space line has no space count', countsText(countSpace(backup.spaces[1])), '1 link')
+  const emptyStacks: BookmarkBackup = { ...backup, spaces: [{ emoji: '⚡', name: 'Empty', stacks: [{ name: 'S', bookmarks: [] }] }] }
+  eq(
+    'snapshots: empty boards are never saved',
+    [isEmptyBoard(counts), isEmptyBoard(countBackup({ ...backup, spaces: [] })), isEmptyBoard(countBackup(emptyStacks))],
+    [false, true, true],
+  )
+  eq('snapshots: to-do items alone are worth a snapshot', isEmptyBoard({ spaces: 1, stacks: 1, links: 0, lists: 1, items: 1 }), false)
+  eq('snapshots: a stored record reads back with fresh counts', parseSnapshot({ day: '2026-11-02', at: 5, counts: { spaces: 99 }, backup })?.counts, counts)
+  eq(
+    'snapshots: broken records are dropped',
+    [parseSnapshot(null), parseSnapshot({ day: 'today', backup }), parseSnapshot({ day: '2026-11-02', backup: { version: 2, spaces: [] } })],
+    [null, null, null],
+  )
+  eq(
+    'snapshots: newest first',
+    sortSnapshots([{ day: '2026-11-01' }, { day: '2026-11-03' }, { day: '2026-11-02' }] as Snapshot[]).map((s) => s.day),
+    ['2026-11-03', '2026-11-02', '2026-11-01'],
+  )
+}
+
+// ---------- 0.7.0: Pro looks ----------
+import {
+  ACCENT_PRESETS,
+  ACCENT_VAR_NAMES,
+  DEFAULT_LOOKS,
+  FONTS,
+  WALLPAPERS,
+  accentHoverFor,
+  accentVars,
+  effectiveLooks,
+  lookMirror,
+  mergeLooks,
+  normalizeHex,
+  onAccentFor,
+  parseLooks,
+} from '../src/lib/looks'
+import { looksFromMirror } from '../src/lib/appearance'
+import indexCss from '../src/styles/index.css'
+{
+  eq('looks: nothing stored gives the defaults', parseLooks(undefined), DEFAULT_LOOKS)
+  eq('looks: junk falls back field by field', parseLooks({ accent: 'red', font: 'comic', tile: 'huge', wallpaper: 'video' }), DEFAULT_LOOKS)
+  const mine = { accent: '#2563eb', font: 'mono', tile: 'large', wallpaper: 'waves' }
+  eq('looks: a full set survives a round trip', parseLooks(JSON.parse(JSON.stringify(mine))), mine)
+  eq('looks: colours are read as #rrggbb', [normalizeHex('#ABC'), normalizeHex(' #2563EB '), normalizeHex('2563eb'), normalizeHex('#12345'), normalizeHex(42)], ['#aabbcc', '#2563eb', null, null, null])
+  eq('looks: merging keeps the rest', mergeLooks(parseLooks(mine), { tile: 'small' }), { ...mine, tile: 'small' })
+  eq('looks: merging validates too', mergeLooks(parseLooks(mine), { font: 'papyrus' as never }).font, 'default')
+  eq('looks: Pro off shows the stock board, Pro on shows the picks', [effectiveLooks(parseLooks(mine), false), effectiveLooks(parseLooks(mine), true)], [DEFAULT_LOOKS, mine])
+
+  // Button text on a custom accent: white while it clears AA, black otherwise, never below 4.5:1.
+  eq('accent: text on white and black', [onAccentFor('#ffffff'), onAccentFor('#000000')], ['#000000', '#ffffff'])
+  eq('accent: bright yellow gets black text, blue gets white', [onAccentFor('#ffd60a'), onAccentFor('#2563eb')], ['#000000', '#ffffff'])
+  eq('accent: every preset carries white text at AA', ACCENT_PRESETS.filter((p) => onAccentFor(p.hex) !== '#ffffff' || contrastRatio('#ffffff', p.hex) < 4.5).map((p) => p.name), [])
+  const sample = ['#ffd60a', '#00ff00', '#00ffff', '#ff00ff', '#ff0000', '#0000ff', '#808080', '#ffffff', '#000000', '#e4732f', ...ACCENT_PRESETS.map((p) => p.hex)]
+  eq('accent: button text clears AA on any colour', sample.filter((c) => contrastRatio(onAccentFor(c), c) < 4.5), [])
+  eq('accent: hover only adds contrast', sample.filter((c) => contrastRatio(onAccentFor(c), accentHoverFor(c)) < contrastRatio(onAccentFor(c), c)), [])
+  // Text and marks in the accent colour, against the surfaces of the palettes that ship.
+  const surfaces = (scheme: string) =>
+    blocks.filter((b) => b.scheme === scheme).flatMap((b) => ['canvas', 'panel', 'card', 'raised'].map((k) => b.tokens.get(k) ?? '#ff00ff'))
+  const misses: string[] = []
+  for (const c of sample) {
+    const v = accentVars(c)
+    for (const s of surfaces('light')) {
+      if (contrastRatio(v['--sb-custom-text-light'], s) < 4.5) misses.push(`${c} text on ${s}`)
+      if (contrastRatio(v['--sb-custom-mark-light'], s) < 3) misses.push(`${c} mark on ${s}`)
+    }
+    for (const s of surfaces('dark')) {
+      if (contrastRatio(v['--sb-custom-text-dark'], s) < 4.5) misses.push(`${c} text on ${s}`)
+      if (contrastRatio(v['--sb-custom-mark-dark'], s) < 3) misses.push(`${c} mark on ${s}`)
+    }
+    for (const b of blocks) {
+      const inv = b.tokens.get('inverse') ?? '#ff00ff'
+      if (contrastRatio(v['--sb-custom-text-dark'], inv) < 4.5) misses.push(`${c} toast text on ${inv}`)
+    }
+  }
+  eq('accent: text clears AA and marks clear 3:1 on every palette surface', misses, [])
+  eq('accent: the variable list matches what is set', Object.keys(accentVars('#2563eb')), [...ACCENT_VAR_NAMES])
+
+  // The boot copy: the first frame shows the look Pro allows, the saved picks wait underneath.
+  const a0 = parseAppearance({ palette: 'nord', bg: { kind: 'gradient', gradient: 2 } })
+  const on = bootMirror(a0, parseLooks(mine), true)
+  const off = bootMirror(a0, parseLooks(mine), false)
+  eq(
+    'mirror: Pro on carries the look for the first frame',
+    [on.look.accent, on.look.font, on.look.tile, on.look.wallpaper, on.look.fontStack === FONTS.find((f) => f.id === 'mono')?.stack],
+    ['#2563eb', 'mono', 'large', 'waves', true],
+  )
+  eq('mirror: Pro off carries the stock look', off.look, lookMirror(DEFAULT_LOOKS, true))
+  eq('mirror: the free background stays put under a wallpaper', [on.bg, on.gradient, on.settings], ['gradient', 2, a0])
+  eq('mirror: saved looks and the Pro answer come back', [looksFromMirror(JSON.stringify(off)), looksFromMirror(JSON.stringify(on)).pro], [{ looks: mine, pro: false }, true])
+  eq('mirror: no copy or a broken one gives the default looks', [looksFromMirror(null), looksFromMirror('{oops')], [{ looks: DEFAULT_LOOKS, pro: false }, { looks: DEFAULT_LOOKS, pro: false }])
+  eq('mirror: the accent variables ride along', Object.keys(on.look.vars), [...ACCENT_VAR_NAMES])
+
+  eq(
+    'fonts: unique ids, every stack ends on a generic family',
+    [new Set(FONTS.map((f) => f.id)).size === FONTS.length, FONTS.filter((f) => f.stack && !/(sans-serif|serif|monospace)$/.test(f.stack)).map((f) => f.id)],
+    [true, []],
+  )
+  eq(
+    'wallpapers: each has a board rule and a Settings preview in index.css',
+    WALLPAPERS.filter((w) => !indexCss.includes(`[data-wallpaper="${w.id}"] body`) || !indexCss.includes(`[data-wallpaper-preview="${w.id}"]`)).map((w) => w.id),
+    [],
+  )
+}
+
+// ---------- 0.7.1: due dates and repeats ----------
+{
+  eq('due: localDay is the local calendar day', [localDay(new Date(2026, 10, 2, 0, 1)), localDay(new Date(2026, 10, 2, 23, 59))], ['2026-11-02', '2026-11-02'])
+  eq('due: parseDay takes real dates only', [!!parseDay('2026-11-02'), parseDay('2026-02-30'), parseDay('2026-2-3'), parseDay('2026-13-01'), parseDay(20261102), parseDay('')], [true, null, null, null, null, null])
+  eq('due: addDays crosses months and years', [addDays('2026-12-31', 1), addDays('2026-03-01', -1), addDays('2028-02-28', 1)], ['2027-01-01', '2026-02-28', '2028-02-29'])
+
+  // 2 Nov 2026 is a Monday; 6 Nov a Friday.
+  eq('due: daily and weekly steps', [stepDue('2026-11-02', 'd'), stepDue('2026-11-02', 'w')], ['2026-11-03', '2026-11-09'])
+  eq('due: weekdays skip the weekend', [stepDue('2026-11-02', 'wd'), stepDue('2026-11-06', 'wd'), stepDue('2026-11-07', 'wd'), stepDue('2026-11-08', 'wd')], ['2026-11-03', '2026-11-09', '2026-11-09', '2026-11-09'])
+  eq('due: monthly keeps the day and clamps short months', [stepDue('2026-01-30', 'm'), stepDue('2026-01-31', 'm'), stepDue('2028-01-31', 'm'), stepDue('2026-12-15', 'm')], ['2026-02-28', '2026-02-28', '2028-02-29', '2027-01-15'])
+  eq('due: without an anchor day (items saved before 0.8.0) a month-end date stays on month ends', [stepDue('2026-02-28', 'm'), stepDue('2026-11-30', 'm'), stepDue('2026-04-30', 'm')], ['2026-03-31', '2026-12-31', '2026-05-31'])
+  // Review finding 4: the anchor day keeps a monthly repeat on its own day after a short month.
+  const chain = (day: string, md: number, n: number) => { const out: string[] = []; for (let i = 0; i < n; i++) out.push((day = stepDue(day, 'm', md))); return out }
+  eq('due: the 28th stays the 28th after February', chain('2027-01-28', 28, 4), ['2027-02-28', '2027-03-28', '2027-04-28', '2027-05-28'])
+  eq('due: the 31st clamps and comes back', chain('2027-01-31', 31, 4), ['2027-02-28', '2027-03-31', '2027-04-30', '2027-05-31'])
+  eq('due: the 30th clamps in February only', chain('2027-01-30', 30, 3), ['2027-02-28', '2027-03-30', '2027-04-30'])
+  eq('due: the 29th in a leap year', chain('2028-01-29', 29, 3), ['2028-02-29', '2028-03-29', '2028-04-29'])
+  eq('due: an overdue monthly item keeps its anchor', nextDue('2027-01-28', 'm', '2027-03-01', 28), '2027-03-28')
+
+  eq('due: an overdue daily item moves to tomorrow', nextDue('2026-11-02', 'd', '2026-11-04'), '2026-11-05')
+  eq('due: an overdue weekly item keeps its weekday', nextDue('2026-11-02', 'w', '2026-11-11'), '2026-11-16')
+  eq('due: an overdue weekday item skips the weekend', nextDue('2026-11-06', 'wd', '2026-11-09'), '2026-11-10')
+  eq('due: ticking early moves one step past the due date', [nextDue('2026-11-05', 'd', '2026-11-02'), nextDue('2026-11-30', 'm', '2026-11-02')], ['2026-11-06', '2026-12-31'])
+
+  eq('due: quick picks', [quickDay('today', '2026-11-02'), quickDay('tomorrow', '2026-11-02'), quickDay('next-week', '2026-11-02'), quickDay('next-week', '2026-11-07'), quickDay('next-week', '2026-11-08')], ['2026-11-02', '2026-11-03', '2026-11-09', '2026-11-09', '2026-11-09'])
+  eq('due: labels', [dueLabel('2026-11-02', '2026-11-02'), dueLabel('2026-11-03', '2026-11-02'), dueLabel('2026-11-01', '2026-11-02'), dueLabel('2026-11-04', '2026-11-02', 'en-GB'), dueLabel('2027-01-05', '2026-11-02', 'en-GB')], ['Today', 'Tomorrow', 'Yesterday', 'Wed 4 Nov', 'Tue 5 Jan 2027'])
+  eq('due: labels mid-sentence', [spokenDue('2026-11-03', '2026-11-02'), spokenDue('2026-11-04', '2026-11-02', 'en-GB')], ['tomorrow', 'Wed 4 Nov'])
+  eq('due: overdue and due', [isOverdue('2026-11-01', '2026-11-02'), isOverdue('2026-11-02', '2026-11-02'), isDue('2026-11-02', '2026-11-02'), isDue('2026-11-03', '2026-11-02'), isDue(undefined, '2026-11-02')], [true, false, true, false, false])
+
+  let l: TodoList = { v: 1, items: [{ id: 'a', text: 'Water plants', done: false, at: 1 }, { id: 'b', text: 'Pay rent', done: false, at: 2 }] }
+  l = setDue(l, 'a', '2026-11-02')
+  eq('due: setDue dates an item and leaves others alone', l.items.map((i) => i.d ?? null), ['2026-11-02', null])
+  eq('due: setDue refuses a bad date', setDue(l, 'b', '2026-02-30'), l)
+  l = setRepeat(l, 'b', 'm', '2026-11-02')
+  eq('due: a repeat on an undated item starts today', [l.items[1].d, l.items[1].r], ['2026-11-02', 'm'])
+  eq('due: clearing the date clears the repeat', setDue(l, 'b', null).items[1], { id: 'b', text: 'Pay rent', done: false, at: 2 })
+  eq('due: turning the repeat off keeps the date', setRepeat(l, 'b', null, '2026-11-02').items[1], { id: 'b', text: 'Pay rent', done: false, at: 2, d: '2026-11-02' })
+
+  eq('due: a monthly repeat remembers its day of the month', l.items[1].md, 2)
+  const rent: TodoList = setRepeat(setDue({ v: 1, items: [{ id: 'r', text: 'Rent', done: false, at: 1 }] }, 'r', '2027-01-28'), 'r', 'm', '2027-01-20')
+  eq('due: monthly on a dated item anchors on its date', [rent.items[0].d, rent.items[0].md], ['2027-01-28', 28])
+  eq('due: a new date moves the anchor', setDue(rent, 'r', '2027-02-05').items[0].md, 5)
+  eq('due: switching away from monthly drops the anchor', setRepeat(rent, 'r', 'w', '2027-01-20').items[0].md, undefined)
+  let paid = rent
+  const seen: string[] = []
+  for (let i = 0; i < 3; i++) { paid = checkItem(paid, 'r', '2027-01-20', true).list; seen.push(paid.items[0].d!) }
+  eq('due: ticking rent three times keeps the 28th', seen, ['2027-02-28', '2027-03-28', '2027-04-28'])
+  const rolled = checkItem(l, 'b', '2026-11-02', true)
+  eq('due: ticking a repeating item moves it on and keeps it open', [rolled.list.items[1].done, rolled.list.items[1].d, rolled.rolledTo], [false, '2026-12-02', '2026-12-02'])
+  eq('due: undo puts a rolled date back', unrollItem(rolled.list, 'b', '2026-11-02', '2026-12-02').items[1].d, '2026-11-02')
+  eq('due: undo leaves a date someone changed since', unrollItem(setDue(rolled.list, 'b', '2026-12-09'), 'b', '2026-11-02', '2026-12-02').items[1].d, '2026-12-09')
+  eq('due: without Pro a repeating item ticks off like any other', [checkItem(l, 'b', '2026-11-02', false).list.items[1].done, checkItem(l, 'b', '2026-11-02', false).rolledTo], [true, null])
+  eq('due: a plain dated item ticks off', checkItem(l, 'a', '2026-11-02', true).list.items[0].done, true)
+  eq('due: a done repeating item unticks normally', checkItem({ v: 1, items: [{ ...l.items[1], done: true }] }, 'b', '2026-11-02', true).list.items[0].done, false)
+
+  const lists = [
+    { listId: 'L1', list: { v: 1 as const, items: [
+      { id: '1', text: 'later', done: false, at: 1, d: '2026-11-03' },
+      { id: '2', text: 'today', done: false, at: 2, d: '2026-11-02' },
+      { id: '3', text: 'done', done: true, at: 3, d: '2026-11-01' },
+      { id: '4', text: 'undated', done: false, at: 4 },
+    ] } },
+    { listId: 'L2', list: { v: 1 as const, items: [{ id: '5', text: 'overdue', done: false, at: 5, d: '2026-10-30' }] } },
+    { listId: 'L3', list: null },
+  ]
+  eq('due: Today lists open items due today or earlier, earliest first', dueToday(lists, '2026-11-02').map((e) => `${e.listId}:${e.item.text}`), ['L2:overdue', 'L1:today'])
+  eq('due: the sidebar count', countDue(lists.map((x) => x.list), '2026-11-02'), 2)
+
+  eq(
+    'due: parseList keeps a valid date and repeat, drops the rest',
+    parseList({ items: [
+      { id: 'a', text: 'ok', d: '2026-11-02', r: 'wd' },
+      { id: 'b', text: 'bad day', d: '2026-13-01', r: 'd' },
+      { id: 'c', text: 'repeat alone', r: 'w' },
+      { id: 'e', text: 'bad rule', d: '2026-11-02', r: 'yearly' },
+    ] }).items.map((i) => [i.id, i.d ?? null, i.r ?? null]),
+    [['a', '2026-11-02', 'wd'], ['b', null, null], ['c', null, null], ['e', '2026-11-02', null]],
+  )
+  eq(
+    'due: parseList keeps an anchor day on monthly items only',
+    parseList({ items: [
+      { id: 'm', text: 'monthly', d: '2027-02-28', r: 'm', md: 31 },
+      { id: 'w', text: 'weekly', d: '2027-02-28', r: 'w', md: 31 },
+      { id: 'x', text: 'bad anchor', d: '2027-02-28', r: 'm', md: 40 },
+    ] }).items.map((i) => i.md ?? null),
+    [31, null, null],
+  )
+  eq('due: backups carry the anchor day', [dueForBackup({ d: '2027-02-28', r: 'm', md: 31 }), dueFromBackup({ due: '2027-02-28', repeat: 'monthly', monthDay: 31 })], [{ due: '2027-02-28', repeat: 'monthly', monthDay: 31 }, { d: '2027-02-28', r: 'm', md: 31 }])
+  eq('due: backups spell the rule out and read it back', [dueForBackup({ d: '2026-11-04', r: 'wd' }), dueFromBackup({ due: '2026-11-04', repeat: 'weekdays' })], [{ due: '2026-11-04', repeat: 'weekdays' }, { d: '2026-11-04', r: 'wd' }])
+  eq('due: an undated item adds nothing to a backup', dueForBackup({}), {})
+  eq('due: broken backup dates are dropped', [dueFromBackup({ due: 'soon' }), dueFromBackup(null), dueFromBackup({ due: '2026-11-04', repeat: 'yearly' })], [{}, {}, { d: '2026-11-04' }])
+
+  // Chrome's 8 KB sync item: half a list of dated, repeating items with real ids and times fits.
+  let dated: TodoList = emptyList()
+  for (let i = 0; i < 50; i++) dated = addItem(dated, `task number ${i}`, 1793624022197 + i, newTodoId())
+  for (const it of dated.items) dated = setRepeat(setDue(dated, it.id, '2026-11-02'), it.id, 'wd', '2026-11-02')
+  eq('due: 50 dated, repeating items fit the 8 KB sync item', listBytes(todoKey(newTodoId()), dated) < 8000, true)
+
+  // 0.8.0 review: due data lives under its own key, so a computer still on 0.7.0 (which rewrites
+  // todo:<id> with only id/text/done/at) can't erase it.
+  {
+    const list: TodoList = {
+      v: 1,
+      items: [
+        { id: 'rent', text: 'Pay rent', done: false, at: 1, d: '2026-11-28', r: 'm', md: 28 },
+        { id: 'call', text: 'Call the bank', done: false, at: 2 },
+      ],
+    }
+    const { items, due } = splitDue(list)
+    eq('due split: the items key carries no due fields', items.items.map((it) => ['d', 'r', 'md'].some((k) => k in it)), [false, false])
+    eq('due split: the due key holds them by item id', due, { rent: { d: '2026-11-28', r: 'm', md: 28 } })
+    // 0.7.0 saves the list after ticking "Call the bank": it keeps only id/text/done/at.
+    const by070 = { v: 1, items: items.items.map(({ id, text, done, at }) => ({ id, text, done: id === 'call' ? true : done, at })) }
+    const merged = mergeDue(parseList(by070), due)
+    eq('due: a 0.7.0 rewrite of the items leaves due dates whole', merged.items, [
+      { id: 'rent', text: 'Pay rent', done: false, at: 1, d: '2026-11-28', r: 'm', md: 28 },
+      { id: 'call', text: 'Call the bank', done: true, at: 2 },
+    ])
+    // 0.7.0 deletes "Pay rent": its due entry is ignored, then dropped at the next save.
+    const deleted = mergeDue(parseList({ v: 1, items: [{ id: 'call', text: 'Call the bank', done: true, at: 2 }] }), due)
+    eq('due: an entry whose item is gone is ignored', deleted.items.map((it) => it.d ?? null), [null])
+    eq('due: and dropped at the next save', splitDue(deleted).due, {})
+    eq('due: a due day saved on the item (test builds) is still read', mergeDue(parseList({ items: [{ id: 'x', text: 'Old', d: '2026-12-01', r: 'w' }] }), undefined).items[0].d, '2026-12-01')
+    eq('due: the due key wins over an old field on the item', mergeDue(parseList({ items: [{ id: 'x', text: 'Old', d: '2026-12-01' }] }), { x: { d: '2026-12-24' } }).items[0].d, '2026-12-24')
+    eq('due: junk in the due key is dropped', parseDue({ a: { d: 'soon' }, b: { d: '2026-11-04', r: 'yearly' }, c: 7 }), { b: { d: '2026-11-04' } })
+    eq('due: parseDue survives junk', [parseDue(null), parseDue([]), parseDue('x')], [{}, {}, {}])
+    eq('todo: parseList keeps item fields from later versions', parseList({ items: [{ id: 'x', text: 'T', done: false, at: 1, prio: 2 }] }).items[0], { prio: 2, id: 'x', text: 'T', done: false, at: 1 } as never)
+    const full = splitDue(dated)
+    eq('due: 50 dated, repeating items fit both 8 KB keys', [listBytes(todoKey('x'), full.items) < 8000, dueBytes(todoDueKey('x'), full.due) < 8000], [true, true])
+  }
+}
+
+// ---------- 0.7.1: clean-up ----------
+{
+  const DAY = 86_400_000
+  const now = Date.UTC(2026, 10, 3)
+  eq('clean-up: host lowercased, trailing slash dropped', normalizeUrl('https://Example.COM/Docs/'), 'https://example.com/Docs')
+  eq('clean-up: a bare domain matches its slash form', normalizeUrl('https://a.com/') === normalizeUrl('https://a.com'), true)
+  eq('clean-up: tracking parameters dropped, the rest kept in order', normalizeUrl('https://a.com/p?id=7&utm_source=x&utm_medium=y&fbclid=z&q=2#top'), 'https://a.com/p?id=7&q=2#top')
+  eq('clean-up: the path decides', normalizeUrl('https://a.com/x') === normalizeUrl('https://a.com/y'), false)
+  eq('clean-up: the scheme decides', normalizeUrl('http://a.com/') === normalizeUrl('https://a.com/'), false)
+  eq('clean-up: non-web links are left as they are', [normalizeUrl(' javascript:alert(1) '), normalizeUrl('not a url')], ['javascript:alert(1)', 'not a url'])
+
+  const link = (id: string, url: string, o: Partial<CleanLink> = {}): CleanLink => ({
+    id, url, title: id, spaceName: 'Work', spaceEmoji: '⚡', stackTitle: 'Dailies', parentId: 's1', index: 0, ...o,
+  })
+  const links = [
+    link('a', 'https://a.com/'),
+    link('b', 'https://b.com/'),
+    link('c', 'https://A.com', { stackTitle: 'Docs' }),
+    link('d', 'https://a.com/?utm_source=news', { spaceName: 'Home', spaceEmoji: '🏠' }),
+    link('e', 'https://b.com/page'),
+  ]
+  const groups = findDuplicates(links)
+  eq('clean-up: copies group by the matching form, in board order', groups.map((g) => g.links.map((l) => l.id)), [['a', 'c', 'd']])
+  eq('clean-up: every copy after the first is ticked', extraCopies(groups), ['c', 'd'])
+  eq('clean-up: duplicates summary', [duplicatesSummary(groups), duplicatesSummary([])], ['1 link saved more than once, 2 extra copies.', 'No link is saved twice.'])
+  eq('clean-up: where a copy lives', locationLabel(links[3]), '🏠 Home › Dailies')
+
+  const old = now - 200 * DAY
+  const opens = new Map([[normalizeUrl('https://seen.com'), now - 10 * DAY]])
+  eq('clean-up: old and never opened is unused', isUnused(link('x', 'https://x.com', { dateAdded: old }), opens, now), true)
+  eq('clean-up: added recently is never unused', isUnused(link('x', 'https://x.com', { dateAdded: now - 20 * DAY }), opens, now), false)
+  eq('clean-up: an open on the board keeps it', isUnused(link('x', 'https://seen.com/', { dateAdded: old }), opens, now), false)
+  eq("clean-up: Chrome's own record counts too", isUnused(link('x', 'https://x.com', { dateAdded: old, dateLastUsed: now - 30 * DAY }), opens, now), false)
+  eq('clean-up: an open over six months ago is unused', isUnused(link('x', 'https://x.com', { dateAdded: old, dateLastUsed: now - UNUSED_MS - DAY }), opens, now), true)
+  eq('clean-up: no add date, never called unused', isUnused(link('x', 'https://x.com'), opens, now), false)
+  eq('clean-up: the later of the two records wins', lastOpened(link('x', 'https://seen.com', { dateLastUsed: now - 50 * DAY }), opens), now - 10 * DAY)
+  eq('clean-up: findUnused keeps board order', findUnused([link('p', 'https://p.com', { dateAdded: old }), link('q', 'https://q.com', { dateAdded: now }), link('r', 'https://r.com', { dateAdded: old })], opens, now).map((l) => l.id), ['p', 'r'])
+  eq('clean-up: unused summary', [unusedSummary(2), unusedSummary(0)], ['2 links not opened in six months.', 'Nothing older than six months sits unopened.'])
+  eq('clean-up: never opened reads plainly', openedWords(0), 'Never opened')
+  eq('clean-up: a past open names the month', openedWords(Date.UTC(2025, 2, 15)).startsWith('Last opened '), true)
+
+  eq('clean-up: only web pages are checked', [isCheckable('https://a.com'), isCheckable('http://a.com'), isCheckable('data:text/plain,hi'), isCheckable('chrome-extension://abc/x.html'), isCheckable('javascript:void(0)')], [true, true, false, false, false])
+  eq('clean-up: one check per page, the first address as saved', checkTargets([...links, link('j', 'javascript:void(0)')]), ['https://a.com/', 'https://b.com/', 'https://b.com/page'])
+  eq('clean-up: a timeout and a failed connection read differently', [readCheckError({ name: 'TimeoutError' }), readCheckError({ name: 'AbortError' }), readCheckError(new TypeError('Failed to fetch'))], ['timeout', 'timeout', 'failed'])
+  const results = new Map([[normalizeUrl('https://a.com/'), 'failed' as const], [normalizeUrl('https://b.com/'), 'ok' as const], [normalizeUrl('https://b.com/page'), 'timeout' as const]])
+  eq('clean-up: every copy of a dead page is listed', unreachableLinks(links, results).map((l) => l.id), ['a', 'c', 'd', 'e'])
+  eq('clean-up: most checks failing means the connection, not the links', [looksOffline(10, 9), looksOffline(10, 3), looksOffline(3, 3)], [true, false, false])
+  eq('clean-up: remove button wording', [removeButtonLabel(0), removeButtonLabel(1), removeButtonLabel(12)], ['Remove selected', 'Remove 1 link', 'Remove 12 links'])
+  eq('clean-up: the second try asks the same site for its icon', [secondProbe('https://fonts.google.com/icons?x=1'), secondProbe('http://a.com:8080/p'), secondProbe('data:text/plain,hi'), secondProbe('nope')], ['https://fonts.google.com/favicon.ico', 'http://a.com:8080/favicon.ico', null, null])
+
+  // Review fix 7 (3 Nov): the check asks each site's home page once, never the saved page.
+  eq('clean-up: the check asks the home page', [siteOf('https://a.com/unsubscribe?token=1'), siteOf('http://b.com:8080/x'), siteOf('data:text/plain,hi'), siteOf('nope')], ['https://a.com/', 'http://b.com:8080/', null, null])
+  eq('clean-up: one check per site, every page listed under it', [...groupBySite(['https://a.com/1', 'https://a.com/2', 'https://b.com/', 'javascript:void(0)']).entries()], [['https://a.com/', ['https://a.com/1', 'https://a.com/2']], ['https://b.com/', ['https://b.com/']]])
+
+  // Review fix 8 (3 Nov): every link counts as opened when counting started, so Unused stays
+  // empty until six months of real counting exist.
+  const since = now - 30 * DAY
+  eq('clean-up: nothing is unused in the first six months of counting', isUnused(link('x', 'https://x.com', { dateAdded: old }), opens, now, UNUSED_MS, since), false)
+  eq('clean-up: after six months of counting, an unopened link shows', isUnused(link('x', 'https://x.com', { dateAdded: old }), opens, now, UNUSED_MS, now - UNUSED_MS - DAY), true)
+  eq('clean-up: findUnused takes the counting start', findUnused([link('p', 'https://p.com', { dateAdded: old })], opens, now, UNUSED_MS, since).length, 0)
+  eq('clean-up: still counting', [stillCounting(since, now), stillCounting(now - UNUSED_MS - DAY, now)], [true, false])
+  eq('clean-up: the counting note says when the list starts', countingNote(Date.UTC(2026, 10, 3, 12), Date.UTC(2026, 10, 5), 'en-GB').includes('starts on 5 May 2027'), true)
+  eq('clean-up: skipped links in the toast', [skippedNote(0), skippedNote(1), skippedNote(2)], [undefined, '1 link had moved off the board and was left alone.', '2 links had moved off the board and were left alone.'])
+}
+
+// ---------- 0.7.1: AI tidy ----------
+import {
+  TIDY_ERRORS,
+  TIDY_MAX_LINKS,
+  cleanName,
+  isNoop,
+  markSame,
+  readAnswer,
+  readPlan,
+  runApply,
+  runUndo,
+  tidyBlock,
+  tidyBody,
+  tidyInput,
+  type BookmarksApi,
+} from '../src/lib/tidyPlan'
+import type { Space } from '../src/lib/types'
+{
+  const bm = (id: string, title = id.toUpperCase(), url = `https://${id}.example/`) => ({ id, title, url, parentStackId: '' })
+  const space: Space = {
+    id: 'S',
+    rawTitle: '🧰 Tools',
+    name: 'Tools',
+    emoji: '🧰',
+    stacks: [
+      { id: 'T', title: 'This week', parentSpaceId: 'S', bookmarks: [], todo: { id: 'todo1', anchorId: 'm' } },
+      { id: 'A', title: 'A', parentSpaceId: 'S', bookmarks: [bm('a1'), bm('a2', 'https://a2.example/'), bm('a3')] },
+      { id: 'E', title: 'Later', parentSpaceId: 'S', bookmarks: [] },
+      { id: 'B', title: 'B', parentSpaceId: 'S', bookmarks: [bm('b1'), bm('b2')] },
+      { id: 'C', title: 'C', parentSpaceId: 'S', bookmarks: [bm('c1')] },
+    ],
+  }
+  const input = tidyInput(space)
+  eq('tidy: links in board order, to-do stacks left out', input.ids, ['a1', 'a2', 'a3', 'b1', 'b2', 'c1'])
+  eq('tidy: a title that is just the address goes as no title', input.links[1], { title: '', url: 'https://a2.example/' })
+  eq('tidy: every link stack is listed, empty ones too', input.stacks.map((s) => `${s.id}:${s.ids.length}`), ['A:3', 'E:0', 'B:2', 'C:1'])
+  const many = { links: Array.from({ length: TIDY_MAX_LINKS + 1 }, () => ({ title: '', url: 'https://x/' })), ids: [], stacks: [] }
+  eq('tidy: too few, enough, too many', [tidyBlock({ ...input, links: input.links.slice(0, 3) }), tidyBlock(input), tidyBlock(many)], ['few', null, 'many'])
+  const body = tidyBody('x'.repeat(80), input, { key: 'SB-1', activationId: 'act' })
+  eq('tidy: the body asks for one space and sends only the key and activation', [body.scope, body.space.length, body.links.length, body.license], ['space', 60, 6, { key: 'SB-1', activationId: 'act' }])
+  eq('tidy: names are one line, 40 characters at most, never empty', [cleanName('  Daily\n  tools '), cleanName('y'.repeat(50)).length, cleanName(''), cleanName(null), cleanName('🍳'.repeat(45)).length], ['Daily tools', 40, 'Links', 'Links', 80])
+
+  const board = {
+    spaces: [
+      { name: 'One', emoji: '1', stacks: [{ name: 'Reading', links: [3, 4, 4] }, { name: 'Tools', links: [2, 5, 99, -1, 1.5] }] },
+      { name: 'Two', emoji: '2', stacks: [{ name: 'tools', links: [0, 3] }, { name: 'Empty', links: [] }] },
+    ],
+    missing: 0,
+  }
+  eq('tidy: spaces flatten, same names merge, each link once, the rest go to "To sort"', readPlan(board, 6), [
+    { name: 'Reading', links: [3, 4] },
+    { name: 'Tools', links: [2, 5, 0] },
+    { name: 'To sort', links: [1] },
+  ])
+  eq('tidy: something that isn\'t a board', [readPlan(null, 3), readPlan({ spaces: 'x' }, 3), readPlan({}, 3)], [null, null, null])
+  eq('tidy: an empty board puts everything in "To sort"', readPlan({ spaces: [] }, 2), [{ name: 'To sort', links: [0, 1] }])
+
+  const plan = markSame([{ name: 'Reading', links: [4, 3] }, { name: 'Tools', links: [2, 5, 0] }, { name: 'Misc', links: [1] }], input)
+  eq('tidy: a stack with exactly the same links is marked, whatever the order', plan.map((p) => p.sameAs ?? '-'), ['B', '-', '-'])
+  const same = markSame([{ name: 'A', links: [0, 1, 2] }, { name: 'B', links: [3, 4] }, { name: 'C', links: [5] }], input)
+  eq('tidy: the same stacks, names and order change nothing', [isNoop(same, input), isNoop(same.map((p, k) => (k === 1 ? { ...p, name: 'Bee' } : p)), input), isNoop([same[1], same[0], same[2]], input)], [true, false, false])
+
+  eq('tidy: answers become a plan or words', [
+    'plan' in readAnswer(200, { ok: true, board }, 6),
+    readAnswer(200, { ok: true }, 6),
+    readAnswer(402, { reason: 'pro' }, 6),
+    readAnswer(429, { reason: 'daily-cap' }, 6),
+    readAnswer(429, { reason: 'busy' }, 6),
+    readAnswer(503, { reason: 'not-ready' }, 6),
+    readAnswer(503, { reason: 'license-check' }, 6),
+    readAnswer(422, { reason: 'refused' }, 6),
+    readAnswer(400, { reason: 'count' }, 6),
+    readAnswer(0, null, 6),
+  ], [true, { error: 'answer' }, { error: 'pro' }, { error: 'cap' }, { error: 'busy' }, { error: 'not-ready' }, { error: 'busy' }, { error: 'refused' }, { error: 'too-many' }, { error: 'busy' }])
+  eq('tidy: the error words', [TIDY_ERRORS.pro, TIDY_ERRORS.cap, TIDY_ERRORS.busy], ['Your Pro key needs attention', "That's today's limit, try again tomorrow", "Couldn't reach Stackboard, try again in a moment"])
+
+  // An in-memory chrome.bookmarks with Chrome's rules: a same-parent move to a later index lands one
+  // earlier (the item is taken out first), an index past the end is refused, and remove() refuses a
+  // folder that still has children.
+  type Node = { id: string; title: string; url?: string; parent?: string; kids?: string[] }
+  const nodes = new Map<string, Node>()
+  const put = (id: string, title: string, parent: string | undefined, kids?: string[], url?: string) => nodes.set(id, { id, title, url, parent, kids })
+  put('S', 'Tools', undefined, ['T', 'A', 'L', 'E', 'B', 'C'])
+  put('T', 'This week', 'S', ['m'])
+  put('m', 'Stackboard to-do', 'T', undefined, 'https://getstackboard.com/todo#todo1')
+  put('A', 'A', 'S', ['a1', 'a2', 'a3'])
+  put('L', 'Loose link', 'S', undefined, 'https://loose.example/')
+  put('E', 'Later', 'S', [])
+  put('B', 'B', 'S', ['b1', 'b2'])
+  put('C', 'C', 'S', ['c1', 'X'])
+  put('X', 'Hidden folder', 'C', [])
+  for (const [id, p] of [['a1', 'A'], ['a2', 'A'], ['a3', 'A'], ['b1', 'B'], ['b2', 'B'], ['c1', 'C']]) put(id, id, p, undefined, `https://${id}.example/`)
+  let next = 0
+  const api: BookmarksApi = {
+    get: async (id) => {
+      const n = nodes.get(id)
+      if (!n) throw new Error("Can't find bookmark for id.")
+      return [{ id, parentId: n.parent }]
+    },
+    getChildren: async (id) => (nodes.get(id)!.kids ?? []).map((k) => ({ id: k, title: nodes.get(k)!.title, url: nodes.get(k)!.url })),
+    create: async ({ parentId, index, title, url }) => {
+      const kids = nodes.get(parentId)!.kids!
+      if (index !== undefined && index > kids.length) throw new Error('index out of range')
+      const id = `n${++next}`
+      put(id, title, parentId, url ? undefined : [], url)
+      kids.splice(index ?? kids.length, 0, id)
+      return { id }
+    },
+    move: async (id, { parentId, index }) => {
+      const n = nodes.get(id)
+      if (!n) throw new Error('no such node')
+      const from = nodes.get(n.parent!)!.kids!
+      const old = from.indexOf(id)
+      from.splice(old, 1)
+      const to = nodes.get(parentId)!.kids!
+      let at = index ?? to.length
+      if (parentId === n.parent && index !== undefined && index > old) at -= 1
+      if (at > to.length) throw new Error('index out of range')
+      to.splice(at, 0, id)
+      n.parent = parentId
+    },
+    update: async (id, { title }) => {
+      if (title !== undefined) nodes.get(id)!.title = title
+    },
+    remove: async (id) => {
+      const n = nodes.get(id)!
+      if (n.kids?.length) throw new Error("Can't remove non-empty folder")
+      const kids = nodes.get(n.parent!)!.kids!
+      kids.splice(kids.indexOf(id), 1)
+      nodes.delete(id)
+    },
+  }
+  const shape = (id: string): unknown => {
+    const n = nodes.get(id)!
+    return n.kids ? { [n.title]: n.kids.map(shape) } : n.title
+  }
+  const before = JSON.stringify(shape('S'))
+
+  const rec = await runApply(api, 'S', plan, input)
+  eq('tidy apply: planned stacks where the first stack was; a reused stack only moves and renames', shape('S'), {
+    Tools: [{ 'This week': ['Stackboard to-do'] }, { Reading: ['b1', 'b2'] }, { Tools: ['a3', 'c1', 'a1'] }, { Misc: ['a2'] }, 'Loose link', { Later: [] }],
+  })
+  // 0.8.0: C kept only an empty folder once c1 moved out, so the folder goes with it (Undo remakes both).
+  eq('tidy apply: emptied stacks are removed, with any empty folder left in them', [rec.removed, nodes.has('C'), rec.renamed, rec.created.length], [['A', 'X', 'C'], false, [{ id: 'B', from: 'B' }], 2])
+  eq('tidy apply: links keep their ids (they move, nothing is re-made)', ['a1', 'a2', 'a3', 'b1', 'b2', 'c1'].every((id) => nodes.has(id)), true)
+
+  const remade = await runUndo(api, rec)
+  eq('tidy undo: the space is exactly as before (only removed stacks and folders have new ids)', [JSON.stringify(shape('S')) === before, remade.size, nodes.get('S')!.kids!.indexOf(remade.get('A')!)], [true, 3, 1])
+  eq('tidy undo: links are back in their stacks in their places', [nodes.get(remade.get('A')!)!.kids, nodes.get('B')!.kids, nodes.get(remade.get('C')!)!.kids], [['a1', 'a2', 'a3'], ['b1', 'b2'], ['c1', remade.get('X')]])
+
+  // A run that stopped halfway (here: the third new stack can't be made) still undoes cleanly.
+  const half = { spaceId: 'S', children: [], stacks: [], renamed: [], created: [], removed: [] }
+  const realCreate = api.create
+  let made = 0
+  api.create = async (arg) => {
+    if (++made === 2) throw new Error('quota')
+    return realCreate(arg)
+  }
+  const input2 = tidyInput({ ...space, stacks: space.stacks.map((s) => (remade.has(s.id) ? { ...s, id: remade.get(s.id)! } : s)) })
+  const plan2 = markSame([{ name: 'One', links: [0] }, { name: 'Two', links: [1, 2] }, { name: 'Three', links: [3, 4, 5] }], input2)
+  const failed = await runApply(api, 'S', plan2, input2, half).then(() => 'ok', (e: Error) => e.message)
+  api.create = realCreate
+  await runUndo(api, half)
+  eq('tidy undo: a run that failed halfway is put back too', [failed, JSON.stringify(shape('S')) === before], ['quota', true])
+
+  // Review fix 10 (3 Nov): a link that left the space between the preview and Apply (another tab,
+  // Chrome's bookmark manager) is skipped, never pulled back in.
+  put('OUT', 'Elsewhere', undefined, [])
+  const plan3 = markSame([{ name: 'Everything', links: [0, 1, 2, 3, 4, 5] }], input2)
+  await api.move('b2', { parentId: 'OUT' })
+  const rec3 = await runApply(api, 'S', plan3, input2)
+  eq('tidy apply: a link that left the space since the preview stays where it went', [rec3.skipped, nodes.get('b2')!.parent], [['b2'], 'OUT'])
+  const remade3 = await runUndo(api, rec3)
+  await api.move('b2', { parentId: remade3.get('B') ?? 'B', index: 1 })
+  eq('tidy undo: the rest of the space comes back exactly', JSON.stringify(shape('S')) === before, true)
+}
+
+// ---------- 0.8.0: Teams company space ----------
+{
+  const policy = {
+    companyName: '  Acme   Corp ',
+    spaces: [
+      {
+        name: 'Company',
+        emoji: '🏢',
+        stacks: [
+          {
+            name: 'Tools',
+            links: [
+              { title: 'Intranet', url: 'https://intranet.example.com' },
+              { title: 'Bad', url: 'javascript:alert(1)' },
+              { title: 'File', url: 'file:///C:/secret.txt' },
+              { title: '', url: 'http://wiki.example.com/start' },
+            ],
+          },
+          { name: 'Empty', links: [{ title: 'x', url: 'chrome://settings' }] },
+        ],
+      },
+      { name: 'Sales', emoji: 'Sales team', stacks: [{ name: 'CRM', links: [{ title: 'CRM', url: 'https://crm.example.com/' }] }] },
+      { name: '   ', stacks: [] },
+    ],
+    announcement: { text: 'Benefits enrolment closes Friday', url: 'https://hr.example.com/benefits' },
+  }
+  const c = parseManagedConfig(policy)
+  eq('teams: company name is tidied', c.companyName, 'Acme Corp')
+  eq('teams: spaces keep policy order, nameless ones go', c.spaces.map((s) => s.name), ['Company', 'Sales'])
+  eq('teams: only http(s) links survive', c.spaces[0].stacks[0].links.map((l) => l.url), ['https://intranet.example.com/', 'http://wiki.example.com/start'])
+  eq('teams: a link without a title shows its address', c.spaces[0].stacks[0].links[1].title, 'http://wiki.example.com/start')
+  eq('teams: a stack with no usable links is dropped', c.spaces[0].stacks.map((s) => s.name), ['Tools'])
+  eq('teams: a word is not an emoji', c.spaces[1].emoji, COMPANY_EMOJI)
+  eq('teams: ManagedBookmarks folder shows unless turned off', [c.showManagedBookmarks, parseManagedConfig({ showManagedBookmarks: false }).showManagedBookmarks], [true, false])
+  eq('teams: junk policy is an empty config', [parseManagedConfig(null), parseManagedConfig('x'), parseManagedConfig({ spaces: 'nope' })].map(isEmptyConfig), [true, true, true])
+  eq('teams: label falls back to Company', [companyLabel(c), companyLabel(parseManagedConfig({}))], ['Acme Corp', 'Company'])
+
+  // Policy values can arrive wrapped: the Google Admin {"Value": ...} form or a JSON string (registry, plist).
+  const wrapped = parseManagedConfig({
+    companyName: { Value: 'Wrapped' },
+    spaces: JSON.stringify([{ name: 'From JSON', stacks: [{ name: 'S', links: [{ title: 'A', url: 'https://a.example.com/' }] }] }]),
+    showManagedBookmarks: { Value: false },
+  })
+  eq('teams: admin-console and JSON-string values unwrap', [wrapped.companyName, wrapped.spaces[0]?.name, wrapped.showManagedBookmarks], ['Wrapped', 'From JSON', false])
+
+  const many = parseManagedConfig({
+    spaces: Array.from({ length: 40 }, (_, i) => ({ name: `S${i}`, stacks: [{ name: 'L', links: Array.from({ length: 500 }, (_, k) => ({ title: `${k}`, url: `https://e.example.com/${k}` })) }] })),
+  })
+  eq('teams: sizes are capped', [many.spaces.length, many.spaces[0].stacks[0].links.length], [MANAGED_LIMITS.spaces, MANAGED_LIMITS.links])
+  eq('teams: very long names are cut', parseManagedConfig({ companyName: 'x'.repeat(500) }).companyName?.length, MANAGED_LIMITS.name)
+  eq('teams: safeUrl', [safeUrl(' https://a.example.com '), safeUrl('HTTPS://B.example.com/x'), safeUrl('ftp://a'), safeUrl('data:text/html,hi'), safeUrl(42)], ['https://a.example.com/', 'https://b.example.com/x', null, null, null])
+
+  const spaces = companySpaces(c)
+  eq('teams: company spaces get co: ids and read-only flags', spaces.map((s) => [s.id, s.company, s.stacks[0].id, s.stacks[0].readOnly, s.stacks[0].bookmarks[0].id, s.stacks[0].bookmarks[0].readOnly]), [
+    ['co:p:0', true, 'co:p:0:0', true, 'co:p:0:0:0', true],
+    ['co:p:1', true, 'co:p:1:0', true, 'co:p:1:0:0', true],
+  ])
+  eq('teams: company links never show the new-link accent', spaces[0].stacks[0].bookmarks.every((b) => b.batch === true && b.dateAdded === undefined), true)
+
+  // Chrome's ManagedBookmarks folder: loose links make a stack named after it, subfolders stacks by path.
+  const folder = {
+    id: '9',
+    title: 'Acme links',
+    children: [
+      { id: '10', title: 'Portal', url: 'https://portal.example.com/' },
+      { id: '11', title: 'HR', children: [{ id: '12', title: 'Payroll', url: 'https://pay.example.com/' }, { id: '13', title: 'Forms', children: [{ id: '14', title: 'Leave', url: 'https://leave.example.com/' }] }] },
+      { id: '15', title: 'Bookmarklet', url: 'javascript:void(0)' },
+      { id: '16', title: 'Empty', children: [] },
+    ],
+  }
+  const mb = managedFolderSpace(folder)
+  eq('teams: ManagedBookmarks folder becomes one read-only space', [mb?.id, mb?.name, mb?.company, mb?.stacks.map((s) => s.title)], ['co:mb:9', 'Acme links', true, ['Acme links', 'HR', 'HR › Forms']])
+  eq('teams: its links are read-only and bookmarklets are skipped', mb?.stacks.flatMap((s) => s.bookmarks.map((b) => `${b.readOnly}:${b.url}`)), ['true:https://portal.example.com/', 'true:https://pay.example.com/', 'true:https://leave.example.com/'])
+  eq('teams: an empty ManagedBookmarks folder shows nothing', managedFolderSpace({ id: '1', title: 'Managed', children: [] }), null)
+
+  const ann = parseAnnouncement(policy.announcement)
+  eq('teams: announcement without an id gets a stable hash id', [ann?.id, ann?.id === parseAnnouncement(policy.announcement)?.id, ann?.dismissible], [`h${textHash('Benefits enrolment closes Friday\nhttps://hr.example.com/benefits')}`, true, true])
+  eq('teams: a new text is a new announcement', parseAnnouncement({ text: 'Other' })?.id !== ann?.id, true)
+  eq('teams: announcement keeps its own id and can be pinned', parseAnnouncement({ id: 'q4', text: 'Hi', dismissible: false }), { id: 'q4', text: 'Hi', dismissible: false })
+  eq('teams: an empty or unsafe announcement link', [parseAnnouncement({ text: '  ' }), parseAnnouncement({ text: 'Hi', url: 'javascript:x' })?.url], [null, undefined])
+  eq('teams: dismissed announcements hide, pinned ones stay', [showAnnouncement(ann, []), showAnnouncement(ann, [ann!.id]), showAnnouncement({ id: 'p', text: 'x', dismissible: false }, ['p']), showAnnouncement(null, [])], [true, false, true, false])
+  eq('teams: dismissal list parses and caps', [parseDismissed('["a",1,"b"]'), parseDismissed('nope'), parseDismissed(null), addDismissed(Array.from({ length: DISMISSED_MAX }, (_, i) => `x${i}`), 'new').length], [['a', 'b'], [], [], DISMISSED_MAX])
+  eq('teams: dismissing twice keeps one entry', addDismissed(['a', 'b'], 'a'), ['b', 'a'])
+}
+
+// ---------- 0.8.0: share a stack ----------
+{
+  const stack = {
+    title: 'Reading list',
+    links: [
+      { title: 'Example', url: 'https://example.com/' },
+      { title: 'Docs', url: 'https://docs.example.org/a?b=1#c' },
+      { title: 'https://plain.example.net/', url: 'https://plain.example.net/' },
+      { title: 'Again', url: 'https://example.com/' },
+      { title: 'Script', url: 'javascript:alert(1)' },
+      { title: 'Data', url: 'data:text/html,<b>x</b>' },
+      { title: 'Chrome page', url: 'chrome://settings/' },
+    ],
+  }
+  const made = await encodeShare(stack)
+  const hash = made ? made.url.slice(made.url.indexOf('#') + 1) : ''
+  eq('share: the link points at the share page with the stack in the hash', !!made && made.url.startsWith(SHARE_PAGE + '#') && /^[A-Za-z0-9_-]+$/.test(hash), true)
+  eq('share: web links only, a URL once', made && [made.links, made.total], [3, 3])
+  const back = await decodeShare(hash)
+  eq('share: round trip keeps the title and links', back, {
+    title: 'Reading list',
+    links: [
+      { title: 'Example', url: 'https://example.com/' },
+      { title: 'Docs', url: 'https://docs.example.org/a?b=1#c' },
+      { title: 'https://plain.example.net/', url: 'https://plain.example.net/' },
+    ],
+  })
+  eq('share: the page decodes the extension link the same way', await pageDecodeShare('#' + hash), back)
+  eq('share: a leading # is fine', await decodeShare('#' + hash), back)
+
+  eq('share: http and https only', [isShareableUrl('https://a.com/'), isShareableUrl('http://a.com/x'), isShareableUrl('javascript:alert(1)'), isShareableUrl('data:text/plain,hi'), isShareableUrl('file:///C:/x'), isShareableUrl('chrome://flags'), isShareableUrl('https://user:pw@a.com/'), isShareableUrl('not a url')], [true, true, false, false, false, false, false, false])
+  eq('share: a hand-made payload loses its script links', parseSharePayload({ v: 1, t: 'x', l: [['bad', 'javascript:alert(1)'], ['ok', 'https://ok.com/'], ['vb', 'vbscript:msgbox'], 'junk', [1, 2]] }), { title: 'x', links: [{ title: 'ok', url: 'https://ok.com/' }] })
+  eq('share: junk is no stack', [parseSharePayload(null), parseSharePayload([]), parseSharePayload({ v: 2, t: 'x', l: [['a', 'https://a.com/']] }), parseSharePayload({ v: 1, t: 'x', l: [] }), parseSharePayload({ v: 1, t: 'x', l: [['a', 'javascript:x']] })], [null, null, null, null, null])
+  eq('share: junk hashes decode to nothing', [await decodeShare(''), await decodeShare('#'), await decodeShare('!!!'), await decodeShare('AAAA'), await decodeShare('x'.repeat(MAX_SHARE_URL * 3)), await pageDecodeShare('%%%')], [null, null, null, null, null, null])
+  // Review batch 2, finding 5: a to-do stack's marker bookmark never travels, either way.
+  const marker = 'https://getstackboard.com/todo#abcd1234abcd1234'
+  eq('share: the to-do marker is not a shareable link (extension and page)', [isShareableUrl(marker), isShareableUrl('https://www.getstackboard.com/todo/#x'), pageIsShareableUrl(marker), isShareableUrl('https://getstackboard.com/todos')], [false, false, false, true])
+  const withMarker = await encodeShare({ title: 'Mixed', links: [{ title: 'Marker', url: marker }, { title: 'Ok', url: 'https://ok.example.com/' }] })
+  eq('share: encoding leaves the marker out', withMarker?.links, 1)
+  const sneaky = bytesToBase64Url(await deflate(JSON.stringify({ v: 1, t: 'Sneaky', l: [['Marker', marker], ['Ok', 'https://ok.example.com/']] })))
+  eq('share: decoding drops a marker someone put in by hand (extension and page)', [(await decodeShare(sneaky))?.links.map((l) => l.url), (await pageDecodeShare(sneaky))?.links.map((l: { url: string }) => l.url)], [['https://ok.example.com/'], ['https://ok.example.com/']])
+  const notJson = bytesToBase64Url(await deflate('this is not json'))
+  eq('share: valid deflate that isn\'t JSON decodes to nothing', [await decodeShare(notJson), await pageDecodeShare(notJson)], [null, null])
+  const bomb = bytesToBase64Url(await deflate('{"v":1,"t":"' + 'a'.repeat(400_000) + '","l":[["a","https://a.com/"]]}'))
+  eq('share: an oversized payload is refused before it is parsed', [bomb.length < MAX_SHARE_URL, await decodeShare(bomb), await pageDecodeShare(bomb)], [true, null, null])
+
+  const hidden = String.fromCharCode(0x202e) + 'gnp.exe' + String.fromCharCode(0x200b) + ' tab\u0007name'
+  eq('share: titles lose control and direction characters', shareCleanText(hidden), 'gnp.exe tab name')
+  eq('share: titles are capped', shareCleanText('x'.repeat(500)).length, SHARE_MAX_TITLE)
+  const many = Array.from({ length: SHARE_MAX_LINKS + 50 }, (_, i) => ['t' + i, `https://e.com/${i}`])
+  eq('share: at most 500 links come out of a payload', parseSharePayload({ v: 1, t: 'x', l: many })?.links.length, SHARE_MAX_LINKS)
+  eq('share: a title equal to its URL travels empty', JSON.parse(sharePayload({ title: 'T', links: [{ title: 'https://a.com/', url: 'https://a.com/' }] })).l, [['', 'https://a.com/']])
+
+  // Random-looking paths so deflate can't shrink them much: the link has to stop at the cap.
+  const big = { title: 'Big', links: Array.from({ length: 400 }, (_, i) => ({ title: `Page ${i} ${Math.random().toString(36).slice(2)}`, url: `https://site${i}.example.com/${Math.random().toString(36).slice(2)}/${Math.random().toString(36).slice(2)}` })) }
+  const cut = await encodeShare(big)
+  const cutBack = cut ? await decodeShare(cut.url.split('#')[1]) : null
+  eq('share: a big stack carries the first links that fit in 8 KB', !!cut && cut.url.length <= MAX_SHARE_URL && cut.links < cut.total && cut.total === 400 && cutBack?.links.length === cut.links && cutBack?.links[0].url === big.links[0].url, true)
+  eq('share: nothing to share without a web link', await encodeShare({ title: 'x', links: [{ title: 'a', url: 'chrome://flags' }] }), null)
+  eq('share: toast wording', [shareNote({ links: 3, total: 3 }).title, shareNote({ links: 1, total: 1 }).title, shareNote({ links: 120, total: 400 }).title, shareNote({ links: 3, total: 3 }).detail], ['3 links', '1 link', '120 of 400 links', 'Anyone with the link sees these titles and addresses.'])
+  eq('share: the page draws a letter, never a favicon request', [pageMonogram('https://www.github.com/x'), pageMonogram('https://docs.google.com/'), pageMonogram('https://a.co/')], ['G', 'G', 'A'])
+}
+
+// ---------- 0.8.0: Teams pack 2 ----------
+{
+  // T6: go links
+  const cfg = parseManagedConfig({
+    goLinks: { Jira: 'https://jira.example.com/', 'PTO Policy': 'https://hr.example.com/pto', 'go/wiki': 'https://wiki.example.com/', bad: 'javascript:alert(1)', '': 'https://x.example.com', 'has space!': 'https://y.example.com', jira: 'https://dupe.example.com' },
+    spaces: [
+      { name: 'Welcome', onboarding: true, stacks: [{ name: 'First week', links: [{ title: 'Laptop setup', url: 'https://it.example.com/setup' }] }] },
+      { name: 'Tools', stacks: [{ name: 'Daily', links: [{ title: 'Jira board', url: 'https://jira.example.com/board' }, { title: 'Payroll', url: 'https://pay.example.com/' }] }] },
+    ],
+    brand: { name: '  Acme  ', accent: '#0F766E' },
+    lock: { appearance: true, starterPacks: 1, importExport: 'yes' },
+  })
+  eq('go: names are tidied, bad ones and non-web addresses go, a name counts once', cfg.goLinks, [
+    { name: 'jira', url: 'https://jira.example.com/' },
+    { name: 'pto-policy', url: 'https://hr.example.com/pto' },
+    { name: 'wiki', url: 'https://wiki.example.com/' },
+  ])
+  eq('go: only the { name: url } map counts, a list reads as none', parseGoLinks([{ name: 'HR', url: 'https://hr.example.com' }, { name: 'x', url: 'ftp://x' }]), [])
+  eq('go: admin-console and JSON-string forms unwrap', parseGoLinks({ Value: JSON.stringify({ a: 'https://a.example.com' }) }), [{ name: 'a', url: 'https://a.example.com/' }])
+  eq('go: names are capped at 40 characters', [cleanGoName('x'.repeat(40))?.length, cleanGoName('x'.repeat(41)), cleanGoName('-lead'), cleanGoName('hr/benefits')], [40, null, null, 'hr/benefits'])
+  eq('go: up to 200 names', parseGoLinks(Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`n${i}`, `https://e.example.com/${i}`]))).length, MANAGED_LIMITS.goLinks)
+
+  const spaces = companySpaces(cfg)
+  const own = [
+    {
+      id: '5',
+      rawTitle: '⭐ Mine',
+      name: 'Mine',
+      emoji: '⭐',
+      stacks: [
+        {
+          id: '6',
+          title: 'S',
+          parentSpaceId: '5',
+          bookmarks: [
+            { id: '7', title: 'Jira board', url: 'https://jira.example.com/board', parentStackId: '6' },
+            { id: '8', title: 'Jira tips', url: 'https://blog.example.com/jira-tips', parentStackId: '6' },
+            { id: '9', title: 'Bookmarklet', url: 'javascript:void(0)', parentStackId: '6' },
+          ],
+        },
+      ],
+    },
+  ]
+  const entries = goEntries(cfg.goLinks, [...own, ...spaces])
+  eq('go: policy names, then company links, then the board, each address once', entries.map((e) => `${e.from}:${e.url}`), [
+    'policy:https://jira.example.com/',
+    'policy:https://hr.example.com/pto',
+    'policy:https://wiki.example.com/',
+    'company:https://it.example.com/setup',
+    'company:https://jira.example.com/board',
+    'company:https://pay.example.com/',
+    'board:https://blog.example.com/jira-tips',
+  ])
+  eq('go: an exact name wins, then word starts, company before the board', rankGo('jira', entries).map((e) => e.url), ['https://jira.example.com/', 'https://jira.example.com/board', 'https://blog.example.com/jira-tips'])
+  eq('go: a word start beats a match inside a word', rankGo('pay', entries)[0]?.url, 'https://pay.example.com/')
+  eq('go: two words match two word starts', rankGo('lap set', entries)[0]?.url, 'https://it.example.com/setup')
+  eq('go: a name prefix', rankGo('pto', entries)[0]?.url, 'https://hr.example.com/pto')
+  eq('go: nothing typed lists the policy names', rankGo('  ', entries).map((e) => e.name), ['jira', 'pto-policy', 'wiki'])
+  eq('go: no match, no suggestion', rankGo('zzz', entries), [])
+  // Review batch 2, finding 6: a policy name that matches always comes first, and at the same
+  // match strength a company link comes before the person's own.
+  const ranked = [
+    { name: null, title: 'Leave', url: 'https://board.example.com/leave', from: 'board' as const },
+    { name: 'hr-leave-policy', title: 'hr-leave-policy', url: 'https://hr.example.com/leave', from: 'policy' as const },
+    { name: null, title: 'Leave', url: 'https://company.example.com/leave', from: 'company' as const },
+  ]
+  eq('go: a matching policy name beats an exact board title', rankGo('leave', ranked)[0]?.url, 'https://hr.example.com/leave')
+  eq('go: company before board at the same strength', rankGo('leave', ranked).map((e) => e.from), ['policy', 'company', 'board'])
+  // Finding 2: no match goes to the person's default search engine, in the tab the omnibox asked for.
+  eq('go: search dispositions', [searchDisposition('currentTab'), searchDisposition('newForegroundTab'), searchDisposition('newBackgroundTab')], ['CURRENT_TAB', 'NEW_TAB', 'NEW_TAB'])
+  // Finding 8: the builder's explicit false (JSON false, DWORD 0) turns the ManagedBookmarks folder
+  // off, so it feeds neither the company spaces nor go links.
+  eq('teams: managed bookmarks off from JSON false or a registry 0', [parseManagedConfig({ showManagedBookmarks: false }).showManagedBookmarks, parseManagedConfig({ showManagedBookmarks: 0 }).showManagedBookmarks, parseManagedConfig({ showManagedBookmarks: { Value: false } }).showManagedBookmarks, parseManagedConfig({}).showManagedBookmarks], [false, false, false, true])
+  eq('go: suggestions are XML-safe and carry the address', goSuggestions('ji', [{ name: null, title: 'R&D <wiki>', url: 'https://ji.example.com/a?b=1&c=2', from: 'board' }]), [
+    { content: 'https://ji.example.com/a?b=1&c=2', description: 'R&amp;D &lt;wiki&gt; <dim>Your board</dim> <url>ji.example.com</url>' },
+  ])
+  eq('go: the typed part is marked', goDescription({ name: 'jira', title: 'jira', url: 'https://jira.example.com/', from: 'policy' }, 'JI'), 'go/<match>ji</match>ra <dim>From your company</dim> <url>jira.example.com</url>')
+  eq('go: xml escaping', escapeXml(`a&b<c>"d'`), 'a&amp;b&lt;c&gt;&quot;d&apos;')
+  eq('go: only full web addresses open as typed', [looksLikeUrl('https://a.example.com/x'), looksLikeUrl('javascript:alert(1)'), looksLikeUrl('jira board'), looksLikeUrl('http://')], [true, false, false, false])
+  eq('go: the board search hash round-trips', [readSearchHash(searchHash(' q4 plan ')), readSearchHash('#other'), readSearchHash('#search=%E0%A4%A')], ['q4 plan', null, null])
+
+  // T7: onboarding space
+  eq('onboarding: the flag comes through on the space', spaces.map((s) => !!s.onboarding), [true, false])
+  const DAY = 86_400_000
+  const now = Date.UTC(2026, 10, 3)
+  eq('onboarding: on for 30 days from first sight', [onboardingActive(null, now), onboardingActive(now - 29 * DAY, now), onboardingActive(now - 30 * DAY, now), onboardingActive(now + DAY, now)], [true, true, false, true])
+  const mbSpace = { id: 'co:mb:1', rawTitle: '🏢 Managed', name: 'Managed', emoji: '🏢', company: true, stacks: [] }
+  const ordered = [
+    ...companySpaces(
+      parseManagedConfig({
+        spaces: [
+          { name: 'A', stacks: [{ name: 's', links: [{ title: 't', url: 'https://a.example.com' }] }] },
+          { name: 'Start', onboarding: true, stacks: [{ name: 's', links: [{ title: 't', url: 'https://b.example.com' }] }] },
+        ],
+      }),
+    ),
+    mbSpace,
+  ]
+  eq('onboarding: leads with a badge while on', arrangeOnboarding(ordered, true).map((s) => `${s.name}:${!!s.startHere}`), ['Start:true', 'A:false', 'Managed:false'])
+  eq('onboarding: then follows the other company spaces, badge gone', arrangeOnboarding(ordered, false).map((s) => `${s.name}:${!!s.startHere}`), ['A:false', 'Managed:false', 'Start:false'])
+  eq('onboarding: with no onboarding space the order is untouched', arrangeOnboarding(ordered.slice(0, 1), true), ordered.slice(0, 1))
+  eq('onboarding: 30 days', ONBOARDING_MS, 30 * DAY)
+
+  // T8: brand and locks
+  eq('brand: name tidied, accent lowercased', cfg.brand, { name: 'Acme', accent: '#0f766e' })
+  eq('brand: only #rrggbb accents', [parseBrand({ accent: 'red' }), parseBrand({ accent: '#abc' }), parseBrand({ name: 'X', accent: '#12345g' })], [null, null, { name: 'X', accent: null }])
+  eq('locks: true (or the registry 1) locks, anything else does not', cfg.lock, { appearance: true, starterPacks: true, importExport: false })
+  eq('locks: none by default', parseLocks(undefined), { appearance: false, starterPacks: false, importExport: false })
+  eq('teams pack 2: a policy that only sets locks or go links still applies', [isEmptyConfig(parseManagedConfig({ lock: { appearance: true } })), isEmptyConfig(parseManagedConfig({ goLinks: { a: 'https://a.example.com' } })), anyLock(parseLocks({ importExport: true }))], [false, false, true])
+  eq('brand: the company accent shows without Pro and wins over a personal one', [lookMirror(DEFAULT_LOOKS, false, '#0f766e').accent, lookMirror(parseLooks({ accent: '#dc2626' }), true, '#0f766e').accent, lookMirror(parseLooks({ accent: '#dc2626' }), true, null).accent], ['#0f766e', '#0f766e', '#dc2626'])
+  eq('brand: the boot copy carries the company accent', [
+    policyAccentFromMirror(JSON.stringify(bootMirror(DEFAULT_APPEARANCE, DEFAULT_LOOKS, false, '#0f766e'))),
+    policyAccentFromMirror(JSON.stringify(bootMirror(DEFAULT_APPEARANCE))),
+    bootMirror(DEFAULT_APPEARANCE, DEFAULT_LOOKS, false, '#0f766e').look.accent,
+  ], ['#0f766e', null, '#0f766e'])
+}
+
+// ---------- 0.8.0: nested folders ----------
+import {
+  OPEN_FOLDERS_MAX,
+  allLinks,
+  backupStack,
+  contentsLabel,
+  holderOf,
+  locate,
+  mapTree,
+  moveIndex,
+  parseOpenFolders,
+  placesIn,
+  setFolderOpen,
+  walkFolders,
+  writeBackupStack,
+  type CreateApi,
+  type TreeNode,
+} from '../src/lib/folderPlan'
+import { searchTree } from '../src/lib/search'
+import { boardLinks } from '../src/lib/cleanupPlan'
+import { flattenNote, flattenedFolders } from '../src/lib/tidyPlan'
+import { liveTodoIds } from '../src/lib/folderPlan'
+import { carriesFolderLinks } from '../src/lib/sharePlan'
+{
+  // A Chrome subtree with the children out of order (Chrome returns them in index order, but
+  // nothing promises it). The mapping, walks and search follow tokyo51's nested-stacks tests.
+  const T0 = Date.UTC(2026, 9, 1)
+  const ln = (id: string, index: number, title: string, url: string): TreeNode => ({ id, index, title, url, dateAdded: T0 + index * 60_000 })
+  const fd = (id: string, index: number, title: string, children: TreeNode[]): TreeNode => ({ id, index, title, children })
+  const MARK = 'https://getstackboard.com/todo#'
+  const root = fd('r', 0, 'Stackboard', [
+    fd('sp2', 1, '🏠 Home', [fd('chores', 0, 'Chores', [ln('rota', 0, 'Rota', 'https://rota.example/')])]),
+    fd('sp1', 0, '🧪 Work', [
+      ln('stray', 0, 'Straight in a space', 'https://stray.example/'),
+      fd('japan', 2, 'Japan', [
+        fd('food', 3, 'Food', [
+          ln('ramen', 1, 'Ramen guide', 'https://ramen.example/'),
+          fd('kyoto', 2, 'Kyoto', [ln('nishiki', 0, 'Nishiki Market', 'https://nishiki.example/'), ln('mk2', 1, 'Stackboard to-do list', `${MARK}zzzzzzzzzzzzzzzz`)]),
+          ln('sushi', 0, 'Sushi map', 'https://sushi.example/'),
+        ]),
+        ln('jr', 0, 'JR Pass', 'https://jrpass.example/'),
+        fd('empty', 2, 'Empty', []),
+        ln('untitled', 1, '', 'https://untitled.example/'),
+        ln('late', 4, 'Late link', 'https://late.example/'),
+      ]),
+      fd('list', 1, 'This week', [ln('mk', 0, 'Stackboard to-do list', `${MARK}abcdefghijklmnop`), fd('inner', 1, 'Inner', [])]),
+    ]),
+  ])
+  const tree = mapTree(root)
+  const work = tree.spaces[0]
+  const japan = work.stacks[1]
+  const food = japan.folders![1]
+  eq('nested readTree: spaces and stacks in index order, a link straight in a space left out', [tree.rootId, work.name, work.stacks.map((s) => s.title)], ['r', 'Work', ['This week', 'Japan']])
+  eq('nested readTree: a stack keeps its own links in order, folders out of the list', japan.bookmarks.map((b) => b.title), ['JR Pass', 'https://untitled.example/', 'Late link'])
+  eq("nested readTree: each link carries Chrome's index, folders counted", japan.bookmarks.map((b) => b.index), [0, 1, 4])
+  eq('nested readTree: folders inside a stack, in order, empty ones too', japan.folders?.map((f) => [f.title, f.parentId, f.bookmarks.length, f.folders.length]), [['Empty', 'japan', 0, 0], ['Food', 'japan', 2, 1]])
+  eq('nested readTree: a folder has its links, pointing at the folder', food.bookmarks.map((b) => [b.title, b.parentStackId]), [['Sushi map', 'food'], ['Ramen guide', 'food']])
+  eq('nested readTree: folders nest to any depth; a to-do marker in one is not a link', food.folders.map((f) => [f.title, f.parentId, f.bookmarks.map((b) => b.title)]), [['Kyoto', 'food', ['Nishiki Market']]])
+  eq('nested readTree: a stack with no folders has no folders key', 'folders' in tree.spaces[1].stacks[0], false)
+  eq('nested readTree: a to-do stack stays a checklist, folders in it unshown', [work.stacks[0].todo?.id, work.stacks[0].bookmarks.length, 'folders' in work.stacks[0]], ['abcdefghijklmnop', 0, false])
+  eq('nested readTree: links saved a minute apart are not a batch', food.bookmarks.map((b) => b.batch), [false, false])
+
+  // Walks: counts, open-all, search and the drop targets all go through these.
+  eq('nested: every link in a stack, its own first, then each folder depth first', allLinks(japan).map((b) => b.id), ['jr', 'untitled', 'late', 'sushi', 'ramen', 'nishiki'])
+  eq('nested: every folder below a stack', walkFolders(japan).map((f) => f.title), ['Empty', 'Food', 'Kyoto'])
+  eq('nested: a space walked in board order', placesIn(work).map((p) => [p.container.id, p.path.map((f) => f.id)]), [['list', []], ['japan', []], ['empty', ['empty']], ['food', ['food']], ['kyoto', ['food', 'kyoto']]])
+  eq('nested: locate a deep folder with its path', (() => { const p = locate(tree, 'kyoto'); return [p?.space.name, p?.stack.title, p?.path.map((f) => f.title)] })(), ['Work', 'Japan', ['Food', 'Kyoto']])
+  eq('nested: locate a stack, and nothing for unknown ids', [locate(tree, 'japan')?.path, locate(tree, 'nope'), locate(null, 'japan')], [[], null, null])
+  eq('nested: the holder of a link, at any depth', [holderOf(tree, 'nishiki')?.container.id, holderOf(tree, 'jr')?.container.id, holderOf(tree, 'stray')], ['kyoto', 'japan', null])
+  eq('nested: what a delete takes with it', [contentsLabel(japan), contentsLabel(food), contentsLabel(tree.spaces[1].stacks[0])], ['3 folders, 6 links', '1 folder, 3 links', '1 link'])
+
+  // Chrome's move index counts folders: Japan is [JR 0, untitled 1, Empty 2, Food 3, Late 4].
+  const [jr, untitled, late] = japan.bookmarks
+  eq('nested move: down past a folder in the same stack passes one more', moveIndex(jr, 0, late, 2, true), 5)
+  eq('nested move: up in the same stack lands on the index', moveIndex(late, 2, jr, 0, true), 0)
+  eq('nested move: into another folder takes its index as it is', moveIndex(jr, 0, food.bookmarks[1], 1, false), 1)
+  eq('nested move: list positions when there is no index (demo data)', moveIndex({}, 0, {}, 2, true), 3)
+  eq('nested move: untitled down onto Late', moveIndex(untitled, 1, late, 2, true), 5)
+
+  // 0.8.0 review: stacks and spaces carry Chrome's own index, so a loose link sitting straight in
+  // a space folder (or the Stackboard folder) can't shift a drop by one.
+  {
+    const looseRoot: TreeNode = {
+      id: 'r', title: 'Stackboard', children: [
+        { id: 'sp1', title: '💼 Work', index: 0, children: [
+          { id: 'a', title: 'A', index: 0, children: [] },
+          { id: 'loose', title: 'Loose link', url: 'https://loose.example/', index: 1 },
+          { id: 'b', title: 'B', index: 2, children: [] },
+          { id: 'c', title: 'C', index: 3, children: [] },
+        ] },
+        { id: 'rootLink', title: 'Root link', url: 'https://root.example/', index: 1 },
+        { id: 'sp2', title: '📚 Read', index: 2, children: [] },
+      ],
+    }
+    const lt = mapTree(looseRoot)
+    const [A, B, C] = lt.spaces[0].stacks
+    eq('reorder: stacks and spaces keep Chrome indexes', [A.index, B.index, C.index, lt.spaces[0].index, lt.spaces[1].index], [0, 2, 3, 0, 2])
+    eq('reorder: A dropped on C lands after C, past the loose link', moveIndex(A, 0, C, 2, true), 4)
+    eq('reorder: C dropped on B lands at B', moveIndex(C, 2, B, 1, true), 2)
+    eq('reorder: the first space dropped on the second passes the loose root link', moveIndex(lt.spaces[0], 0, lt.spaces[1], 1, true), 3)
+  }
+
+  // Fold state: one list per device, newest last, capped.
+  eq('folds: parse keeps strings only', [parseOpenFolders('["a",1,"b"]'), parseOpenFolders('nope'), parseOpenFolders(null)], [['a', 'b'], [], []])
+  eq('folds: opening moves a folder to the end, folding drops it', [setFolderOpen(['a', 'b'], 'a', true), setFolderOpen(['a', 'b'], 'a', false), setFolderOpen([], 'c', false)], [['b', 'a'], ['b'], []])
+  eq('folds: the list is capped, oldest out', (() => { const l = setFolderOpen(Array.from({ length: OPEN_FOLDERS_MAX }, (_, i) => `f${i}`), 'new', true); return [l.length, l[0], l.at(-1)] })(), [OPEN_FOLDERS_MAX, 'f1', 'new'])
+
+  // Search reaches into folders and says where a hit sits.
+  const nishiki = searchTree(tree, 'nishiki')
+  eq('nested search: finds a link two levels down, with its folders', nishiki.map((g) => [g.stack.title, g.path.map((f) => f.title), g.hits.map((h) => h.title)]), [['Japan', ['Food', 'Kyoto'], ['Nishiki Market']]])
+  eq('nested search: a folder name matches the links below it', searchTree(tree, 'food').flatMap((g) => g.hits.map((h) => h.title)), ['Sushi map', 'Ramen guide', 'Nishiki Market'])
+  eq('nested search: a stack name still matches its folders too', searchTree(tree, 'japan').flatMap((g) => g.hits.map((h) => h.id)).sort(), ['jr', 'late', 'nishiki', 'ramen', 'sushi', 'untitled'])
+  eq('nested search: Enter opens the best hit, wherever it sits', searchTree(tree, 'ramen')[0]?.hits[0]?.title, 'Ramen guide')
+
+  // An in-memory chrome.bookmarks: create (at an index or last), getChildren, move with Chrome's
+  // same-folder rule, remove (empty folders only), and a subtree read back as TreeNodes.
+  type Mem = { id: string; title: string; url?: string; parent?: string; kids?: string[] }
+  const mem = new Map<string, Mem>()
+  let seq = 0
+  const put = (id: string, title: string, parent: string | undefined, url?: string) => {
+    mem.set(id, { id, title, url, parent, kids: url ? undefined : [] })
+    if (parent) mem.get(parent)!.kids!.push(id)
+    return id
+  }
+  let gets = 0
+  const api = {
+    get: async (id: string) => {
+      gets++
+      const n = mem.get(id)
+      if (!n) throw new Error("Can't find bookmark for id.")
+      return [{ id, parentId: n.parent }]
+    },
+    getChildren: async (id: string) => (mem.get(id)!.kids ?? []).map((k) => ({ id: k, title: mem.get(k)!.title, url: mem.get(k)!.url })),
+    create: async ({ parentId, index, title, url }: { parentId: string; index?: number; title: string; url?: string }) => {
+      if (url !== undefined && !/^https?:/.test(url)) throw new Error('Invalid URL')
+      const id = `m${++seq}`
+      put(id, title, undefined, url)
+      const kids = mem.get(parentId)!.kids!
+      kids.splice(index ?? kids.length, 0, id)
+      mem.get(id)!.parent = parentId
+      return { id }
+    },
+    move: async (id: string, { parentId, index }: { parentId: string; index?: number }) => {
+      const n = mem.get(id)!
+      const from = mem.get(n.parent!)!.kids!
+      const old = from.indexOf(id)
+      from.splice(old, 1)
+      const to = mem.get(parentId)!.kids!
+      let at = index ?? to.length
+      if (parentId === n.parent && index !== undefined && index > old) at -= 1
+      if (at > to.length) throw new Error('index out of range')
+      to.splice(at, 0, id)
+      n.parent = parentId
+    },
+    update: async (id: string, { title }: { title?: string }) => {
+      if (title !== undefined) mem.get(id)!.title = title
+    },
+    remove: async (id: string) => {
+      const n = mem.get(id)!
+      if (n.kids?.length) throw new Error("Can't remove non-empty folder")
+      const kids = mem.get(n.parent!)!.kids!
+      kids.splice(kids.indexOf(id), 1)
+      mem.delete(id)
+    },
+  }
+  const sub = (id: string): TreeNode => {
+    const n = mem.get(id)!
+    const index = n.parent ? mem.get(n.parent)!.kids!.indexOf(id) : 0
+    return n.kids ? { id, title: n.title, index, children: n.kids.map(sub) } : { id, title: n.title, url: n.url, index }
+  }
+  // Titles and addresses only: what a backup can carry.
+  const shapeOf = (c: { title: string; bookmarks: { title: string; url: string }[]; folders?: { title: string; bookmarks: { title: string; url: string }[]; folders: unknown[] }[] }): unknown => ({
+    [c.title]: [...c.bookmarks.map((b) => `${b.title}=${b.url}`), ...(c.folders ?? []).map((f) => shapeOf(f as never))],
+  })
+
+  // Backup round trip: board -> backup JSON -> a new board, nesting intact.
+  const backup: BookmarkBackup = {
+    version: 1,
+    exportedAt: '2026-11-03T00:00:00.000Z',
+    spaces: tree.spaces.map((s) => ({ emoji: s.emoji, name: s.name, stacks: s.stacks.filter((st) => !st.todo).map(backupStack) })),
+  }
+  eq('nested backup: a stack keeps its folders, nested', backup.spaces[0].stacks[0].folders?.map((f) => [f.name, f.bookmarks.length, f.folders?.map((g) => g.name)]), [['Empty', 0, undefined], ['Food', 2, ['Kyoto']]])
+  eq('nested backup: a stack without folders has no folders key (older versions read it as before)', 'folders' in backup.spaces[1].stacks[0], false)
+  const file = JSON.parse(JSON.stringify(backup)) as BookmarkBackup
+  const newRoot = put('R', 'Stackboard', undefined)
+  for (const space of file.spaces) {
+    const sp = await api.create({ parentId: newRoot, title: `${space.emoji} ${space.name}` })
+    for (const st of space.stacks) await writeBackupStack(api as CreateApi, sp.id, st)
+  }
+  const again = mapTree(sub(newRoot))
+  eq('nested backup: round trip keeps every folder and link in place', again.spaces[0].stacks.map(shapeOf), [shapeOf(japan)])
+  eq('nested backup: links inside folders keep their order', allLinks(again.spaces[0].stacks[0]).map((b) => b.title), allLinks(japan).map((b) => b.title))
+  eq('nested backup: snapshot counts take in links in folders', [countSpace(backup.spaces[0]), countBackup(backup).links], [{ stacks: 1, links: 6, lists: 0, items: 0 }, 7])
+
+  // Older backups (no folders) and hand-edited ones still import.
+  const old = put('O', 'Old', undefined)
+  const oldId = await writeBackupStack(api as CreateApi, old, { name: 'Docs', bookmarks: [{ title: 'A', url: 'https://a.example/' }] })
+  eq('nested backup: an older backup imports its links only', shapeOf(mapTree({ id: 'x', title: 'x', children: [sub(old)] }).spaces[0].stacks[0]), { Docs: ['A=https://a.example/'] })
+  const odd = { name: 'Odd', bookmarks: [{ title: 'B', url: 'https://b.example/' }], folders: [null, { name: 'Ok', bookmarks: [{ title: 'No url' }, { url: 'https://c.example/' }], folders: 'nope' }] }
+  await writeBackupStack(api as CreateApi, old, odd as never)
+  eq('nested backup: malformed folders and links are passed over', shapeOf(mapTree({ id: 'x', title: 'x', children: [sub(old)] }).spaces[0].stacks[1]), { Odd: ['B=https://b.example/', { Ok: ['https://c.example/=https://c.example/'] }] })
+  const bad = { name: 'Bad', bookmarks: [], folders: [{ name: 'F', bookmarks: [{ title: 'Script', url: 'javascript:void(0)' }, { title: 'D', url: 'https://d.example/' }] }] }
+  const threw = await writeBackupStack(api as CreateApi, old, bad).then(() => false, () => true)
+  const skipped: string[] = []
+  await writeBackupStack(api as CreateApi, old, { ...bad, name: 'Bad 2' }, (url) => skipped.push(url))
+  eq('nested backup: a refused link stops an import, a snapshot restore skips it', [threw, skipped, mem.get(mem.get(old)!.kids!.at(-1)!)!.title], [true, ['javascript:void(0)'], 'Bad 2'])
+  eq('nested backup: written ids come back', typeof oldId, 'string')
+
+  // Clean-up scans see links in folders, with the folder path, and skip to-do markers.
+  const links = boardLinks(root)
+  eq('nested clean-up: every link on the board, folders included, markers skipped', links.map((l) => l.id), ['jr', 'untitled', 'late', 'sushi', 'ramen', 'nishiki', 'rota'])
+  eq('nested clean-up: a link in a folder says where it is', locationLabel(links.find((l) => l.id === 'nishiki')!), '🧪 Work › Japan › Food › Kyoto')
+  eq('nested clean-up: its parent is the folder, its index Chrome\'s', [links.find((l) => l.id === 'ramen')?.parentId, links.find((l) => l.id === 'ramen')?.index], ['food', 1])
+  eq('nested clean-up: a copy inside a folder is a duplicate', findDuplicates([...links, { ...links[5], id: 'copy', parentId: 'japan', stackTitle: 'Japan' }]).map((g) => g.links.map((l) => l.id)), [['nishiki', 'copy']])
+
+  // AI tidy: links in folders go to the AI too; Apply empties and removes those folders, Undo puts them back.
+  const tSpace = put('TS', 'Tidy', undefined)
+  const tA = put('TA', 'A', tSpace)
+  put('a1', 'a1', tA, 'https://a1.example/')
+  const tF = put('TF', 'Folder', tA)
+  put('f1', 'f1', tF, 'https://f1.example/')
+  const tG = put('TG', 'Deeper', tF)
+  put('g1', 'g1', tG, 'https://g1.example/')
+  put('TE', 'Kept empty', tA)
+  put('a2', 'a2', tA, 'https://a2.example/')
+  const tB = put('TB', 'B', tSpace)
+  put('b1', 'b1', tB, 'https://b1.example/')
+  const tidySpace = mapTree({ id: 'x', title: 'x', children: [sub(tSpace)] }).spaces[0]
+  const tInput = tidyInput(tidySpace)
+  eq('nested tidy: links in folders are sent too, after the stack\'s own', [tInput.ids, tInput.stacks.map((s) => `${s.id}:${s.ids.length}`)], [['a1', 'a2', 'f1', 'g1', 'b1'], ['TA:4', 'TB:1']])
+  const tShape = (id: string): unknown => {
+    const n = mem.get(id)!
+    return n.kids ? { [n.title]: n.kids.map(tShape) } : n.title
+  }
+  const tBefore = JSON.stringify(tShape(tSpace))
+  const tPlan = markSame([{ name: 'Mixed', links: [0, 2, 4] }, { name: 'Rest', links: [1, 3] }], tInput)
+  const tRec = await runApply(api as unknown as BookmarksApi, tSpace, tPlan, tInput)
+  eq('nested tidy apply: links leave their folders; a stack left with only empty folders goes, folders and all', tShape(tSpace), {
+    Tidy: [{ Mixed: ['a1', 'f1', 'b1'] }, { Rest: ['a2', 'g1'] }],
+  })
+  eq('nested tidy apply: innermost first, the folder that was empty before too, and the record says so', tRec.removed, ['TG', 'TF', 'TE', 'TA', 'TB'])
+  await runUndo(api as unknown as BookmarksApi, tRec)
+  eq('nested tidy undo: stacks, folders and links are back exactly', JSON.stringify(tShape(tSpace)), tBefore)
+  const tSame = markSame([{ name: 'A', links: [0, 1, 2, 3] }, { name: 'B', links: [4] }], tidyInput(mapTree({ id: 'x', title: 'x', children: [sub(tSpace)] }).spaces[0]))
+  eq('nested tidy: a stack the plan keeps whole keeps its folders', tSame.map((p) => !!p.sameAs), [true, true])
+
+  // Merged with main (3 Nov): Tidy flattens folders and the preview says how many; Apply looks for
+  // each link where it was right before moving it; share and go links take in links in folders.
+  const tNow = () => tidyInput(mapTree({ id: 'x', title: 'x', children: [sub(tSpace)] }).spaces[0])
+  const tInput2 = tNow()
+  eq('nested tidy: each stack counts the folders in it that hold links', [tInput.stacks.map((s) => s.folders), tInput2.stacks.map((s) => s.folders)], [[2, 0], [2, 0]])
+  eq('nested tidy: folders a plan flattens, none in a stack it keeps whole', [flattenedFolders(tPlan, tInput), flattenedFolders(markSame([{ name: 'A', links: [0, 1, 2, 3] }, { name: 'B', links: [4] }], tInput2), tInput2)], [2, 0])
+  eq('nested tidy: the preview line', [flattenNote(0), flattenNote(1), flattenNote(3)], [
+    null,
+    '1 folder inside a stack gets flattened into the new stacks; Undo puts it back.',
+    '3 folders inside stacks get flattened into the new stacks; Undo puts them back.',
+  ])
+  const outside = put('OUT', 'Outside', undefined)
+  const deepLink = allLinks(mapTree({ id: 'x', title: 'x', children: [sub(tSpace)] }).spaces[0].stacks[0]).find((b) => b.title === 'g1')!.id
+  const tBefore2 = JSON.stringify(tShape(tSpace))
+  const realMove = api.move
+  let moves = 0
+  api.move = async (id: string, dest: { parentId: string; index?: number }) => {
+    if (++moves === 1) await realMove(deepLink, { parentId: outside }) // another tab takes g1 away mid-run
+    return realMove(id, dest)
+  }
+  const gets0 = gets
+  const tRec2 = await runApply(api as unknown as BookmarksApi, tSpace, markSame([{ name: 'All', links: [0, 1, 2, 3, 4] }], tInput2), tInput2)
+  api.move = realMove
+  eq('nested tidy apply: a link that left its folder mid-run is skipped, the rest move', [tRec2.skipped, tShape(tSpace)], [
+    ['g1'],
+    { Tidy: [{ All: ['a1', 'a2', 'f1', 'b1'] }] },
+  ])
+  eq('nested tidy apply: each link is looked up once, by id, right before it moves', gets - gets0, 5)
+  await runUndo(api as unknown as BookmarksApi, tRec2)
+  eq('nested tidy undo: folders come back whole, and the link that left stays where it went', [JSON.stringify(tShape(tSpace)), mem.get(deepLink)?.parent], [tBefore2.replace('"g1"', ''), outside])
+
+  eq('nested share: a stack with folders says it goes as one flat list', [shareNote({ links: 5, total: 5 }, true).detail, shareNote({ links: 5, total: 5 }).detail], [
+    'Its folders are shared as one flat list. Anyone with the link sees these titles and addresses.',
+    'Anyone with the link sees these titles and addresses.',
+  ])
+  eq('nested go links: links in folders are found too, after the stack\'s own', goEntries([], tree.spaces).map((e) => e.url).slice(0, 7), [
+    'https://jrpass.example/', 'https://untitled.example/', 'https://late.example/', 'https://sushi.example/', 'https://ramen.example/', 'https://nishiki.example/', 'https://rota.example/',
+  ])
+
+  // Review fixes (3 Nov).
+  // 1. The board builder writes each company space as a ManagedBookmarks folder holding its stacks
+  //    (writeManagedBookmarks in site/teams/builder/builder.js). Chrome shows that list as one
+  //    folder: it keeps the path-named stacks it had before 0.8.0, with no folders.
+  const builderOut = [
+    { toplevel_name: 'Acme Corp' },
+    {
+      name: '⚡ Engineering',
+      children: [
+        { name: 'Tools', children: [{ name: 'Jira', url: 'https://jira.example.com/' }, { name: 'CI', url: 'https://ci.example.com/' }] },
+        { name: 'Docs', children: [{ name: 'Handbook', url: 'https://docs.example.com/handbook' }] },
+      ],
+    },
+    { name: '🏥 People', children: [{ name: 'Benefits', children: [{ name: 'Portal', url: 'https://benefits.example.com/' }] }] },
+  ]
+  let mbSeq = 0
+  type PolicyEntry = { name?: string; url?: string; children?: PolicyEntry[] }
+  const asNode = (e: PolicyEntry): FolderNode => (e.url ? { id: `mb${++mbSeq}`, title: e.name ?? '', url: e.url } : { id: `mb${++mbSeq}`, title: e.name ?? '', children: (e.children ?? []).map(asNode) })
+  const managed: FolderNode = { id: 'mbroot', title: builderOut[0].toplevel_name!, children: (builderOut.slice(1) as PolicyEntry[]).map(asNode) }
+  const fromBuilder = managedFolderSpace(managed)
+  eq('nested teams: the builder\'s ManagedBookmarks keep path-named stacks, no folders, read-only', fromBuilder?.stacks.map((s) => [s.title, s.bookmarks.length, 'folders' in s, s.readOnly]), [
+    ['⚡ Engineering › Tools', 2, false, true],
+    ['⚡ Engineering › Docs', 1, false, true],
+    ['🏥 People › Benefits', 1, false, true],
+  ])
+  eq('nested teams: nest: false is only for ManagedBookmarks; an import still nests', planFolder(managed, { name: 'x', emoji: '📁', looseTitle: 'Links' }).space.stacks.map((s) => [s.title, (s.folders ?? []).map((f) => f.title)]), [
+    ['⚡ Engineering', ['Tools', 'Docs']],
+    ['🏥 People', ['Benefits']],
+  ])
+
+  // 3. A to-do stack is passed over whole by the clean-up, extra links and folders in it too.
+  const todoRoot = fd('r2', 0, 'Stackboard', [
+    fd('s2', 0, '🧪 Work', [
+      fd('td', 0, 'This week', [
+        ln('mk3', 0, 'Stackboard to-do list', `${MARK}cccccccccccccccc`),
+        ln('hidden', 1, 'Hidden link', 'https://hidden.example/'),
+        fd('hf', 2, 'Hidden folder', [ln('hidden2', 0, 'Hidden too', 'https://hidden2.example/')]),
+      ]),
+      fd('st', 1, 'Links', [ln('shown', 0, 'Shown', 'https://shown.example/')]),
+    ]),
+  ])
+  eq('nested clean-up: a to-do stack is passed over whole, as the board shows it', boardLinks(todoRoot).map((l) => l.id), ['shown'])
+
+  // 4. A to-do list moved inside another stack keeps its items: its marker counts as live.
+  eq('nested to-do: markers at any depth are live', liveTodoIds(tree).sort(), ['abcdefghijklmnop', 'zzzzzzzzzzzzzzzz'])
+  const lists = { abcdefghijklmnop: emptyList(), zzzzzzzzzzzzzzzz: emptyList(), qqqqqqqqqqqqqqqq: emptyList() }
+  const swept = (live: string[]) => planSweep(lists, live, Object.keys(lists), Date.UTC(2026, 10, 3)).mark
+  eq('nested to-do: the sweep marks only the list whose marker is gone, not one moved inside a stack', [swept(liveTodoIds(tree)), swept(['abcdefghijklmnop'])], [
+    ['qqqqqqqqqqqqqqqq'],
+    ['zzzzzzzzzzzzzzzz', 'qqqqqqqqqqqqqqqq'],
+  ])
+  eq('nested to-do: a tree without the marker list falls back to the to-do stacks', liveTodoIds({ ...tree, todoIds: undefined }), ['abcdefghijklmnop'])
+
+  // 8. The share toast talks about folders only when links from them made it into the link.
+  const own = [{ title: 'A', url: 'https://a.example/' }, { title: 'B', url: 'https://b.example/' }, { title: 'Script', url: 'javascript:void(0)' }]
+  eq('nested share: folder links in the link are what the toast goes by', [carriesFolderLinks({ links: 3 }, own), carriesFolderLinks({ links: 2 }, own), carriesFolderLinks({ links: 1 }, [])], [true, false, true])
+}
+
+// ---------- 0.8.0: packed stacks (U1) ----------
+import { PACK_MAX_ROWS, PACK_UNIT, packPlan, packedMove } from '../src/lib/packPlan'
+import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/lib/appearance'
+{
+  // The Layout setting: Packed for everyone, settings saved before 0.8.0 included.
+  eq('layout: Packed is the default', [DEFAULT_APPEARANCE.layout, parseAppearance(undefined).layout], ['packed', 'packed'])
+  // Packed is for new installs only (3 Nov): saved settings with no layout key come from before
+  // 0.8.0, and those boards keep Rows. parseAppearance fills a missing key; parseSavedAppearance reads storage.
+  const oldSettings = { mode: 'dark', palette: 'nord', density: 'compact', bg: { kind: 'gradient' } }
+  eq('layout: settings saved before 0.8.0 come back Rows', [parseSavedAppearance(oldSettings).layout, parseSavedAppearance(oldSettings).palette, parseAppearance(oldSettings).layout], ['rows', 'nord', 'packed'])
+  eq('layout: nothing saved is a new board, Packed; a picked layout stands', [parseSavedAppearance(undefined).layout, parseSavedAppearance({ layout: 'packed' }).layout, parseSavedAppearance({ layout: 'rows' }).layout], ['packed', 'packed', 'rows'])
+  const oldMirror = JSON.stringify({ ...bootMirror(parseAppearance(oldSettings)), settings: oldSettings })
+  eq('layout: a boot copy from before 0.8.0 opens Rows on the first frame, no copy opens Packed', [settingsFromMirror(oldMirror).layout, settingsFromMirror(null).layout], ['rows', 'packed'])
+  eq('layout: an update from before 0.8.0 writes Rows into the saved settings, never over a pick', [rowsForOldBoard(undefined), rowsForOldBoard(oldSettings), rowsForOldBoard({ layout: 'packed' }), rowsForOldBoard({ layout: 'rows' }), PACKED_VERSION], [
+    { layout: 'rows' },
+    { ...oldSettings, layout: 'rows' },
+    null,
+    null,
+    '0.8.0',
+  ])
+  eq('layout: Rows survives storage', parseAppearance(JSON.parse(JSON.stringify({ layout: 'rows' }))).layout, 'rows')
+  eq('layout: an unknown value falls back to Packed', ['masonry', 'ROWS', '', 3, null, { rows: true }].map((v) => parseAppearance({ layout: v }).layout), Array(6).fill('packed'))
+  eq('layout: merging another setting keeps it, and a pick changes it', [mergeAppearance(parseAppearance({ layout: 'rows' }), { density: 'compact' }).layout, mergeAppearance(DEFAULT_APPEARANCE, { layout: 'rows' }).layout], ['rows', 'rows'])
+  eq('layout: rides along in the boot copy', settingsFromMirror(JSON.stringify(bootMirror(parseAppearance({ layout: 'rows' })))).layout, 'rows')
+
+  // Column-stable: stack i in column i mod N, starting one gap under the stack above it. With a
+  // 28px gap and 4px rows, a 100px stack spans (100 + 28) / 4 = 32 rows.
+  const gap = 28
+  const heights = [100, 400, 200, 52, 300, 10, 72]
+  const p = packPlan(heights, 3, gap)
+  eq('pack: 4px rows on an ordinary board', [p.unit, PACK_UNIT], [4, 4])
+  eq('pack: stack i goes in column i mod N, as in Rows', p.places.map((x) => x.column), [1, 2, 3, 1, 2, 3, 1])
+  eq('pack: a stack starts on the row after the one above it in its column', p.places.map((x) => x.row), [1, 1, 1, 33, 108, 58, 53])
+  eq('pack: a span is the height plus the gap, in whole rows', p.places.map((x) => x.span), [32, 107, 57, 20, 82, 10, 25])
+  eq('pack: the space under each stack is the gap, at most a row more', heights.map((h, i) => p.places[i].span * p.unit - h - gap).filter((spare) => spare < 0 || spare >= p.unit), [])
+  eq('pack: each column reads top to bottom in board order', [1, 2, 3].map((c) => {
+    const rows = p.places.filter((x) => x.column === c).map((x) => x.row)
+    return rows.every((r, i) => i === 0 || r > rows[i - 1])
+  }), [true, true, true])
+  eq('pack: under half a pixel over doesn\'t cost a row, a whole pixel does', packPlan([100.3, 101], 2, gap).places.map((x) => x.span), [32, 33])
+
+  // Growing a stack in the first row moves only the stacks under it, and never sideways.
+  const grown = packPlan([900, ...heights.slice(1)], 3, gap)
+  eq('pack: growing a stack keeps every stack in its column', grown.places.map((x) => x.column), p.places.map((x) => x.column))
+  eq('pack: growing a stack moves only the stacks under it', grown.places.map((x, i) => x.row - p.places[i].row), [0, 0, 0, 200, 0, 0, 200])
+
+  eq('pack: one column stacks everything in order', packPlan([100, 50, 20], 1, gap).places, [
+    { column: 1, row: 1, span: 32 },
+    { column: 1, row: 33, span: 20 },
+    { column: 1, row: 53, span: 12 },
+  ])
+  // The add-stack button (76px with its top margin) is item number `count`, so it takes the next
+  // column, or the first one again under the first stack when the row is full.
+  eq('pack: the add-stack button takes the next free column in the first row', packPlan([300, 120, 76], 3, gap).places[2], { column: 3, row: 1, span: 26 })
+  eq('pack: the add-stack button goes under the first stack when the row is full', packPlan([300, 120, 76], 2, gap).places[2], { column: 1, row: 83, span: 26 })
+
+  eq('pack: nothing to place', packPlan([], 4, gap), { unit: 4, places: [] })
+  eq('pack: junk columns, heights and gap stay sane', packPlan([NaN, -5, 0], 0, -3).places, [
+    { column: 1, row: 1, span: 1 },
+    { column: 1, row: 2, span: 1 },
+    { column: 1, row: 3, span: 1 },
+  ])
+  eq('pack: a fractional column count rounds down', packPlan([10, 10, 10, 10], 3.7, gap).places.map((x) => x.column), [1, 2, 3, 1])
+  const tall = packPlan(Array(200).fill(1000), 1, gap)
+  const last = tall.places[tall.places.length - 1]
+  eq('pack: a board past the grid line limit gets taller rows instead', [tall.unit > PACK_UNIT, last.row + last.span - 1 <= PACK_MAX_ROWS, PACK_MAX_ROWS < 10000], [true, true, true])
+
+  // The drag preview: each stack's corner if the dragged one landed at a new index, worked out by
+  // packing the would-be order. Boxes are a packed board: columns 300px apart, the grid top at 100.
+  const boxesOf = (hs: number[], n: number) => {
+    const { unit, places } = packPlan(hs, n, gap)
+    return places.map((q, i) => ({ left: (q.column - 1) * 300, top: 100 + (q.row - 1) * unit, height: hs[i] }))
+  }
+  const corners = (boxes: Array<{ left: number; top: number }>) => boxes.map(({ left, top }) => ({ left, top }))
+  const mix = [80, 360, 400, 440, 120, 80, 240, 80, 160, 280, 40] // the e2e board's shape
+  const board = boxesOf(mix, 4)
+  const moved = (from: number, to: number) => {
+    const order = mix.map((_, i) => i)
+    order.splice(to, 0, ...order.splice(from, 1))
+    const packed = boxesOf(order.map((i) => mix[i]), 4)
+    const at: Array<{ left: number; top: number }> = []
+    order.forEach((i, j) => (at[i] = { left: packed[j].left, top: packed[j].top }))
+    return at
+  }
+  eq('preview: a stack dropped where it was moves nothing', packedMove(board, 4, 4, 4, gap), corners(board))
+  eq('preview: every stack goes where packing the new order puts it', [packedMove(board, 4, 2, 4, gap), packedMove(board, 0, 10, 4, gap), packedMove(board, 9, 1, 4, gap)], [moved(4, 2), moved(0, 10), moved(9, 1)])
+  const overlaps: string[] = []
+  for (let from = 0; from < mix.length; from++) {
+    for (let to = 0; to < mix.length; to++) {
+      const at = packedMove(board, from, to, 4, gap)
+      for (let i = 0; i < mix.length; i++) {
+        for (let j = i + 1; j < mix.length; j++) {
+          if (at[i].left === at[j].left && at[i].top < at[j].top + mix[j] && at[j].top < at[i].top + mix[i]) overlaps.push(`${from}>${to}: ${i}/${j}`)
+        }
+      }
+    }
+  }
+  eq('preview: no two stacks overlap, whichever moves where', overlaps, [])
+  eq('preview: a board with fewer stacks than columns', packedMove(boxesOf([50, 90], 4), 1, 0, 4, gap), [{ left: 300, top: 100 }, { left: 0, top: 100 }])
+  eq('preview: indexes off the board change nothing', [packedMove(board, -1, 3, 4, gap), packedMove(board, 2, 11, 4, gap)], [corners(board), corners(board)])
+}
+
+// ---------- 0.8.0: what's new ----------
+{
+  const base = { early: false, shows070: 0, updated080: false, shows080: 0 }
+  eq('whats new: a fresh 0.8.0 install sees no note', pickWhatsNew(base), null)
+  eq('whats new: an update from before 0.8.0 sees the 0.8.0 note', pickWhatsNew({ ...base, updated080: true }), '080')
+  eq('whats new: the Pro note goes first while it is pending', pickWhatsNew({ ...base, early: true, updated080: true }), '070')
+  eq('whats new: the 0.8.0 note comes once the Pro note is answered or used up', [pickWhatsNew({ ...base, early: true, shows070: -1, updated080: true }), pickWhatsNew({ ...base, early: true, shows070: WHATS_NEW_SHOWS, updated080: true })], ['080', '080'])
+  eq('whats new: an answered or used-up 0.8.0 note stays away', [pickWhatsNew({ ...base, updated080: true, shows080: -1 }), pickWhatsNew({ ...base, updated080: true, shows080: 3 })], [null, null])
+  eq('whats new: three tabs at most', [stillPending(0), stillPending(2), stillPending(3), stillPending(-1)], [true, true, false, false])
+  eq('whats new: the Pro line for Pro, the trial and early users only', [showProLine({ hasPro: true, early: false }), showProLine({ hasPro: false, early: true }), showProLine({ hasPro: false, early: false })], [true, true, false])
+  const open = whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true })
+  eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
+  eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
+  eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
+  // 0.8.0 (3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
+  eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
+  eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
+  eq('whats new: 0.8.0 tells an early user without a list that to-do lists moved into Pro, with the trial', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, todoMoved: true, trialOpen: true }).pro, 'To-do lists now come with Pro, along with due dates and a Today list, clean-up and AI tidy. Try it free for 14 days, no card needed.')
+  eq('whats new: the trial line joins the plain Pro line too', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, trialOpen: true }).pro, 'Pro adds due dates and a Today list, clean-up and AI tidy. Try it free for 14 days, no card needed.')
+  eq('whats new: already Packed, no offer', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'packed', proLine: false }).tryPacked, false)
+  const locked = whatsNew080({ lockAppearance: true, lockImportExport: false, layout: 'rows', proLine: false })
+  eq('whats new: a company that manages appearance gets no layout line or button', [locked.lead, locked.tryPacked], ['New in Stackboard 0.8.0: folders inside stacks and share a stack as a link.', false])
+  eq('whats new: with import and export locked, sharing goes unmentioned', whatsNew080({ lockAppearance: true, lockImportExport: true, layout: 'rows', proLine: false }).lead, 'New in Stackboard 0.8.0: folders inside stacks.')
+}
+
+// ---------- 0.8.0: the Pro card and finishing a purchase ----------
+{
+  const DAY = 86_400_000
+  const now = Date.UTC(2026, 10, 3, 9, 0)
+  eq('pro card: no checkout, nothing pending', [checkoutPending(null, now), checkoutPending(undefined, now)], [false, false])
+  eq('pro card: a checkout opened an hour ago is pending', checkoutPending(now - 3_600_000, now), true)
+  eq('pro card: a day later it is not', [checkoutPending(now - CHECKOUT_PENDING_MS, now), checkoutPending(now - 2 * DAY, now)], [false, false])
+  eq('pro card: a clock that went backwards is not pending', checkoutPending(now + 60_000, now), false)
+  eq('pro card: money', [money(299, 'usd'), money(499), money(250, 'eur'), money(100, 'zz')], ['$2.99', '$4.99', '€2.50', '1.00 ZZ'])
+  eq('pro card: short date', shortDate(Date.UTC(2027, 10, 3, 8, 41)), '3 Nov 2027')
+  const end = Date.UTC(2027, 10, 3, 8, 41)
+  eq('pro card: a period end still ahead stays', currentPeriodEnd(end, 'year', now), end)
+  eq('pro card: a passed yearly end moves on a year', currentPeriodEnd(end, 'year', Date.UTC(2027, 10, 20)), Date.UTC(2028, 10, 3, 8, 41))
+  eq('pro card: years without news move on as many years', currentPeriodEnd(end, 'year', Date.UTC(2029, 11, 1)), Date.UTC(2030, 10, 3, 8, 41))
+  eq('pro card: a monthly plan moves a month', currentPeriodEnd(Date.UTC(2026, 10, 1), 'month', Date.UTC(2026, 10, 5)), Date.UTC(2026, 11, 1))
+  eq('pro card: days ago', [daysAgo(now, now), daysAgo(now - DAY - 1, now), daysAgo(now - 3 * DAY, now)], ['today', 'yesterday', '3 days ago'])
+
+  const license = { key: 'SB-1A2B-9F2C', activationId: 'a', status: 'granted' as const, checkedAt: now, okAt: now, email: 'buyer@example.com', since: Date.UTC(2026, 10, 3, 8, 41) }
+  const sub = { amount: 299, currency: 'usd', interval: 'year', periodEnd: end, startedAt: Date.UTC(2026, 10, 3, 8, 41), at: now }
+  const full = proCard({ license, sub, now })
+  eq('pro card: the plan line', full.plan, 'Yearly plan, $2.99 a year')
+  eq('pro card: the details', full.rows, [
+    { label: 'Renews', value: '3 Nov 2027' },
+    { label: 'Pro since', value: '3 Nov 2026' },
+    { label: 'Email', value: 'buyer@example.com' },
+    { label: 'Key', value: 'SB-...-9F2C' },
+    { label: 'Checked', value: 'today, with Polar' },
+  ])
+  eq('pro card: a cancelled plan says when it ends', proCard({ license, sub: { ...sub, cancelAtPeriodEnd: true }, now }).rows[0], { label: 'Ends', value: '3 Nov 2027 (cancelled)' })
+  eq('pro card: a pasted key with nothing else shows only the key', proCard({ license: { key: 'SB-1A2B-9F2C' }, sub: null, now }), { plan: 'Yearly plan', rows: [{ label: 'Key', value: 'SB-...-9F2C' }] })
+  eq('pro card: a free plan shows no price', proCard({ license, sub: { ...sub, amount: 0 }, now }).plan, 'Yearly plan')
+
+  const polarSub = { amount: 299, currency: 'usd', recurring_interval: 'year', current_period_end: '2027-11-03T08:41:49Z', cancel_at_period_end: false, started_at: '2026-11-03T08:41:49Z', status: 'active' }
+  eq('pro card: a Polar subscription read', readSub(polarSub, now), { at: now, amount: 299, currency: 'usd', interval: 'year', periodEnd: Date.parse('2027-11-03T08:41:49Z'), cancelAtPeriodEnd: false, startedAt: Date.parse('2026-11-03T08:41:49Z') })
+  eq('pro card: junk is no subscription', [readSub(null, now), readSub('x', now), readSub({ status: 'active' }, now)], [null, null, null])
+
+  const prev = { key: 'SB-1', activationId: 'a', status: 'granted' as const, checkedAt: now - 5 * DAY, okAt: now - 5 * DAY }
+  const answer = { benefit_id: PRO_BENEFIT_ID, status: 'granted', expires_at: null, created_at: '2026-11-03T08:41:50Z', customer: { email: 'buyer@example.com', name: 'B' } }
+  const read = readValidation(200, answer, prev, now)
+  eq('pro card: validate keeps the email and the purchase day', [read.email, read.since], ['buyer@example.com', Date.parse('2026-11-03T08:41:50Z')])
+  eq('pro card: a later answer without them keeps what we had', readValidation(200, { benefit_id: PRO_BENEFIT_ID, status: 'granted' }, read, now).email, 'buyer@example.com')
+  eq('pro card: a key for another product never brings its email', readValidation(200, { ...answer, benefit_id: 'other' }, prev, now).email, undefined)
+
+  const base = { early: true, shows070: 0, updated080: false, shows080: 0 }
+  eq('whats new: someone who bought Pro skips the Pro note', [pickWhatsNew({ ...base, paid: true }), pickWhatsNew({ ...base, paid: true, updated080: true })], [null, '080'])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

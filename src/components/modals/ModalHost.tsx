@@ -11,6 +11,8 @@ import { PacksModal } from './PacksModal'
 // Settings (with the 0.5.0 Appearance section) loads on first open, so a plain new tab doesn't
 // parse it.
 const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })))
+// Clean-up (Pro, 0.7.1) loads only when someone opens it.
+const CleanupModal = lazy(() => import('./CleanupModal').then((m) => ({ default: m.CleanupModal })))
 
 export function ModalHost() {
   const modal = useStackableStore((s) => s.modal)
@@ -34,6 +36,10 @@ export function ModalHost() {
       return <StackFormModal mode="add" spaceId={modal.spaceId} />
     case 'stack-edit':
       return <StackFormModal mode="edit" stackId={modal.id} initialTitle={modal.title} />
+    case 'folder-add':
+      return <StackFormModal mode="add" folder parentId={modal.parentId} />
+    case 'folder-edit':
+      return <StackFormModal mode="edit" folder stackId={modal.id} initialTitle={modal.title} />
     case 'stack-move':
       return (
         <StackMoveModal
@@ -73,5 +79,11 @@ export function ModalHost() {
       return <ImportModal />
     case 'packs':
       return <PacksModal />
+    case 'cleanup':
+      return (
+        <Suspense fallback={null}>
+          <CleanupModal />
+        </Suspense>
+      )
   }
 }

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStackableStore } from '../store/useStackableStore'
+import { watchCompany } from '../lib/company'
 
 const BURST_MS = 80
 
@@ -38,9 +39,12 @@ export function useBookmarkTree(): void {
     chrome.bookmarks.onChanged.addListener(handler)
     chrome.bookmarks.onMoved.addListener(handler)
     chrome.bookmarks.onChildrenReordered.addListener(handler)
+    // Teams (0.8.0): a new company policy shows up without a reload.
+    const unwatchCompany = watchCompany(handler)
 
     return () => {
       clearTimeout(timer)
+      unwatchCompany()
       chrome.bookmarks.onCreated.removeListener(handler)
       chrome.bookmarks.onRemoved.removeListener(handler)
       chrome.bookmarks.onChanged.removeListener(handler)

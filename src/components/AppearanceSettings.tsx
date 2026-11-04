@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Check, Monitor, Moon, Sun } from 'lucide-react'
+import { Check, Monitor, Moon, Sparkles, Sun } from 'lucide-react'
 import {
   BLUR_MAX,
   DIM_MAX,
@@ -11,11 +11,21 @@ import {
   type BgKind,
   type Density,
   type GradientId,
+  type Layout,
   type Mode,
   type PaletteId,
   type Scheme,
 } from '../lib/appearance'
 import { deleteBgImage, loadBgImage, prepareBgImage, saveBgImage } from '../lib/bgImage'
+import {
+  ACCENT_PRESETS,
+  DEFAULT_FONT_STACK,
+  FONTS,
+  TILES,
+  WALLPAPERS,
+  onAccentFor,
+  type TileSize,
+} from '../lib/looks'
 import { useAppearance } from '../store/useAppearance'
 import { Segmented } from './modals/Modal'
 
@@ -28,6 +38,8 @@ export function AppearanceSettings() {
   const scheme = useAppearance((s) => s.scheme)
   const systemDark = useAppearance((s) => s.systemDark)
   const update = useAppearance((s) => s.update)
+  // A Pro wallpaper (0.7.0) stands in for the free background while it shows.
+  const wallpaperShown = useAppearance((s) => s.proOn && !!s.looks.wallpaper)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [hasImage, setHasImage] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
@@ -45,6 +57,8 @@ export function AppearanceSettings() {
 
   const chooseBackground = (kind: BgKind) => {
     setError(null)
+    // Picking a free background puts away the Pro wallpaper that was showing.
+    if (wallpaperShown) useAppearance.getState().updateLooks({ wallpaper: null })
     // No picture saved yet: picking "Image" goes straight to the file chooser.
     if (kind === 'image' && !hasImage) {
       fileRef.current?.click()
@@ -128,17 +142,20 @@ export function AppearanceSettings() {
 
         <RowLabel>Background</RowLabel>
         <div>
-          <Segmented<BgKind>
+          <Segmented<BgKind | 'wallpaper'>
             label="Background"
-            value={a.bg.kind}
-            onChange={chooseBackground}
+            value={wallpaperShown ? 'wallpaper' : a.bg.kind}
+            onChange={(kind) => kind !== 'wallpaper' && chooseBackground(kind)}
             options={[
               { value: 'solid', label: 'Solid' },
               { value: 'gradient', label: 'Gradient' },
               { value: 'image', label: busy ? 'Saving…' : 'Image' },
             ]}
           />
-          {a.bg.kind === 'gradient' && (
+          {wallpaperShown && (
+            <p className="mt-1.5 text-xs leading-relaxed text-muted">Showing a Pro wallpaper. Pick one of these to go back.</p>
+          )}
+          {!wallpaperShown && a.bg.kind === 'gradient' && (
             <div role="radiogroup" aria-label="Gradient" className="mt-2.5 grid grid-cols-3 gap-2">
               {([1, 2, 3] as GradientId[]).map((g) => {
                 const on = a.bg.gradient === g
@@ -160,7 +177,7 @@ export function AppearanceSettings() {
               })}
             </div>
           )}
-          {a.bg.kind === 'image' && (
+          {!wallpaperShown && a.bg.kind === 'image' && (
             <ImageControls
               busy={busy}
               onReplace={() => fileRef.current?.click()}
@@ -188,8 +205,197 @@ export function AppearanceSettings() {
             { value: 'compact', label: 'Compact' },
           ]}
         />
+
+        <RowLabel>Layout</RowLabel>
+        <LayoutSwitch value={a.layout} onChange={(layout) => update({ layout })} />
       </div>
+
+      <ProLooks />
     </section>
+  )
+}
+
+function LayoutSwitch({ value, onChange }: { value: Layout; onChange: (layout: Layout) => void }) {
+  return (
+    <Segmented<Layout>
+      label="Layout"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: 'packed', label: 'Packed' },
+        { value: 'rows', label: 'Rows' },
+      ]}
+    />
+  )
+}
+
+/**
+ * Packed or Rows on its own (0.8.0), for when the company manages the rest of Appearance (Teams
+ * T8): the lock covers the look of the board, and the layout stays the person's own choice.
+ */
+export function LayoutSetting() {
+  const layout = useAppearance((s) => s.appearance.layout)
+  const update = useAppearance((s) => s.update)
+  return (
+    <div data-layout-setting className="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3">
+      <RowLabel>Layout</RowLabel>
+      <LayoutSwitch value={layout} onChange={(next) => update({ layout: next })} />
+    </div>
+  )
+}
+
+/**
+ * Pro looks (0.7.0): accent, font, tile size and wallpaper. Without Pro the rows stay visible but
+ * switched off, and what was picked before stays saved for when Pro comes back.
+ */
+function ProLooks() {
+  const looks = useAppearance((s) => s.looks)
+  const proOn = useAppearance((s) => s.proOn)
+  const updateLooks = useAppearance((s) => s.updateLooks)
+  const policyAccent = useAppearance((s) => s.policyAccent)
+  const custom = looks.accent && !ACCENT_PRESETS.some((p) => p.hex === looks.accent) ? looks.accent : null
+
+  return (
+    <div data-pro-looks={proOn ? 'on' : 'off'} className="mt-5 border-t border-line pt-4">
+      <h4 className="mb-1 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+        <Sparkles className="h-3.5 w-3.5" />
+        Pro looks
+      </h4>
+      {!proOn && (
+        <p data-pro-looks-note className="mb-1 text-xs leading-relaxed text-muted">
+          Part of Stackboard Pro. Start the free trial or add a key in Stackboard Pro below.
+        </p>
+      )}
+      <fieldset
+        disabled={!proOn}
+        className="mt-2.5 grid min-w-0 grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3 gap-y-3.5 disabled:opacity-50"
+      >
+        <RowLabel>Accent</RowLabel>
+        {policyAccent ? (
+          <p data-policy-accent className="flex items-center gap-2 pt-1 text-xs text-muted">
+            <span className="h-4 w-4 shrink-0 rounded-full ring-1 ring-line" style={{ background: policyAccent }} />
+            Your company sets this colour.
+          </p>
+        ) : (
+        <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap items-center gap-1.5 pt-0.5">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={looks.accent === null}
+            data-accent-option="palette"
+            onClick={() => updateLooks({ accent: null })}
+            className={`h-6 rounded-full px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+              looks.accent === null ? 'bg-card text-strong ring-2 ring-focus' : 'text-muted ring-1 ring-line hover:text-fg hover:ring-line-strong'
+            }`}
+          >
+            Palette
+          </button>
+          {ACCENT_PRESETS.map((p) => {
+            const on = looks.accent === p.hex
+            return (
+              <button
+                key={p.hex}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                aria-label={p.name}
+                title={p.name}
+                data-accent-option={p.hex}
+                onClick={() => updateLooks({ accent: p.hex })}
+                className={`flex h-6 w-6 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  on ? 'ring-2 ring-focus ring-offset-2 ring-offset-raised' : 'ring-1 ring-line'
+                }`}
+                style={{ background: p.hex }}
+              >
+                {on && <Check className="h-3 w-3" strokeWidth={3.5} style={{ color: onAccentFor(p.hex) }} />}
+              </button>
+            )
+          })}
+          <label
+            title="Any colour"
+            className={`relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-within:ring-2 focus-within:ring-focus ${
+              custom ? 'ring-2 ring-focus ring-offset-2 ring-offset-raised' : 'ring-1 ring-line'
+            }`}
+            style={{
+              background: custom ?? 'conic-gradient(from 90deg, #ef4444, #f59e0b, #22c55e, #06b6d4, #6366f1, #d946ef, #ef4444)',
+            }}
+          >
+            <input
+              type="color"
+              aria-label="Pick any colour"
+              data-accent-custom
+              value={looks.accent ?? '#2563eb'}
+              onChange={(e) => updateLooks({ accent: e.target.value }, { gentle: true })}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+            {custom && <Check className="pointer-events-none h-3 w-3" strokeWidth={3.5} style={{ color: onAccentFor(custom) }} />}
+          </label>
+        </div>
+        )}
+
+        <RowLabel>Font</RowLabel>
+        <div role="radiogroup" aria-label="Font" className="grid grid-cols-3 gap-1.5">
+          {FONTS.map((f) => {
+            const on = looks.font === f.id
+            return (
+              <button
+                key={f.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                data-font-option={f.id}
+                onClick={() => updateLooks({ font: f.id })}
+                className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  on ? 'bg-card ring-2 ring-focus' : 'ring-1 ring-line hover:ring-line-strong'
+                }`}
+              >
+                <span className="text-[15px] leading-none text-strong" style={{ fontFamily: f.stack || DEFAULT_FONT_STACK }}>
+                  Aa
+                </span>
+                <span className="truncate text-xs text-muted">{f.name}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <RowLabel>Tile size</RowLabel>
+        <Segmented<TileSize>
+          label="Tile size"
+          value={looks.tile}
+          onChange={(tile) => updateLooks({ tile })}
+          options={TILES.map((t) => ({ value: t.id, label: t.name }))}
+        />
+
+        <RowLabel>Wallpaper</RowLabel>
+        <div>
+          <div role="radiogroup" aria-label="Wallpaper" className="grid grid-cols-4 gap-2">
+            {WALLPAPERS.map((w) => {
+              const on = looks.wallpaper === w.id
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  data-wallpaper-option={w.id}
+                  onClick={() => updateLooks({ wallpaper: on ? null : w.id })}
+                  className="group/wp flex min-w-0 flex-col gap-1 rounded-lg text-left focus-visible:outline-none"
+                >
+                  <span
+                    data-wallpaper-preview={w.id}
+                    className={`relative block aspect-[16/10] overflow-hidden rounded-lg group-focus-visible/wp:ring-2 group-focus-visible/wp:ring-focus ${
+                      on ? 'ring-2 ring-focus' : 'ring-1 ring-line group-hover/wp:ring-line-strong'
+                    }`}
+                  />
+                  <span className="truncate px-0.5 text-[11px] text-muted">{w.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">Click a wallpaper again to take it off.</p>
+        </div>
+      </fieldset>
+    </div>
   )
 }
 

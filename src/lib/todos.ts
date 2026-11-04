@@ -1,16 +1,23 @@
 import {
+  TODO_DUE_PREFIX,
   TODO_KEY_PREFIX,
   TODO_MAX_BYTES,
+  dueBytes,
   listBytes,
+  mergeDue,
+  parseDue,
   parseList,
   planSweep,
+  splitDue,
+  todoDueKey,
   todoKey,
   type TodoList,
 } from './todoPlan'
 
 // To-do items live in chrome.storage.sync (0.6.0): Chrome syncs them with the user's other
 // extension data and they never reach us. Outside an extension (vite preview) they live in
-// localStorage, with a few sample items for the demo board.
+// localStorage, with a few sample items for the demo board. Since 0.8.0 a list is two keys:
+// todo:<id> for the items and todoDue:<id> for their due days (todoPlan.ts splitDue/mergeDue).
 
 const HAS_SYNC = typeof chrome !== 'undefined' && !!chrome.storage?.sync
 const SEEN_KEY = 'todoSeen' // chrome.storage.local: list ids this device has shown
@@ -38,10 +45,23 @@ async function readRaw(key: string): Promise<unknown> {
   return DEMO_SEED[key.slice(TODO_KEY_PREFIX.length)]
 }
 
-async function writeRaw(key: string, list: TodoList): Promise<void> {
-  if (HAS_SYNC) return chrome.storage.sync.set({ [key]: list })
+/** Writes several keys in one go (one sync write when both parts of a list change). */
+async function writeRaw(values: Record<string, unknown>): Promise<void> {
+  if (HAS_SYNC) return chrome.storage.sync.set(values)
   try {
-    localStorage.setItem(DEMO_PREFIX + key, JSON.stringify(list))
+    for (const [key, value] of Object.entries(values)) {
+      localStorage.setItem(DEMO_PREFIX + key, JSON.stringify(value))
+      window.dispatchEvent(new StorageEvent('storage', { key: DEMO_PREFIX + key }))
+    }
+  } catch {
+    // the demo just forgets
+  }
+}
+
+async function removeRaw(key: string): Promise<void> {
+  if (HAS_SYNC) return chrome.storage.sync.remove(key)
+  try {
+    localStorage.removeItem(DEMO_PREFIX + key)
     window.dispatchEvent(new StorageEvent('storage', { key: DEMO_PREFIX + key }))
   } catch {
     // the demo just forgets
@@ -49,7 +69,8 @@ async function writeRaw(key: string, list: TodoList): Promise<void> {
 }
 
 export async function loadList(id: string): Promise<TodoList> {
-  return parseList(await readRaw(todoKey(id)))
+  const [items, due] = await Promise.all([readRaw(todoKey(id)), readRaw(todoDueKey(id))])
+  return mergeDue(parseList(items), due)
 }
 
 // One write at a time per list within a page, each reading the latest stored copy, so two
@@ -60,13 +81,24 @@ const queues = new Map<string, Promise<unknown>>()
 export function updateList(id: string, fn: (list: TodoList) => TodoList): Promise<TodoList> {
   const run = (queues.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
     const key = todoKey(id)
-    const current = parseList(await readRaw(key))
+    const dueKey = todoDueKey(id)
+    const [rawItems, rawDue] = await Promise.all([readRaw(key), readRaw(dueKey)])
+    const storedItems = parseList(rawItems)
+    const current = mergeDue(storedItems, rawDue)
     const next = fn(current)
     if (next === current) return current
-    if (listBytes(key, next) > TODO_MAX_BYTES) {
+    // Each key has Chrome's 8 KB item limit; both count against the list being full.
+    const { items, due } = splitDue(next)
+    if (listBytes(key, items) > TODO_MAX_BYTES || dueBytes(dueKey, due) > TODO_MAX_BYTES) {
       throw new Error('This list is full; clear the done items or shorten a few')
     }
-    await writeRaw(key, next)
+    const writes: Record<string, unknown> = {}
+    if (JSON.stringify(items) !== JSON.stringify(storedItems)) writes[key] = items
+    const hasDue = Object.keys(due).length > 0
+    const dueChanged = JSON.stringify(due) !== JSON.stringify(parseDue(rawDue))
+    if (hasDue && dueChanged) writes[dueKey] = due
+    if (Object.keys(writes).length) await writeRaw(writes)
+    if (!hasDue && rawDue !== undefined) await removeRaw(dueKey)
     return next
   })
   queues.set(id, run)
@@ -81,15 +113,24 @@ export async function saveList(id: string, list: TodoList): Promise<void> {
 /** Calls back with the list whenever it changes in storage: this tab, another tab, another device. */
 export function watchList(id: string, onChange: (list: TodoList) => void): () => void {
   const key = todoKey(id)
+  const dueKey = todoDueKey(id)
+  // Either part can change; read both again, and let only the newest read answer.
+  let seq = 0
+  const reload = () => {
+    const mine = ++seq
+    void loadList(id).then((l) => {
+      if (mine === seq) onChange(l)
+    })
+  }
   if (HAS_SYNC) {
     const handler = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area === 'sync' && key in changes) onChange(parseList(changes[key].newValue))
+      if (area === 'sync' && (key in changes || dueKey in changes)) reload()
     }
     chrome.storage.onChanged.addListener(handler)
     return () => chrome.storage.onChanged.removeListener(handler)
   }
   const handler = (e: StorageEvent) => {
-    if (e.key === DEMO_PREFIX + key) void loadList(id).then(onChange)
+    if (e.key === DEMO_PREFIX + key || e.key === DEMO_PREFIX + dueKey) reload()
   }
   window.addEventListener('storage', handler)
   return () => window.removeEventListener('storage', handler)
@@ -115,6 +156,14 @@ export async function sweepOrphans(liveIds: string[], now = Date.now()): Promise
     writes[todoKey(id)] = rest
   }
   if (Object.keys(writes).length) await chrome.storage.sync.set(writes)
-  if (plan.drop.length) await chrome.storage.sync.remove(plan.drop.map(todoKey))
+  // A dropped list takes its due days with it; due days whose list is gone (dropped by a computer
+  // still on 0.7.0, which doesn't know this key) go too, unless the list is still on the board.
+  const live = new Set(liveIds)
+  const orphanDue = Object.keys(all)
+    .filter((k) => k.startsWith(TODO_DUE_PREFIX))
+    .map((k) => k.slice(TODO_DUE_PREFIX.length))
+    .filter((id) => !(id in stored) && !live.has(id))
+  const removeKeys = [...plan.drop.flatMap((id) => [todoKey(id), todoDueKey(id)]), ...orphanDue.map(todoDueKey)]
+  if (removeKeys.length) await chrome.storage.sync.remove(removeKeys)
   if (plan.seen.join() !== seen.join()) await chrome.storage.local.set({ [SEEN_KEY]: plan.seen })
 }

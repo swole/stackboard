@@ -63,6 +63,20 @@ export function buildIndex(tabs: chrome.tabs.Tab[]): OpenTabIndex {
   return { exact, byHost }
 }
 
+/** Same URLs pointing at the same tabs, so the board has nothing to redraw. */
+export function sameIndex(a: OpenTabIndex | null, b: OpenTabIndex): boolean {
+  if (!a) return false
+  const same = (x: Map<string, OpenTab>, y: Map<string, OpenTab>) => {
+    if (x.size !== y.size) return false
+    for (const [k, t] of x) {
+      const u = y.get(k)
+      if (!u || u.id !== t.id || u.windowId !== t.windowId) return false
+    }
+    return true
+  }
+  return same(a.exact, b.exact) && same(a.byHost, b.byHost)
+}
+
 /**
  * The tab already showing this bookmark, if any. Deep links need an exact match (a
  * SharePoint doc must never switch you to a different doc); a root bookmark like

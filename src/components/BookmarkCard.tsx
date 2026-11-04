@@ -7,6 +7,7 @@ import { parseBookmarkTitle } from '../lib/icon'
 import { displayTitle, splitTitle } from '../lib/title'
 import { findOpenTab } from '../lib/openTabs'
 import { openHere } from '../lib/tabs'
+import { recordOpen } from '../lib/opens'
 import { glow } from '../lib/motion'
 import { useStackableStore } from '../store/useStackableStore'
 import { BookmarkIcon } from './BookmarkIcon'
@@ -22,7 +23,10 @@ interface Props {
   top?: boolean
 }
 
-export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) {
+export function BookmarkCard({ bookmark, sortable: sortableProp = true, top = false }: Props) {
+  // A company link (Teams, 0.8.0) opens like any other and offers nothing that writes.
+  const locked = !!bookmark.readOnly
+  const sortable = sortableProp && !locked
   const openModal = useStackableStore((s) => s.openModal)
   const removeWithUndo = useStackableStore((s) => s.removeWithUndo)
   const isOpen = useStackableStore((s) => findOpenTab(s.openTabs, bookmark.url) !== null)
@@ -55,6 +59,7 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
   // Already open somewhere: a plain click switches to that tab. Modified clicks mean
   // "open another copy", so the browser keeps them.
   const onLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    recordOpen(bookmark.url) // every click and Enter opens it somewhere (0.7.1, clean-up's "Unused")
     if (!isOpen || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
     void openHere(bookmark.url, useStackableStore.getState().openTabs)
@@ -95,6 +100,8 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
       }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       {...(sortable ? listeners : {})}
+      data-card // tile size (Pro looks, 0.7.0) scales cards through this hook in index.css
+      data-readonly-card={locked ? '' : undefined}
       data-drop-slot={isDragging ? '' : undefined}
       className={`group/card relative rounded-lg border text-sm text-fg compact:text-[13px] ${grab} ${
         isDragging
@@ -118,7 +125,8 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
         draggable={false}
         title={tooltip}
         onClick={onLinkClick}
-        className={`flex items-center gap-2 rounded-lg py-2 pl-2.5 pr-9.5 ${grab} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus compact:py-1 ${
+        onAuxClick={(e) => e.button === 1 && recordOpen(bookmark.url)}
+        className={`flex items-center gap-2 rounded-lg py-2 pl-2.5 ${locked && !top ? 'pr-2.5' : 'pr-9.5'} ${grab} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus compact:py-1 ${
           isDragging ? 'invisible' : ''
         }`}
       >
@@ -146,17 +154,19 @@ export function BookmarkCard({ bookmark, sortable = true, top = false }: Props) 
           ↵
         </kbd>
       )}
-      <button
-        onClick={() => setMenuOpen((v) => !v)}
-        className={`absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 hover:bg-selected hover:text-fg focus-visible:opacity-100 group-hover/card:opacity-100 ${
-          isDragging ? 'invisible' : ''
-        }`}
-        aria-label="Bookmark options"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
+      {!locked && (
+        <button
+          onClick={() => setMenuOpen((v) => !v)}
+          className={`absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 hover:bg-selected hover:text-fg focus-visible:opacity-100 group-hover/card:opacity-100 ${
+            isDragging ? 'invisible' : ''
+          }`}
+          aria-label="Bookmark options"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      )}
 
-      {menuOpen && (
+      {menuOpen && !locked && (
         <div
           className="absolute right-1 top-9 z-30 w-32 overflow-hidden rounded-md border border-line bg-raised shadow-md compact:top-7"
           onMouseLeave={() => setMenuOpen(false)}

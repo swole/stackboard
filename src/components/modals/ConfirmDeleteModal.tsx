@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, DangerButton, SecondaryButton } from './Modal'
 import { useStackableStore } from '../../store/useStackableStore'
+import { allLinks } from '../../lib/folderPlan'
 
 interface Props {
   targetKind: 'space' | 'stack' | 'bookmark'
@@ -24,7 +25,7 @@ export function ConfirmDeleteModal({ targetKind, id, name, childCount }: Props) 
     let detail: string | undefined
     if (targetKind === 'space') {
       const space = tree?.spaces.find((s) => s.id === id)
-      const links = space?.stacks.reduce((n, st) => n + st.bookmarks.length, 0) ?? 0
+      const links = space?.stacks.reduce((n, st) => n + allLinks(st).length, 0) ?? 0 // folders inside count (0.8.0)
       detail = `${plural(space?.stacks.length ?? childCount, 'stack')}, ${plural(links, 'link')}`
     } else if (targetKind === 'stack') {
       detail = plural(childCount, 'link')

@@ -14,6 +14,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
+// 0.8.0 adds `search` (go links fall back to the default search engine); Chrome shows no install
+// warning for it, which the go-link block checks with getPermissionWarningsByManifest.
+const PERMISSIONS = ['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups', 'search']
 const CHROME = process.env.STACKABLE_TEST_CHROME
 if (!CHROME) throw new Error('Set STACKABLE_TEST_CHROME to a Chrome for Testing chrome.exe')
 let EXT = process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist')
@@ -37,6 +40,43 @@ const check = (name, ok, extra = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? `  (${extra})` : ''}`)
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * A step that can stall (a page left behind another tab, a reply that never comes) gets `ms` to
+ * answer, then one more try with its page in front, then fails on its own with its label instead
+ * of hanging until the protocol timeout ends the whole run (3 Nov 2026: two runs stopped dead
+ * right after the share block's parked-stacks check).
+ */
+async function bounded(label, pg, fn, ms = 15000) {
+  const once = () => {
+    const run = Promise.resolve().then(fn)
+    run.catch(() => {}) // the attempt that was given up on may still fail later: ignore it
+    let timer
+    const limit = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}: no answer in ${ms} ms`)), ms)
+    })
+    return Promise.race([run, limit]).finally(() => clearTimeout(timer))
+  }
+  try {
+    return await once()
+  } catch (e) {
+    if (!pg || !String(e?.message).includes('no answer')) throw e
+    console.log(`RETRY  ${label} (brought its page to the front)`)
+    await pg.bringToFront().catch(() => {})
+    return once()
+  }
+}
+
+/** Asks the service worker from an extension page, giving up after `ms` with { error: 'no reply' }. */
+function askWorker(pg, msg, ms = 8000) {
+  return bounded(`worker ${msg?.type}`, pg, () =>
+    pg.evaluate(
+      (m, t) => Promise.race([chrome.runtime.sendMessage(m), new Promise((r) => setTimeout(() => r({ error: 'no reply' }), t))]),
+      msg,
+      ms,
+    ),
+  )
+}
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -76,6 +116,9 @@ try {
   const control = probe
   control.on('pageerror', (e) => errors.push(`control: ${e.message}`))
   await control.goto(NTP)
+  // 0.8.0: with a managed_schema the install tab can open after this page and take the front;
+  // a background page gets no animation frames, so puppeteer's waits would never poll.
+  await control.bringToFront()
   await control.waitForFunction(() => document.body.innerText.includes('Welcome to Stackboard'), { timeout: 10000 })
 
   await control.evaluate(async () => {
@@ -431,7 +474,9 @@ try {
     packs: document.querySelectorAll('[data-welcome="packs"] button').length,
   }))
   check('welcome shows on an empty board', welcome.title === 'Welcome to Stackboard', welcome.title)
-  check('welcome offers the bookmarks bar with counts', welcome.rows.some((r) => r.includes('Bookmarks bar') && r.includes('3 links') && r.includes('3 stacks')), JSON.stringify(welcome.rows))
+  // 0.8.0: "Deep" stays a folder inside the Reading stack, so 2 stacks (it was a third, "Reading › Deep").
+  check('welcome offers the bookmarks bar with counts', welcome.rows.some((r) => r.includes('Bookmarks bar') && r.includes('3 links') && r.includes('2 stacks')), JSON.stringify(welcome.rows))
+  check('welcome says folders inside stay folders', welcome.note.includes('2 stacks, one per folder, and 1 folder inside them'), welcome.note)
   check('welcome says what stays behind', welcome.note.includes('1 bookmarklet or browser page stays behind'), welcome.note)
   check('welcome lists five starter packs', welcome.packs === 5, String(welcome.packs))
 
@@ -445,14 +490,17 @@ try {
     const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
     const [sub] = await chrome.bookmarks.getSubTree(root.id)
     const space = sub.children[0]
+    const walk = (n) => (n.url ? n.title : { [n.title]: (n.children ?? []).map(walk) })
     return {
       space: space.title,
       stacks: space.children.map((st) => `${st.title}:${st.children.length}`),
+      reading: JSON.stringify(walk(space.children.find((st) => st.title === 'Reading'))),
       bar: (await chrome.bookmarks.getChildren('1')).length,
     }
   })
   check('copy makes a space from the bookmarks bar', copied.space === '⭐ Bookmarks bar', copied.space)
-  check('each folder becomes a stack with its links', copied.stacks.join('|') === 'On the bar:1|Reading:1|Reading › Deep:1', copied.stacks.join('|'))
+  check('each folder becomes a stack with its links', copied.stacks.join('|') === 'On the bar:1|Reading:2', copied.stacks.join('|'))
+  check('a folder inside a folder stays nested in its stack', copied.reading === JSON.stringify({ Reading: ['Wikipedia', { Deep: ['MDN'] }] }), copied.reading)
   check('originals stay in the bookmarks bar', copied.bar === 3, String(copied.bar))
   const toast5 = await ntp5.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
   check('copy toast offers undo', toast5.includes('Copied') && toast5.includes('Undo'), toast5)
@@ -846,7 +894,8 @@ try {
   check('the background image comes back on a new tab', !!wall.src && wall.src.includes('blob:chrome-extension://'), JSON.stringify(wall))
   check('the picture loads only after the board has painted', wall.board !== null && wall.backdrop !== null && wall.backdrop > wall.board, `board ${wall.board}, picture ${wall.backdrop}`)
   const storageUse = await control.evaluate(async () => ({ sync: await chrome.storage.sync.getBytesInUse(null), local: JSON.stringify(await chrome.storage.local.get(null)).length }))
-  check('the picture lives in IndexedDB, never in chrome.storage', !!wall.stored && wall.stored.size > 0 && storageUse.sync === 0 && storageUse.local < 4000, JSON.stringify({ stored: wall.stored, storageUse }))
+  // 0.7.0: sync holds the small Pro marks (proEarly), never the picture.
+  check('the picture lives in IndexedDB, never in chrome.storage', !!wall.stored && wall.stored.size > 0 && storageUse.sync < 200 && storageUse.local < 4000, JSON.stringify({ stored: wall.stored, storageUse }))
   await ntpB.screenshot({ path: path.join(SHOTS, '30-wallpaper.png') })
 
   // Keys 1-9 jump to spaces; digits typed into search stay there.
@@ -898,7 +947,7 @@ try {
   const shipped = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'))
   check(
     'no new permissions',
-    JSON.stringify(shipped.permissions) === JSON.stringify(['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups']) && !shipped.host_permissions && !shipped.optional_permissions,
+    JSON.stringify(shipped.permissions) === JSON.stringify(PERMISSIONS) && !shipped.host_permissions && !shipped.optional_permissions,
     JSON.stringify(shipped.permissions),
   )
   const enMsgs = path.join(EXT, '_locales', 'en', 'messages.json')
@@ -911,6 +960,249 @@ try {
   // 0.5.6: ten more store languages (backlog S4); each one is its own store-search shelf
   const shippedLocales = fs.readdirSync(path.join(EXT, '_locales'))
   check('21 store languages ship', shippedLocales.length === 21 && ['ru', 'zh_TW', 'th'].every((l) => shippedLocales.includes(l)), shippedLocales.join(' '))
+
+  // ---------- 0.7.0: Stackboard Pro ----------
+  // Settings sells Pro; the trial is opt-in and syncs; a pasted key is checked before any call.
+  // The test board is new, so whether it counts as early depends on the date (PRO_CUTOFF); the
+  // to-do block below pins the early mark so its checks hold on any date.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    await control.evaluate(() => chrome.storage.sync.remove(['proTrial', 'proKey']))
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    const shown = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
+    const offer = await page.evaluate(() => document.querySelector('[data-pro]')?.innerText ?? '')
+    check('pro: Settings offers Pro with a trial and a key box', shown && offer.includes('Get Pro') && offer.includes('Try it free for 14 days'), offer.slice(0, 160))
+
+    await page.evaluate(() => document.querySelector('[data-pro] input[aria-label="License key"]').focus())
+    await page.keyboard.type('nope')
+    await page.evaluate(() => document.querySelector('[data-pro-key] button[type=submit]').click())
+    const badNote = await until(page, () => document.querySelector('[data-pro]').innerText.includes("doesn't look like a license key"))
+    check('pro: a pasted non-key says so without calling anyone', badNote)
+
+    await page.evaluate(() => document.querySelector('[data-pro-trial]').click())
+    const trial = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial' && document.querySelector('[data-pro]').innerText.includes('14 days left'))
+    const synced = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial)
+    check('pro: the trial starts on a click and syncs', trial && typeof synced?.startedAt === 'number', JSON.stringify(synced))
+    check('pro: with the trial on, Settings shows auto-archive', await until(page, () => !!document.querySelector('[data-archive-setting]')))
+
+    const other = await openNtp()
+    await other.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    check('pro: another tab shows the running trial', await until(other, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial'))
+    await other.close()
+
+    const perms = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'))
+    check('pro: no new permissions or host access', JSON.stringify(perms.permissions) === JSON.stringify(PERMISSIONS) && !perms.host_permissions && !perms.optional_host_permissions, JSON.stringify(perms.permissions))
+    await control.evaluate(() => chrome.storage.sync.remove('proTrial'))
+    await page.close()
+  }
+
+  // ---------- 0.8.0: the Pro card and finishing a purchase ----------
+  // Polar is stubbed in the page: activate gives an id, validate says granted with the buyer's
+  // email and the purchase day. The checkout tab is caught before it opens.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    await control.evaluate(() => Promise.all([chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub']), chrome.storage.local.remove(['proLicense', 'proCheckout'])]))
+    const stub = () => {
+      window.__polar = []
+      window.__opened = []
+      const real = window.fetch.bind(window)
+      const json = (b, status = 200) => Promise.resolve(new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } }))
+      window.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.startsWith('https://api.polar.sh/')) {
+          const op = url.split('/').pop()
+          window.__polar.push(op)
+          if (op === 'activate') return json({ id: 'act-e2e' })
+          if (op === 'validate') return json({ benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', status: 'granted', expires_at: null, created_at: '2026-11-03T08:41:50Z', customer: { email: 'buyer@example.com' } })
+          if (op === 'deactivate') return new Response(null, { status: 204 })
+        }
+        return real(input, init)
+      }
+      try {
+        const create = chrome.tabs.create.bind(chrome.tabs)
+        chrome.tabs.create = (o, ...rest) => (/polar\.sh/.test(o?.url ?? '') ? (window.__opened.push(o.url), Promise.resolve({ id: -1 })) : create(o, ...rest))
+      } catch {
+        // read-only binding: the test closes the real checkout tab instead
+      }
+    }
+    const page = await browser.newPage()
+    await page.setViewport({ width: 1400, height: 900 })
+    page.on('pageerror', (e) => errors.push(`pro card ntp: ${e.message}`))
+    await page.evaluateOnNewDocument(stub)
+    await page.goto(NTP, { waitUntil: 'load' })
+    await page.bringToFront()
+    await page.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
+    check('pro card: a free board says where a bought key is', await page.evaluate(() => !!document.querySelector('[data-pro-find-key]')))
+
+    // Get Pro opens the checkout and turns Settings to the steps that finish the purchase.
+    await page.evaluate(() => [...document.querySelectorAll('[data-pro] button')].find((b) => b.textContent.trim() === 'Get Pro').click())
+    const steps = await until(page, () => !!document.querySelector('[data-pro-pending]'))
+    const opened = await page.evaluate(() => window.__opened.slice())
+    for (const t of browser.targets()) if (/polar\.sh/.test(t.url())) await (await t.page().catch(() => null))?.close().catch(() => {})
+    await page.bringToFront()
+    const marked = await control.evaluate(async () => (await chrome.storage.local.get('proCheckout')).proCheckout)
+    check('pro card: Get Pro opens the checkout and shows the finishing steps', steps && typeof marked?.at === 'number', JSON.stringify({ opened, marked }))
+
+    // A good key: crown card with the details, a thank-you, a toast and the crown in the sidebar.
+    await page.evaluate(() => document.querySelector('[data-pro] input[aria-label="License key"]').focus())
+    await page.keyboard.type('SB-E2E0-0000-0000-9F2C')
+    await page.evaluate(() => document.querySelector('[data-pro-key] button[type=submit]').click())
+    const on = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro' && !!document.querySelector('[data-pro-card]'))
+    const card = await page.evaluate(() => document.querySelector('[data-pro-card]')?.innerText ?? '')
+    check('pro card: a good key shows the crown card and its details', on && /active/i.test(card) && card.includes('buyer@example.com') && card.includes('3 Nov 2026') && card.includes('SB-...-9F2C') && card.includes('Yearly plan'), card.replace(/\s+/g, ' ').slice(0, 220))
+    check('pro card: a thank-you on the card and a toast', await until(page, () => !!document.querySelector('[data-pro-welcome]') && document.body.innerText.includes('Switched on')))
+    check('pro card: a crown beside the name in the sidebar', await page.evaluate(() => !!document.querySelector('[data-pro-crown]')))
+    const after = await control.evaluate(async () => ({
+      checkout: (await chrome.storage.local.get('proCheckout')).proCheckout ?? null,
+      key: (await chrome.storage.sync.get('proKey')).proKey ?? null,
+      lic: (await chrome.storage.local.get('proLicense')).proLicense ?? null,
+    }))
+    check('pro card: the steps clear, the key syncs and the email is kept', after.checkout === null && after.key?.key === 'SB-E2E0-0000-0000-9F2C' && after.lic?.email === 'buyer@example.com', JSON.stringify(after))
+
+    // A plan saved by the purchase hand-off (or another computer) adds the price and the renewal.
+    await control.evaluate(() => chrome.storage.sync.set({ proSub: { amount: 299, currency: 'usd', interval: 'year', periodEnd: Date.parse('2027-11-03T08:41:49Z'), at: Date.now() } }))
+    const priced = await until(page, () => (document.querySelector('[data-pro-plan]')?.textContent ?? '').includes('$2.99 a year') && (document.querySelector('[data-pro-card]')?.innerText ?? '').includes('3 Nov 2027'))
+    check('pro card: a synced plan shows the price and the renewal date', priced, await page.evaluate(() => document.querySelector('[data-pro-card]')?.innerText.replace(/\s+/g, ' ').slice(0, 200)))
+
+    // Remove, clicked twice, takes the key, the plan and the license off again.
+    await page.evaluate(() => document.querySelector('[data-pro-remove]').click())
+    await page.evaluate(() => document.querySelector('[data-pro-remove]').click())
+    const gone = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
+    const left = await control.evaluate(async () => ({ ...(await chrome.storage.sync.get(['proKey', 'proSub'])), ...(await chrome.storage.local.get('proLicense')) }))
+    check('pro card: Remove clears the key, the plan and the license', gone && Object.keys(left).length === 0, JSON.stringify(left))
+    await page.close()
+  }
+
+  // ---------- 0.8.0: the thanks page hands the key over ----------
+  // Polar sends a buyer to getstackboard.com/pro/thanks with a customer session token. The page is
+  // served from the site folder on its real origin; Polar's customer portal API is stubbed in the
+  // page. The page reads the key and the plan and hands them to the extension, which keeps them in
+  // sync storage; the next new tab activates the key with the (stubbed) license API.
+  {
+    const SITE = process.env.STACKABLE_SITE || path.resolve(process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist'), '..', 'site')
+    const THANKS = path.join(SITE, 'pro', 'thanks', 'index.html')
+    if (!fs.existsSync(THANKS)) {
+      console.log(`SKIP  pro hand-off: no site/pro/thanks page under ${SITE} (set STACKABLE_SITE)`)
+    } else {
+      const until = async (page, fn, arg, ms = 8000) => {
+        for (let t = 0; t < ms; t += 150) {
+          if (await page.evaluate(fn, arg).catch(() => false)) return true
+          await sleep(150)
+        }
+        return false
+      }
+      const KEY = 'SB-HAND-0000-0000-7A1B'
+      await control.evaluate(() => Promise.all([chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub']), chrome.storage.local.remove(['proLicense', 'proCheckout'])]))
+      const openSite = async (url, portal) => {
+        const page = await browser.newPage()
+        page.on('pageerror', (e) => errors.push(`pro thanks: ${e.message}`))
+        await page.evaluateOnNewDocument((id, portal) => {
+          window.__STACKBOARD_EXT_ID = id
+          window.__portalCalls = []
+          const real = window.fetch.bind(window)
+          window.fetch = async (input, init = {}) => {
+            const url = typeof input === 'string' ? input : input.url
+            if (url.startsWith('https://api.polar.sh/v1/customer-portal/')) {
+              window.__portalCalls.push([url.replace('https://api.polar.sh/v1/customer-portal', ''), (init.headers || {}).Authorization || ''])
+              const body = url.includes('/license-keys/') ? portal.keys : url.includes('/subscriptions/') ? portal.subs : { items: [] }
+              return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+            }
+            return real(input, init)
+          }
+        }, extId, portal)
+        await page.setRequestInterception(true)
+        page.on('request', (req) => {
+          const u = new URL(req.url())
+          if (u.origin !== 'https://getstackboard.com') return req.continue()
+          if (u.pathname === '/pro/thanks') return req.respond({ status: 200, contentType: 'text/html', body: fs.readFileSync(THANKS) })
+          return req.respond({ status: 404, body: 'not found' })
+        })
+        await page.goto(url, { waitUntil: 'load' })
+        return page
+      }
+      const portal = {
+        keys: { items: [
+          { key: 'SB-OTHR-0000-0000-0000', benefit_id: 'some-other-benefit', status: 'granted', created_at: '2026-11-03T08:00:00Z' },
+          { key: KEY, benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', status: 'granted', created_at: '2026-11-03T08:41:50Z' },
+        ] },
+        subs: { items: [{ amount: 299, currency: 'usd', recurring_interval: 'year', current_period_end: '2027-11-03T08:41:49Z', cancel_at_period_end: false, started_at: '2026-11-03T08:41:49Z', status: 'active' }] },
+      }
+      const stub = () => {
+        window.__fetchBeforeStub = window.__fetchBeforeStub || window.fetch
+        const real = window.__fetchBeforeStub.bind(window)
+        window.fetch = async (input, init = {}) => {
+          const url = typeof input === 'string' ? input : input.url
+          if (url.startsWith('https://api.polar.sh/v1/customer-portal/license-keys/')) {
+            const op = url.split('/').pop()
+            if (op === 'activate') return new Response(JSON.stringify({ id: 'act-hand' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+            if (op === 'validate') return new Response(JSON.stringify({ benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', status: 'granted', expires_at: null, created_at: '2026-11-03T08:41:50Z', customer: { email: 'buyer@example.com' } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          }
+          return real(input, init)
+        }
+      }
+      // Every open Stackboard tab (the control page, the tab opened on install) activates a key the
+      // moment it syncs, so they all get the stubbed license API and no test key reaches Polar.
+      const boards = (await browser.pages()).filter((pg) => pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab'))
+      for (const pg of boards) await pg.evaluate(stub).catch(() => {})
+      const thanks = await openSite('https://getstackboard.com/pro/thanks?customer_session_token=polar_cst_e2e', portal)
+      const handed = await until(thanks, () => document.getElementById('handoff')?.classList.contains('on'))
+      const shown = await thanks.evaluate(() => ({ key: document.getElementById('key')?.textContent, url: location.href, calls: window.__portalCalls }))
+      check('pro hand-off: the thanks page shows the key for our product', shown.key === KEY, JSON.stringify(shown.key))
+      check('pro hand-off: the token leaves the address bar at once and goes only to Polar', !shown.url.includes('polar_cst') && shown.calls.length >= 1 && shown.calls.every(([, auth]) => auth === 'Bearer polar_cst_e2e'), JSON.stringify(shown))
+      const saved = await control.evaluate(async () => chrome.storage.sync.get(['proKey', 'proSub']))
+      check('pro hand-off: the extension keeps the key and the plan', handed && saved.proKey?.key === KEY && saved.proSub?.amount === 299 && saved.proSub?.interval === 'year', JSON.stringify(saved))
+      await thanks.close()
+
+      // The next new tab activates the handed-over key and shows the price and the renewal.
+      const ntp = await browser.newPage()
+      await ntp.setViewport({ width: 1400, height: 900 })
+      ntp.on('pageerror', (e) => errors.push(`pro hand-off ntp: ${e.message}`))
+      await ntp.evaluateOnNewDocument(stub)
+      await ntp.goto(NTP, { waitUntil: 'load' })
+      await ntp.bringToFront()
+      await ntp.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      await ntp.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+      const on = await until(ntp, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro' && (document.querySelector('[data-pro-plan]')?.textContent ?? '').includes('$2.99 a year'))
+      check('pro hand-off: the next new tab is Pro with the plan on the card', on, await ntp.evaluate(() => document.querySelector('[data-pro]')?.innerText.replace(/\s+/g, ' ').slice(0, 200)))
+      await ntp.close()
+
+      // Any other page on the site is ignored, and so is a junk key.
+      const other = await openSite('https://getstackboard.com/pro/thanks?customer_session_token=polar_cst_none', { keys: { items: [] }, subs: { items: [] } })
+      const replies = await other.evaluate((id) => Promise.all([
+        new Promise((r) => chrome.runtime.sendMessage(id, { type: 'pro-key', key: 'nope <x>' }, (v) => r(v ?? null))),
+      ]), extId)
+      await other.close()
+      const page2 = await browser.newPage()
+      await page2.setRequestInterception(true)
+      page2.on('request', (req) => (new URL(req.url()).origin === 'https://getstackboard.com' ? req.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>x</title>' }) : req.continue()))
+      await page2.goto('https://getstackboard.com/s', { waitUntil: 'load' })
+      const fromShare = await page2.evaluate((id) => new Promise((r) => {
+        chrome.runtime.sendMessage(id, { type: 'pro-key', key: 'SB-EVIL-0000-0000-0000' }, (v) => r(v ?? null))
+        setTimeout(() => r('timeout'), 3000)
+      }), extId)
+      await page2.close()
+      const still = await control.evaluate(async () => (await chrome.storage.sync.get('proKey')).proKey?.key)
+      check('pro hand-off: a junk key is refused and other site pages are ignored', JSON.stringify(replies) === JSON.stringify([{ ok: false }]) && still === KEY, JSON.stringify({ replies, fromShare, still }))
+      await control.evaluate(() => Promise.all([chrome.storage.sync.remove(['proKey', 'proSub']), chrome.storage.local.remove(['proLicense', 'proCheckout'])]))
+      for (const pg of boards) await pg.evaluate(() => { if (window.__fetchBeforeStub) window.fetch = window.__fetchBeforeStub }).catch(() => {})
+    }
+  }
 
   // ---------- 0.6.0: to-do stacks ----------
   // A stack folder holding one marker bookmark; the items live in chrome.storage.sync.
@@ -928,6 +1220,9 @@ try {
       return Object.entries(all).filter(([k]) => k.startsWith('todo:')).map(([k, v]) => ({ k, v }))
     })
 
+    // New installs need Pro for a new list (0.7.0); an early user who already had a list when 0.8.0
+    // arrived doesn't (the to-do Pro block covers the rest).
+    await control.evaluate(() => chrome.storage.sync.set({ proEarly: { from: 'e2e', at: Date.now() }, proEarlyTodo: { keep: true, at: Date.now() } }))
     const page = await openNtp()
     await page.bringToFront()
     await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
@@ -1041,7 +1336,7 @@ try {
     await later.close()
 
     const perms = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8')).permissions ?? []
-    check('to-do: no new permissions', JSON.stringify(perms) === JSON.stringify(['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups']), perms.join(' '))
+    check('to-do: no new permissions', JSON.stringify(perms) === JSON.stringify(PERMISSIONS), perms.join(' '))
     await page.close()
   }
 
@@ -1076,6 +1371,1939 @@ try {
       await page.close()
     }
     await holder.close()
+  }
+
+  // ---------- 0.7.1: due dates and repeats (Pro) ----------
+  // With the trial on, a to-do takes a date and a repeat, shows in Today, and a repeating one
+  // moves to its next date when ticked. Without Pro the dates stay visible and the controls go.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const day = (page, plus = 0) => page.evaluate((n) => {
+      const d = new Date()
+      const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    }, plus)
+    const waitFor = async (fn, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await fn().catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const clickIn = (page, text, sel) => page.evaluate(([t, s]) => {
+      const el = [...document.querySelectorAll('[data-todo-item]')].find((r) => r.textContent.includes(t))?.querySelector(s)
+      el?.click()
+      return !!el
+    }, [text, sel])
+    const dueOf = (page, text) => page.evaluate((t) => {
+      const el = [...document.querySelectorAll('[data-todo-item]')].find((r) => r.textContent.includes(t))?.querySelector('[data-todo-due]')
+      return el ? { day: el.dataset.todoDue, repeat: el.dataset.todoRepeat, label: el.textContent } : null
+    }, text)
+    // 0.8.0: due days sit under todoDue:<id>, apart from the items (todo:<id>); read both back together.
+    const storedItems = () => control.evaluate(async () => {
+      const all = await chrome.storage.sync.get(null)
+      return Object.entries(all)
+        .filter(([k]) => k.startsWith('todo:'))
+        .flatMap(([k, v]) => (v.items ?? []).map((it) => ({ ...it, ...(all['todoDue:' + k.slice(5)]?.[it.id] ?? {}) })))
+    })
+    const itemsCarryDue = () => control.evaluate(async () => {
+      const all = await chrome.storage.sync.get(null)
+      return Object.entries(all).filter(([k]) => k.startsWith('todo:')).some(([, v]) => (v.items ?? []).some((it) => 'd' in it || 'r' in it))
+    })
+
+    await control.evaluate(() => chrome.storage.sync.set({ proTrial: { startedAt: Date.now() } }))
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
+    await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+    await page.type('[role=dialog] input', 'Due test')
+    await page.keyboard.press('Enter')
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Due test')
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Add empty Stack').click())
+    await page.waitForSelector('[role=dialog] [data-option="todo"]', { timeout: 5000 })
+    await page.click('[role=dialog] [data-option="todo"]')
+    await page.type('[role=dialog] input', 'Chores')
+    await page.keyboard.press('Enter')
+    await until(page, () => !!document.querySelector('[data-todo-input]'))
+    await page.evaluate(() => document.querySelector('[data-todo-input]').focus())
+    await page.keyboard.type('Water plants')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('Take vitamins')
+    await page.keyboard.press('Enter')
+    await until(page, () => document.querySelectorAll('[data-todo-item]').length === 2)
+    const today = await day(page)
+    const tomorrow = await day(page, 1)
+
+    await clickIn(page, 'Water plants', '[data-todo-due-button]')
+    await page.waitForSelector('[data-due-menu]', { timeout: 3000 }).catch(() => {})
+    await page.evaluate(() => document.querySelector('[data-due-pick="today"]').click())
+    const dated = await waitFor(async () => (await dueOf(page, 'Water plants'))?.day === today)
+    const label = (await dueOf(page, 'Water plants'))?.label
+    check('due: Today from the menu dates the item', dated && label === 'Today', String(label))
+    check('due: the date is saved with the item', (await storedItems()).some((i) => i.text === 'Water plants' && i.d === today))
+    check('due: the date sits in its own key, never on the items 0.7.0 rewrites', !(await itemsCarryDue()))
+
+    await clickIn(page, 'Take vitamins', '[data-todo-due-button]')
+    await page.waitForSelector('[data-due-menu]', { timeout: 3000 }).catch(() => {})
+    await page.evaluate(() => document.querySelector('[data-due-repeat="d"]').click())
+    await waitFor(async () => (await dueOf(page, 'Take vitamins'))?.repeat === 'd')
+    await page.keyboard.press('Escape')
+    check('due: a daily repeat starts today', (await storedItems()).some((i) => i.text === 'Take vitamins' && i.d === today && i.r === 'd') &&
+      (await until(page, () => !document.querySelector('[data-due-menu]'))))
+
+    const count = await until(page, () => document.querySelector('[data-today-count]')?.textContent === '2')
+    check('due: the sidebar shows Today with 2 due', count, await page.evaluate(() => document.querySelector('[data-today-entry]')?.textContent ?? 'no entry'))
+    await page.evaluate(() => document.querySelector('[data-today-entry]').click())
+    const listed = await until(page, () => {
+      const v = document.querySelector('[data-today-view]')
+      return !!v && v.innerText.includes('Water plants') && v.innerText.includes('Take vitamins') && v.innerText.includes('Chores')
+    })
+    check('due: Today lists both, under their list', listed, await page.evaluate(() => document.querySelector('[data-today-view]')?.innerText.slice(0, 160) ?? 'no view'))
+
+    await page.evaluate(() => [...document.querySelectorAll('[data-today-item]')].find((r) => r.textContent.includes('Take vitamins')).querySelector('[data-today-toggle]').click())
+    const rolled = await until(page, () => ![...document.querySelectorAll('[data-today-item]')].some((r) => r.textContent.includes('Take vitamins')))
+    const vit = (await storedItems()).find((i) => i.text === 'Take vitamins')
+    const toast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    check('due: ticking a daily item moves it to tomorrow and keeps it open', rolled && vit?.d === tomorrow && vit?.done === false && toast.includes('next due tomorrow'), `${JSON.stringify(vit)} ${toast}`)
+
+    await page.evaluate(() => document.querySelector('[data-today-show]').click())
+    check('due: Show in its stack goes back to the space', await until(page, () => document.querySelector('main h1')?.textContent === 'Due test' && !document.querySelector('[data-today-view]')))
+    await page.close()
+
+    // Pro off: the dates stay, the controls and Today go.
+    await control.evaluate(() => chrome.storage.sync.remove('proTrial'))
+    const free = await openNtp()
+    await free.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Due test'))?.click())
+    await until(free, () => document.querySelectorAll('[data-todo-item]').length === 2)
+    const freeState = await free.evaluate(() => ({
+      buttons: document.querySelectorAll('[data-todo-due-button]').length,
+      due: [...document.querySelectorAll('[data-todo-due]')].map((e) => `${e.tagName}:${e.textContent}`),
+      today: !!document.querySelector('[data-today-entry]'),
+    }))
+    check('due: without Pro the dates still show, the date controls and Today are gone',
+      freeState.buttons === 0 && !freeState.today && freeState.due.includes('SPAN:Today') && freeState.due.some((d) => d.endsWith('Tomorrow')), JSON.stringify(freeState))
+    await free.close()
+  }
+
+  // ---------- 0.7.1: clean up your board (Pro) ----------
+  // Copies of one link are found and every extra copy is ticked; removing takes one click and Undo
+  // puts it back in place. The reachability check needs no host permission: a dead domain comes
+  // back unreachable and a data: link is never checked. Opening a card records the open.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 200) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(200)
+      }
+      return false
+    }
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧹 Cleanup test' })
+      const one = await chrome.bookmarks.create({ parentId: space.id, title: 'One' })
+      const two = await chrome.bookmarks.create({ parentId: space.id, title: 'Two' })
+      await chrome.bookmarks.create({ parentId: one.id, title: 'Dup A', url: 'https://cleanup-dup.example.com/page' })
+      const b = await chrome.bookmarks.create({ parentId: two.id, title: 'Dup B', url: 'https://CLEANUP-DUP.example.com/page/?utm_source=e2e' })
+      await chrome.bookmarks.create({ parentId: two.id, title: 'Dead link', url: 'https://does-not-exist.invalid/' })
+      await chrome.bookmarks.create({ parentId: two.id, title: 'Data link', url: 'data:text/plain,hi' })
+      await chrome.storage.sync.set({ proTrial: { startedAt: Date.now() } })
+      return { space: space.id, two: two.id, dupB: b.id }
+    })
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(page, () => !!document.querySelector('[data-cleanup-open]'))
+    await page.evaluate(() => document.querySelector('[data-cleanup-open]').click())
+    await until(page, () => [...document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')].some((r) => r.textContent.includes('Dup B')))
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')]
+        .filter((r) => /Dup [AB]/.test(r.textContent))
+        .map((r) => ({ id: r.dataset.cleanupRow, checked: r.querySelector('input').checked, name: r.textContent.includes('Dup A') ? 'A' : 'B' })),
+    )
+    check('clean-up: two copies of one link are found, the second one ticked', rows.length === 2 && rows.find((r) => r.name === 'A')?.checked === false && rows.find((r) => r.name === 'B')?.checked === true, JSON.stringify(rows))
+
+    // Leave only Dup B ticked, then remove it.
+    await page.evaluate((keep) => {
+      for (const r of document.querySelectorAll('[data-cleanup-row]')) {
+        const box = r.querySelector('input')
+        if (box.checked !== (r.dataset.cleanupRow === keep)) box.click()
+      }
+    }, made.dupB)
+    await until(page, () => document.querySelector('[data-cleanup-remove]')?.textContent.trim() === 'Remove 1 link')
+    await page.evaluate(() => document.querySelector('[data-cleanup-remove]').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Removed'))
+    const gone = await control.evaluate(async (two) => (await chrome.bookmarks.getChildren(two)).map((c) => c.title), made.two)
+    check('clean-up: removing takes the ticked copy only', !gone.includes('Dup B') && gone.includes('Dead link'), gone.join(', '))
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.trim().startsWith('Undo'))?.click())
+    await sleep(1200)
+    const back = await control.evaluate(async (two) => (await chrome.bookmarks.getChildren(two)).map((c) => c.title), made.two)
+    check('clean-up: Undo puts the copy back where it was', back[0] === 'Dup B', back.join(', '))
+
+    // Reachability: switch lists, check, and only the dead domain comes back.
+    await page.evaluate(() => [...document.querySelectorAll('[data-cleanup] [role=radio]')].find((b) => b.textContent.startsWith("Can't be reached"))?.click())
+    await until(page, () => !!document.querySelector('[data-cleanup-check]'))
+    await page.evaluate(() => document.querySelector('[data-cleanup-check]').click())
+    const checked = await until(page, () => !!document.querySelector('[data-cleanup-checked]'), null, 150000)
+    const dead = await page.evaluate(() => [...document.querySelectorAll('[data-cleanup-section="dead"] [data-cleanup-row]')].map((r) => r.textContent))
+    check(
+      'clean-up: a dead domain is unreachable, data: links are skipped, no host permission needed',
+      checked && dead.some((t) => t.includes('Dead link')) && !dead.some((t) => t.includes('Data link')),
+      `${checked} ${dead.length} rows: ${dead.filter((t) => /Dead|Data/.test(t)).join(' | ').slice(0, 160)}`,
+    )
+
+    // Opening a card from the board records the open (the "Unused" list's own signal).
+    await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+    await control.evaluate(() => chrome.storage.local.remove('open:https://cleanup-dup.example.com/page'))
+    const opener = await openNtp()
+    await opener.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Cleanup test'))?.click())
+    await until(opener, () => [...document.querySelectorAll('a[href]')].some((x) => x.textContent.includes('Dup A')))
+    await opener.evaluate(() => {
+      const a = [...document.querySelectorAll('a[href]')].find((x) => x.textContent.includes('Dup A'))
+      if (a) a.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }))
+    })
+    await sleep(500)
+    const recorded = await control.evaluate(async () => (await chrome.storage.local.get('open:https://cleanup-dup.example.com/page'))['open:https://cleanup-dup.example.com/page'])
+    check('clean-up: a middle-click on a card records the open', typeof recorded === 'number', String(recorded))
+
+    // Review fixes 2, 3 and 8 (3 Nov): Undo restores exact positions, Remove acts on the open list
+    // only, and Unused stays quiet until six months of counting exist.
+    const orderStack = await control.evaluate(async (spaceId) => {
+      const st = await chrome.bookmarks.create({ parentId: spaceId, title: 'Order' })
+      // data: links are never checked, so these copies stay off the "Can't be reached" list.
+      const x = 'data:text/plain,order-x'
+      for (const [t, u] of [['X', x], ['Y', 'data:text/plain,order-y'], ['X copy', x], ['Z', 'data:text/plain,order-z'], ['X copy 2', x]]) {
+        await chrome.bookmarks.create({ parentId: st.id, title: t, url: u })
+      }
+      return st.id
+    }, made.space)
+    const titles = (id) => control.evaluate(async (s) => (await chrome.bookmarks.getChildren(s)).map((c) => c.title), id)
+    const label = () => page.evaluate(() => document.querySelector('[data-cleanup-remove]')?.textContent.trim())
+    const tab = (name) => page.evaluate((n) => [...document.querySelectorAll('[data-cleanup] [role=radio]')].find((b) => b.textContent.startsWith(n))?.click(), name)
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(page, () => !!document.querySelector('[data-cleanup-open]'))
+    await page.evaluate(() => document.querySelector('[data-cleanup-open]').click())
+    await until(page, () => [...document.querySelectorAll('[data-cleanup-row]')].some((r) => r.textContent.includes('X copy 2')))
+    await tab('Unused')
+    await until(page, () => !!document.querySelector('[data-cleanup-counting]'))
+    const counting = await page.evaluate(() => ({ flag: document.querySelector('[data-cleanup-counting]').dataset.cleanupCounting, rows: document.querySelectorAll('[data-cleanup-section="unused"] [data-cleanup-row]').length }))
+    check('clean-up: Unused waits for six months of counting', counting.flag === 'yes' && counting.rows === 0, JSON.stringify(counting))
+    await tab("Can't be reached")
+    await until(page, () => !!document.querySelector('[data-cleanup-check]'))
+    await page.evaluate(() => document.querySelector('[data-cleanup-check]').click())
+    await until(page, () => [...document.querySelectorAll('[data-cleanup-section="dead"] [data-cleanup-row]')].some((r) => r.textContent.includes('Dead link')), null, 150000)
+    // Tick only Dead link on this list (Dup B is unreachable too, and pre-ticked as a copy).
+    await page.evaluate(() => {
+      for (const r of document.querySelectorAll('[data-cleanup-section="dead"] [data-cleanup-row]')) {
+        const box = r.querySelector('input')
+        if (box.checked !== r.textContent.includes('Dead link')) box.click()
+      }
+    })
+    await sleep(300)
+    const deadLabel = await label()
+    await page.evaluate(() => document.querySelector('[data-cleanup-remove]').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Removed'))
+    const afterDead = { two: await titles(made.two), order: await titles(orderStack) }
+    check(
+      "clean-up: Remove takes the open list's ticks only (the ticked copies elsewhere stay)",
+      deadLabel === 'Remove 1 link' && !afterDead.two.includes('Dead link') && afterDead.two.includes('Dup B') && afterDead.order.length === 5,
+      `${deadLabel} | ${JSON.stringify(afterDead)}`,
+    )
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.trim().startsWith('Undo'))?.click())
+    await sleep(1200)
+    await tab('Duplicates')
+    await until(page, () => !!document.querySelector('[data-cleanup-section="dupes"]'))
+    // Tick only the two extra X copies (earlier tests leave other copies on the board, pre-ticked too).
+    await page.evaluate(() => {
+      for (const r of document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')) {
+        const box = r.querySelector('input')
+        const want = /X copy/.test(r.textContent) && r.textContent.includes('Cleanup test')
+        if (box.checked !== want) box.click()
+      }
+    })
+    await sleep(300)
+    const dupLabel = await label()
+    await page.evaluate(() => document.querySelector('[data-cleanup-remove]').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Removed 2'))
+    const removedOrder = await titles(orderStack)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.trim().startsWith('Undo'))?.click())
+    await sleep(1500)
+    const restoredOrder = await titles(orderStack)
+    check(
+      'clean-up: Undo puts several copies back in their exact places',
+      dupLabel === 'Remove 2 links' && removedOrder.join(',') === 'X,Y,Z' && restoredOrder.join(',') === 'X,Y,X copy,Z,X copy 2',
+      `${dupLabel} | ${removedOrder.join(',')} -> ${restoredOrder.join(',')}`,
+    )
+    await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+
+    await opener.close()
+    await page.close()
+    await control.evaluate(async (m) => {
+      await chrome.bookmarks.removeTree(m.space)
+      await chrome.storage.sync.remove('proTrial')
+    }, made)
+  }
+
+  // ---------- 0.7.1: AI tidy (Pro) ----------
+  // The server is stubbed in the page (fetch override before the app loads), so no request leaves
+  // the test and no AI runs. A key is pinned as granted and freshly checked, so Polar isn't asked.
+  // Hidden while the server says it's off; then notice, preview, apply and undo on a test space.
+  {
+    const KEY = 'SB-E2E-0000-TIDY'
+    // Pages already open (the control page runs the board too) see the key arrive through storage.
+    // Their fetch refuses getstackboard.com and Polar, so they can't reach either for real.
+    const deny = () => {
+      const real = window.fetch.bind(window)
+      window.fetch = (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.startsWith('https://getstackboard.com/api/') || url.startsWith('https://api.polar.sh/')) return Promise.reject(new TypeError('blocked by the e2e'))
+        return real(input, init)
+      }
+    }
+    for (const p of await browser.pages()) {
+      if (p.url().startsWith(NTP.slice(0, NTP.lastIndexOf('/')))) await p.evaluate(deny).catch(() => {})
+    }
+    const fresh = async () => {
+      const id = await control.evaluate(async (key) => {
+        const now = Date.now()
+        // The license first: a key that arrives without one makes open pages activate it.
+        await chrome.storage.local.set({ proLicense: { key, activationId: 'act-e2e', status: 'granted', checkedAt: now, okAt: now } })
+        await chrome.storage.sync.set({ proKey: { key } })
+        await chrome.storage.local.remove(['tidyReady', 'tidyNotice2'])
+        const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+        const old = (await chrome.bookmarks.getChildren(root.id)).find((k) => k.title.endsWith('Tidy test'))
+        if (old) await chrome.bookmarks.removeTree(old.id)
+        const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧪 Tidy test' })
+        const mixed = await chrome.bookmarks.create({ parentId: space.id, title: 'Mixed' })
+        const more = await chrome.bookmarks.create({ parentId: space.id, title: 'More' })
+        for (const [p, t, u] of [[mixed, 'Alpha one', 'https://alpha1.example/'], [mixed, 'Beta one', 'https://beta1.example/'], [mixed, 'Alpha two', 'https://alpha2.example/'], [more, 'Beta two', 'https://beta2.example/'], [more, 'Gamma one', 'https://gamma1.example/']]) {
+          await chrome.bookmarks.create({ parentId: p.id, title: t, url: u })
+        }
+        localStorage.setItem('stackable:lastSpaceId', space.id)
+        return space.id
+      }, KEY)
+      return id
+    }
+    const shapeOf = (spaceId) => control.evaluate(async (id) => {
+      const [sub] = await chrome.bookmarks.getSubTree(id)
+      return sub.children.map((st) => `${st.title}:${(st.children ?? []).map((b) => b.title).join('+')}`).join(' | ')
+    }, spaceId)
+    const idsOf = (spaceId) => control.evaluate(async (id) => {
+      const [sub] = await chrome.bookmarks.getSubTree(id)
+      return sub.children.flatMap((st) => (st.children ?? []).map((b) => b.id)).sort().join(',')
+    }, spaceId)
+    // The page's fetch answers for getstackboard.com/api/tidy (and Polar, just in case) and records the calls.
+    const stub = (ready) => {
+      const real = window.fetch.bind(window)
+      const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+      window.__tidyCalls = []
+      window.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.startsWith('https://getstackboard.com/api/tidy')) {
+          const method = (init.method || 'GET').toUpperCase()
+          window.__tidyCalls.push(method)
+          if (method === 'GET') return json({ ok: true, ready, max: 600 })
+          const body = JSON.parse(init.body)
+          window.__tidyBody = body
+          const groups = new Map()
+          body.links.forEach((l, i) => {
+            const k = new URL(l.url).hostname.split('.')[0].replace(/\d+$/, '')
+            groups.set(k, [...(groups.get(k) ?? []), i])
+          })
+          const stacks = [...groups].map(([name, links]) => ({ name: name[0].toUpperCase() + name.slice(1), links }))
+          return json({ ok: true, board: { spaces: [{ name: body.space, emoji: '🧪', stacks }], missing: 0 } })
+        }
+        if (url.startsWith('https://api.polar.sh/')) return json({ status: 'granted', benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', expires_at: null })
+        return real(input, init)
+      }
+    }
+    const openStubbed = async (ready) => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`tidy ntp: ${e.message}`))
+      await p.evaluateOnNewDocument(stub, ready)
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Tidy test', { timeout: 10000 })
+      return p
+    }
+    const until = async (page, fn, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+
+    // The server is asked only when Settings (or a space menu) opens, never on a plain new tab.
+    const askViaSettings = async (p) => {
+      await p.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+      const got = await until(p, () => window.__tidyCalls.includes('GET'))
+      await p.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+      await sleep(300)
+      return got
+    }
+
+    // Switched off: the button never shows, and the answer is kept for a day.
+    const spaceId = await fresh()
+    const off = await openStubbed(false)
+    await sleep(1500)
+    const quiet = await off.evaluate(() => window.__tidyCalls.length === 0)
+    check('tidy: a plain new tab asks the server nothing', quiet, await off.evaluate(() => JSON.stringify(window.__tidyCalls)))
+    const asked = await askViaSettings(off)
+    await sleep(800)
+    const hidden = await off.evaluate(() => !document.querySelector('[data-tidy-button]'))
+    const kept = await control.evaluate(async () => (await chrome.storage.local.get('tidyReady')).tidyReady?.ready)
+    check('tidy: hidden while the server says it is off', asked && hidden && kept === false, JSON.stringify({ asked, hidden, kept }))
+    await off.close()
+
+    // Switched on: notice, then the preview, then apply.
+    await control.evaluate(() => chrome.storage.local.remove('tidyReady'))
+    const before = await shapeOf(spaceId)
+    const beforeIds = await idsOf(spaceId)
+    const page = await openStubbed(true)
+    await askViaSettings(page)
+    const shown = await until(page, () => !!document.querySelector('[data-tidy-button]'))
+    check('tidy: the button shows with a Pro key once the server is on', shown)
+    await page.evaluate(() => document.querySelector('[data-tidy-button]').click())
+    const notice = await until(page, () => !!document.querySelector('[data-tidy-notice]'))
+    const noticeText = await page.evaluate(() => document.querySelector('[data-tidy-notice]')?.textContent ?? '')
+    check('tidy: the first run says what is sent, links in folders too, before anything is sent', notice && noticeText.includes("Anthropic's AI") && noticeText.includes('including links in folders') && !(await page.evaluate(() => window.__tidyCalls.includes('POST'))), noticeText.slice(0, 80))
+    await page.evaluate(() => document.querySelector('[data-tidy-continue]').click())
+    const previewed = await until(page, () => document.querySelectorAll('[data-tidy-stack]').length === 3)
+    const names = await page.evaluate(() => [...document.querySelectorAll('[data-tidy-stack] input')].map((i) => i.value))
+    const sent = await page.evaluate(() => window.__tidyBody)
+    check('tidy: the request carries one space, its links and the key', sent?.scope === 'space' && sent?.space === 'Tidy test' && sent?.links?.length === 5 && sent?.license?.key === KEY && sent?.license?.activationId === 'act-e2e', JSON.stringify(sent).slice(0, 160))
+    check('tidy: the preview lists the planned stacks before anything moves', previewed && names.join(',') === 'Alpha,Beta,Gamma' && (await shapeOf(spaceId)) === before, names.join(','))
+    const remembered = await control.evaluate(async () => (await chrome.storage.local.get('tidyNotice2')).tidyNotice2 === true)
+    check('tidy: the notice is remembered', remembered)
+
+    await page.evaluate(() => document.querySelector('[data-tidy-apply]').click())
+    let after = ''
+    for (let t = 0; t < 40 && after !== 'Alpha:Alpha one+Alpha two | Beta:Beta one+Beta two | Gamma:Gamma one'; t++) {
+      await sleep(150)
+      after = await shapeOf(spaceId)
+    }
+    check('tidy: apply makes the stacks and moves the links into them', after === 'Alpha:Alpha one+Alpha two | Beta:Beta one+Beta two | Gamma:Gamma one', after)
+    check('tidy: links keep their ids', (await idsOf(spaceId)) === beforeIds)
+    const toast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    check('tidy: the toast offers Undo', toast.includes('Tidied') && toast.includes('Undo'), toast)
+
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
+    let back = ''
+    for (let t = 0; t < 40 && back !== before; t++) {
+      await sleep(150)
+      back = await shapeOf(spaceId)
+    }
+    check('tidy: undo puts the space back exactly', back === before && (await idsOf(spaceId)) === beforeIds, `${back} / ${before}`)
+    await page.close()
+
+    await control.evaluate(async (id) => {
+      await chrome.bookmarks.removeTree(id)
+      // The license goes first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'tidyReady', 'tidyNotice2'])
+      await chrome.storage.sync.remove('proKey')
+      localStorage.removeItem('stackable:lastSpaceId')
+    }, spaceId)
+  }
+
+  // ---------- 0.8.0: Teams company space ----------
+  // An IT admin's Chrome policy (here the unpacked-build override, which stands in for
+  // chrome.storage.managed) puts read-only company spaces first, plus one announcement line.
+  // ManagedBookmarks can't be set from a test; the unit tests cover that folder.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const mf = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'))
+    check('teams: the manifest ships a managed storage schema', mf.storage?.managed_schema === 'managed_schema.json' && fs.existsSync(path.join(EXT, 'managed_schema.json')), JSON.stringify(mf.storage))
+
+    const policy = {
+      companyName: 'Acme',
+      spaces: [
+        { name: 'Acme Company', emoji: '🏢', stacks: [{ name: 'Tools', links: [{ title: 'Acme Example', url: 'https://example.com/' }, { title: 'Bad', url: 'javascript:alert(1)' }] }] },
+        { name: 'Acme Sales', emoji: '💼', stacks: [{ name: 'CRM', links: [{ title: 'CRM', url: 'https://example.org/crm' }] }] },
+      ],
+      announcement: { id: 'e2e-1', text: 'Benefits enrolment closes Friday', url: 'https://example.com/benefits' },
+    }
+    await control.evaluate((p) => localStorage.setItem('stackable:managedOverride', JSON.stringify(p)), policy)
+    const page = await openNtp()
+    await page.bringToFront()
+    const side = await page.evaluate(() => {
+      const group = document.querySelector('[data-company-group]')
+      const own = [...document.querySelectorAll('aside span')].find((s) => s.textContent.trim() === 'Spaces')
+      return {
+        label: group?.textContent ?? '',
+        rows: [...document.querySelectorAll('[data-company-space]')].map((r) => r.dataset.companySpace),
+        first: !!group && !!own && !!(group.compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING),
+      }
+    })
+    check('teams: company spaces come first, in policy order, under the company name', side.first && side.label.includes('Acme') && side.rows.join('|') === 'Acme Company|Acme Sales', JSON.stringify(side))
+
+    await page.evaluate(() => document.querySelector('[data-company-space="Acme Company"] button').click())
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Acme Company')
+    const ro = await page.evaluate(() => ({
+      hint: !!document.querySelector('[data-company-hint]'),
+      addStack: [...document.querySelectorAll('main button')].some((b) => b.textContent.trim() === 'Add empty Stack'),
+      addBookmark: [...document.querySelectorAll('main button')].some((b) => b.textContent.trim() === 'Add bookmark'),
+      stackMenu: !!document.querySelector('main [aria-label="Stack options"]'),
+      cardMenu: !!document.querySelector('main [aria-label="Bookmark options"]'),
+      dragHeader: !!document.querySelector('main [aria-label="Drag stack header"]'),
+      grab: !!document.querySelector('main .cursor-grab'),
+      stacks: document.querySelectorAll('main [data-readonly-stack]').length,
+      cards: [...document.querySelectorAll('main [data-readonly-card] a')].map((a) => a.getAttribute('href')),
+    }))
+    check('teams: a company space is read-only (no add, edit, delete or drag handles)', ro.hint && !ro.addStack && !ro.addBookmark && !ro.stackMenu && !ro.cardMenu && !ro.dragHeader && !ro.grab && ro.stacks === 1, JSON.stringify(ro))
+    check('teams: only http(s) policy links show', JSON.stringify(ro.cards) === JSON.stringify(['https://example.com/']), JSON.stringify(ro.cards))
+
+    // A real mouse drag on a company card lifts nothing.
+    const box = await page.evaluate(() => {
+      const r = document.querySelector('main [data-readonly-card]').getBoundingClientRect()
+      return { x: r.x + 30, y: r.y + r.height / 2 }
+    })
+    await page.mouse.move(box.x, box.y)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 40, box.y + 60, { steps: 6 })
+    const lifted = await page.evaluate(() => !!document.querySelector('[data-drop-slot], [data-lifted]'))
+    await page.mouse.up()
+    check('teams: company cards can\'t be dragged', !lifted)
+
+    await page.evaluate(() => document.activeElement?.blur())
+    await page.keyboard.press('3')
+    const third = await until(page, () => !!document.querySelector('main h1') && !document.querySelector('[data-company-hint]'))
+    await page.keyboard.press('2')
+    const second = await until(page, () => document.querySelector('main h1')?.textContent === 'Acme Sales')
+    check('teams: keys 1-9 count company spaces first', third && second)
+
+    await page.evaluate(() => document.querySelector('input[aria-label="Search all spaces"]').focus())
+    await page.keyboard.type('Acme Example')
+    const found = await until(page, () => [...document.querySelectorAll('main [data-readonly-card] a')].some((a) => a.getAttribute('href') === 'https://example.com/'))
+    check('teams: search finds company links', found)
+    await page.keyboard.press('Escape')
+
+    const bar = await page.evaluate(() => {
+      const b = document.querySelector('[data-announcement]')
+      return b ? { text: b.textContent, link: b.querySelector('a')?.getAttribute('href') } : null
+    })
+    check('teams: the announcement line shows with its link', !!bar && bar.text.includes('Benefits enrolment closes Friday') && bar.link === 'https://example.com/benefits', JSON.stringify(bar))
+    await page.evaluate(() => document.querySelector('[data-announcement] button[aria-label="Dismiss announcement"]').click())
+    const gone = await until(page, () => !document.querySelector('[data-announcement]'))
+    await page.close()
+    const again = await openNtp()
+    await sleep(600)
+    check('teams: a dismissed announcement stays dismissed on new tabs', gone && (await again.evaluate(() => !document.querySelector('[data-announcement]'))))
+    await again.close()
+
+    await control.evaluate((p) => localStorage.setItem('stackable:managedOverride', JSON.stringify({ ...p, announcement: { id: 'e2e-2', text: 'Office closed Monday', dismissible: false } })), policy)
+    const pinned = await openNtp()
+    const pin = await pinned
+      .waitForSelector('[data-announcement="e2e-2"]', { timeout: 5000 })
+      .then(() => pinned.evaluate(() => !document.querySelector('[data-announcement] button')), () => null)
+    check('teams: a pinned announcement shows with no dismiss button', pin === true, String(pin))
+    await pinned.close()
+
+    const pop = await browser.newPage()
+    await pop.goto(NTP.replace('newtab.html', 'popup.html'))
+    await sleep(1500)
+    const popText = await pop.evaluate(() => document.body.innerText)
+    check('teams: the save popup never offers company spaces', !popText.includes('Acme Company') && !popText.includes('Acme Sales'))
+    await pop.close()
+
+    await control.evaluate(() => localStorage.removeItem('stackable:managedOverride'))
+    const after = await openNtp()
+    await sleep(400)
+    check('teams: with no policy the company group and line go away', await after.evaluate(() => !document.querySelector('[data-company-group]') && !document.querySelector('[data-announcement]')))
+    await after.close()
+  }
+
+  // ---------- 0.8.0: share a stack as a link ----------
+  // A stack's menu copies a link that carries the stack in its hash. The share page is served from
+  // the site folder through request interception, so it runs on its real origin
+  // (https://getstackboard.com) and the shipped externally_connectable applies as is: no test-only
+  // manifest. Set STACKABLE_SITE to the site folder when dist isn't next to it.
+  {
+    const SITE = process.env.STACKABLE_SITE || path.resolve(process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist'), '..', 'site')
+    if (!fs.existsSync(path.join(SITE, 's', 'index.html'))) {
+      console.log(`SKIP  share: no site/s page under ${SITE} (set STACKABLE_SITE)`)
+    } else {
+      const until = async (page, fn, arg, ms = 8000) => {
+        for (let t = 0; t < ms; t += 150) {
+          if (await page.evaluate(fn, arg).catch(() => false)) return true
+          await sleep(150)
+        }
+        return false
+      }
+      const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }
+      const serve = async (page, extra = {}) => {
+        await page.evaluateOnNewDocument((id) => { window.__STACKBOARD_EXT_ID = id }, extId)
+        await page.setRequestInterception(true)
+        page.on('request', (req) => {
+          const u = new URL(req.url())
+          if (extra[u.origin]) return req.respond({ status: 200, contentType: 'text/html', body: extra[u.origin] })
+          if (u.origin !== 'https://getstackboard.com') return req.continue()
+          const rel = u.pathname === '/s' || u.pathname === '/s/' ? 's/index.html' : decodeURIComponent(u.pathname.slice(1))
+          const full = path.resolve(SITE, rel)
+          if (!full.startsWith(path.resolve(SITE)) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) return req.respond({ status: 404, body: 'not found' })
+          req.respond({ status: 200, contentType: TYPES[path.extname(full)] ?? 'application/octet-stream', body: fs.readFileSync(full) })
+        })
+      }
+
+      const made = await control.evaluate(async () => {
+        const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+        const space = await chrome.bookmarks.create({ parentId: root.id, title: '🔗 Share test' })
+        const st = await chrome.bookmarks.create({ parentId: space.id, title: 'Reading list' })
+        for (const [t, u] of [['Example', 'https://example.com/?share=1'], ['Example org', 'https://example.org/?share=2'], ['Example net', 'https://example.net/?share=3'], ['Settings', 'chrome://settings/']]) {
+          await chrome.bookmarks.create({ parentId: st.id, title: t, url: u })
+        }
+        const target = await chrome.bookmarks.create({ parentId: root.id, title: '📚 Share target' })
+        localStorage.setItem('stackable:lastSpaceId', space.id)
+        return { space: space.id, stack: st.id, target: target.id }
+      })
+
+      // 1. Copy the link from the stack's menu (clipboard stubbed: headless has no real one).
+      const board = await openNtp()
+      await board.bringToFront()
+      await board.evaluate(() => {
+        window.__copied = null
+        navigator.clipboard.writeText = async (text) => { window.__copied = text }
+      })
+      await until(board, (id) => !!document.querySelector(`#stack-${id}`), made.stack)
+      await board.evaluate((id) => document.querySelector(`#stack-${id} button[aria-label="Stack options"]`).click(), made.stack)
+      const hasItem = await until(board, () => !!document.querySelector('[data-share-stack]'))
+      await board.evaluate(() => document.querySelector('[data-share-stack]')?.click())
+      await until(board, () => !!window.__copied)
+      const copied = await board.evaluate(() => window.__copied)
+      const toast = await board.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+      check('share: the stack menu copies a getstackboard.com/s link with the stack in the hash', hasItem && typeof copied === 'string' && copied.startsWith('https://getstackboard.com/s#') && copied.length < 8000, String(copied).slice(0, 60))
+      check('share: the toast says it was copied and who can see it', toast.includes('Link copied') && toast.includes('3 links') && toast.includes('Anyone with the link'), toast)
+      const menuLeft = await board.evaluate(() => document.querySelectorAll('[data-share-stack]').length)
+      check('share: the menu closes after sharing', menuLeft === 0)
+
+      // 2. The page shows the stack, finds the extension, and never renders a script link.
+      const page = await browser.newPage()
+      await page.setViewport({ width: 1200, height: 900 })
+      page.on('pageerror', (e) => errors.push(`share page: ${e.message}`))
+      await serve(page)
+      await page.goto(copied, { waitUntil: 'load' })
+      await until(page, () => document.getElementById('links')?.children.length > 0)
+      const shown = await page.evaluate(() => ({
+        title: document.getElementById('title').textContent,
+        links: [...document.querySelectorAll('#links a')].map((a) => a.href),
+        imgs: [...document.querySelectorAll('#links img')].length,
+      }))
+      check('share: the page shows the title and the three web links', shown.title === 'Reading list' && shown.links.length === 3 && shown.links[0] === 'https://example.com/?share=1' && shown.imgs === 0, JSON.stringify(shown))
+      const addShown = await until(page, () => !!document.getElementById('add') && getComputedStyle(document.getElementById('add')).display !== 'none')
+      check('share: the page finds Stackboard and offers Add', addShown && (await page.evaluate(() => getComputedStyle(document.getElementById('get')).display === 'none')))
+
+      // 3. Add opens a Stackboard tab that asks first; nothing is written before Add.
+      const known = new Set(browser.targets())
+      const asking = browser.waitForTarget((t) => !known.has(t) && t.url().includes('/newtab.html#share='), { timeout: 10000 }).then((t) => t.page()).catch(() => null)
+      await page.evaluate(() => document.getElementById('add').click())
+      const confirmTab = await asking
+      const before = await control.evaluate((id) => chrome.bookmarks.getChildren(id).then((k) => k.length), made.target)
+      const card = confirmTab ? await until(confirmTab, () => !!document.querySelector('[data-share-add]')) : false
+      const cardText = confirmTab ? await confirmTab.evaluate(() => document.querySelector('[data-share-add]')?.innerText ?? '') : ''
+      check('share: Add opens a Stackboard tab asking which space, with nothing written yet', card && cardText.includes('Reading list') && cardText.includes('3 links') && before === 0, cardText.slice(0, 120))
+      // Review batch 2, finding 1: Add answers only after a short moment.
+      const armedLate = confirmTab ? await confirmTab.evaluate(() => !!document.querySelector('[data-share-confirm]')?.disabled) : false
+      check('share: Add waits a moment before it answers', armedLate)
+      const fullList = confirmTab ? await confirmTab.evaluate(() => document.querySelectorAll('[data-share-links] li').length) : 0
+      check('share: the card lists every link before Add', fullList === 3, String(fullList))
+      if (confirmTab) {
+        await confirmTab.select('[data-share-space]', made.target)
+        await until(confirmTab, () => !document.querySelector('[data-share-confirm]')?.disabled)
+        await confirmTab.evaluate(() => document.querySelector('[data-share-confirm]').click())
+        await until(confirmTab, () => !document.querySelector('[data-share-add]') && (document.querySelector('.toast')?.textContent ?? '').includes('Added'))
+      }
+      const landed = await control.evaluate(async (id) => {
+        const [sub] = await chrome.bookmarks.getSubTree(id)
+        return (sub.children ?? []).map((st) => ({ title: st.title, urls: (st.children ?? []).map((b) => b.url) }))
+      }, made.target)
+      check('share: after Add the stack lands in the chosen space', landed.length === 1 && landed[0].title === 'Reading list' && landed[0].urls.join() === 'https://example.com/?share=1,https://example.org/?share=2,https://example.net/?share=3', JSON.stringify(landed))
+      const hashGone = confirmTab ? await confirmTab.evaluate(() => location.hash === '') : false
+      check('share: the confirmation clears its address and its parked stack', hashGone && (await control.evaluate(async () => Object.keys(await chrome.storage.session.get(null)).filter((k) => k.startsWith('shareAdd:')).length)) === 0)
+      await confirmTab?.close()
+
+      // 4. Open all goes through Stackboard: one tab per link, grouped, next to the page.
+      await sleep(2100) // the worker takes one add or open every two seconds
+      const tabsBefore = await control.evaluate(() => chrome.tabs.query({}).then((t) => t.length))
+      await page.bringToFront()
+      await page.evaluate(() => document.getElementById('open').click())
+      await until(page, () => (document.getElementById('status')?.textContent ?? '').includes('Opened'))
+      const opened = await control.evaluate(async () => (await chrome.tabs.query({})).filter((t) => /\?share=\d/.test(t.pendingUrl || t.url || '')).map((t) => ({ id: t.id, g: t.groupId })))
+      const tabsAfter = await control.evaluate(() => chrome.tabs.query({}).then((t) => t.length))
+      check('share: Open all opens each link once, in one tab group', tabsAfter - tabsBefore === 3 && opened.length === 3 && opened.every((t) => t.g >= 0 && t.g === opened[0].g), `${tabsAfter - tabsBefore} ${JSON.stringify(opened)}`)
+      await control.evaluate((ids) => chrome.tabs.remove(ids), opened.map((t) => t.id))
+
+      // Review batch 2, finding 11: at most five parked stacks wait at once, the newest kept.
+      await control.evaluate(async () => {
+        const now = Date.now()
+        const parked = {}
+        for (let i = 0; i < 6; i++) parked[`shareAdd:capped00000${i}`] = { stack: { title: `Old ${i}`, links: [{ title: 'A', url: 'https://example.com/a' }] }, at: now - (6 - i) * 60000 }
+        await chrome.storage.session.set(parked)
+      })
+      await sleep(2100)
+      const knownCap = new Set(browser.targets())
+      const capTab = browser.waitForTarget((t) => !knownCap.has(t) && t.url().includes('/newtab.html#share='), { timeout: 10000 }).then((t) => t.page()).catch(() => null)
+      await page.bringToFront()
+      await page.evaluate(() => document.getElementById('add').click())
+      await (await capTab)?.close()
+      const parkedKeys = await bounded('share: read the parked stacks', control, () => control.evaluate(async () => Object.keys(await chrome.storage.session.get(null)).filter((k) => k.startsWith('shareAdd:')).sort()))
+      check('share: at most five parked stacks, the newest kept', parkedKeys.length === 5 && !parkedKeys.includes('shareAdd:capped000000') && !parkedKeys.includes('shareAdd:capped000001') && parkedKeys.includes('shareAdd:capped000005'), parkedKeys.join(' '))
+      await bounded('share: clear the parked stacks', control, () => control.evaluate(async (keys) => chrome.storage.session.remove(keys), parkedKeys))
+      await sleep(2100)
+
+      // 5. A doctored link: script and data links never reach the page.
+      await control.bringToFront()
+      const evil = await bounded('share: build a doctored link', control, () => control.evaluate(async () => {
+        const json = JSON.stringify({ v: 1, t: 'Mixed', l: [['x', 'javascript:alert(1)'], ['ok', 'https://example.com/ok'], ['d', 'data:text/html,hi']] })
+        const s = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+        const bytes = new Uint8Array(await new Response(s).arrayBuffer())
+        let bin = ''
+        for (const b of bytes) bin += String.fromCharCode(b)
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      }))
+      await page.goto('about:blank')
+      await page.goto('https://getstackboard.com/s#' + evil, { waitUntil: 'load' })
+      await until(page, () => document.getElementById('title')?.textContent === 'Mixed')
+      const evilLinks = await bounded('share: read the doctored page', page, () => page.evaluate(() => [...document.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '').filter((h) => /^(javascript|data):/i.test(h)).length))
+      const evilCount = await bounded('share: count the doctored links', page, () => page.evaluate(() => document.querySelectorAll('#links li').length))
+      check('share: a doctored link shows only its web links', evilLinks === 0 && evilCount === 1, `${evilLinks} ${evilCount}`)
+      await page.goto('about:blank')
+      await page.goto('https://getstackboard.com/s#not-a-stack', { waitUntil: 'load' })
+      await until(page, () => (document.getElementById('title')?.textContent ?? '').includes("doesn't hold a stack"))
+      check('share: a broken link says so', (await page.evaluate(() => document.getElementById('title').textContent)).includes("doesn't hold a stack"))
+      await page.close()
+
+      // 6. Other sites can't reach Stackboard, and an unknown confirmation id writes nothing.
+      const other = await browser.newPage()
+      await serve(other, { 'https://other.example': '<!doctype html><title>other</title><p>hi</p>' })
+      await other.goto('https://other.example/', { waitUntil: 'load' })
+      const reach = await other.evaluate(() => typeof window.chrome?.runtime?.sendMessage)
+      check('share: pages on other sites get no channel to Stackboard', reach === 'undefined', reach)
+      await other.close()
+      const stale = await openNtp()
+      await stale.goto(NTP + '#share=zzzzzzzzzzzz', { waitUntil: 'load' }).catch(() => {})
+      await stale.reload({ waitUntil: 'load' }).catch(() => {})
+      await until(stale, () => !!document.querySelector('main h1'))
+      await sleep(1200)
+      const staleCard = await stale.evaluate(() => !!document.querySelector('[data-share-add]'))
+      const staleToast = await stale.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+      check('share: an unknown or expired share shows no card and says so', !staleCard && staleToast.includes('expired'), staleToast)
+      await stale.close()
+
+      // 7. The new manifest key adds no install warning (the API that answers needs no permission).
+      const warn = await control.evaluate(async () => {
+        if (!chrome.management?.getPermissionWarningsByManifest) return null
+        const m = chrome.runtime.getManifest()
+        const without = { ...m }
+        delete without.externally_connectable
+        const a = await chrome.management.getPermissionWarningsByManifest(JSON.stringify(m))
+        const b = await chrome.management.getPermissionWarningsByManifest(JSON.stringify(without))
+        return { a, b, key: m.externally_connectable }
+      })
+      if (warn) check('share: externally_connectable adds no permission warning', JSON.stringify(warn.a) === JSON.stringify(warn.b) && warn.key?.matches?.[0] === 'https://getstackboard.com/*', JSON.stringify(warn))
+      else console.log('SKIP  share: chrome.management.getPermissionWarningsByManifest not available')
+
+      await board.close()
+      await control.evaluate(async (m) => {
+        await chrome.bookmarks.removeTree(m.space)
+        await chrome.bookmarks.removeTree(m.target)
+        localStorage.removeItem('stackable:lastSpaceId')
+      }, made)
+    }
+  }
+
+  // ---------- 0.8.0: Teams pack 2 ----------
+  // Go links (asked through the service worker, since a test can't type in the address bar), a
+  // start-here space for new people, the company's brand, and settings the company locks.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const mf = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'))
+    check('teams2: go is the address-bar keyword, with the expected permissions', mf.omnibox?.keyword === 'go' && JSON.stringify(mf.permissions) === JSON.stringify(PERMISSIONS) && !mf.host_permissions, JSON.stringify(mf.omnibox))
+
+    const policy = {
+      companyName: 'Acme',
+      goLinks: { pto: 'https://example.com/pto', 'hr/benefits': 'https://example.org/benefits' },
+      spaces: [
+        { name: 'Acme Tools', emoji: '🧰', stacks: [{ name: 'Daily', links: [{ title: 'Payroll portal', url: 'https://example.com/payroll' }] }] },
+        { name: 'Welcome aboard', emoji: '👋', onboarding: true, stacks: [{ name: 'First week', links: [{ title: 'Laptop setup', url: 'https://example.com/setup' }] }] },
+      ],
+      brand: { name: 'Acme Corp', accent: '#0f766e' },
+      lock: { appearance: true, starterPacks: true, importExport: true },
+    }
+    // Pages read the override from localStorage; the service worker has none, so it reads chrome.storage.local.
+    await control.evaluate(async (j) => {
+      localStorage.setItem('stackable:managedOverride', j)
+      await chrome.storage.local.set({ 'stackable:managedOverride': j })
+    }, JSON.stringify(policy))
+
+    const sug = await askWorker(control, { type: 'go-suggest', text: 'pto', fresh: true })
+    check('teams2: go pto suggests the company name first, marked', Array.isArray(sug) && sug[0]?.content === 'https://example.com/pto' && sug[0].description.includes('<match>pto</match>'), JSON.stringify(sug).slice(0, 240))
+    const sug2 = await askWorker(control, { type: 'go-suggest', text: 'payroll' })
+    check('teams2: go also finds company links by title', Array.isArray(sug2) && sug2[0]?.content === 'https://example.com/payroll', JSON.stringify(sug2).slice(0, 240))
+
+    const opened = await askWorker(control, { type: 'go-open', text: 'hr/benefits' })
+    await sleep(400)
+    const goTabs = await control.evaluate(async (u) => (await chrome.tabs.query({})).filter((t) => (t.pendingUrl || t.url || '').startsWith(u)).map((t) => t.id), 'https://example.org/benefits')
+    check('teams2: go hr/benefits opens its address in a new tab', opened?.url === 'https://example.org/benefits' && goTabs.length === 1, `${JSON.stringify(opened)} ${goTabs.length}`)
+    if (goTabs.length) await control.evaluate((ids) => chrome.tabs.remove(ids), goTabs)
+
+    // Review batch 2, finding 2: with no match the words go to the default search engine.
+    const known = new Set(browser.targets())
+    const miss = await askWorker(control, { type: 'go-open', text: 'zzqx quarterly' })
+    const missTab = await browser.waitForTarget((t) => !known.has(t) && t.type() === 'page' && /zzqx/.test(decodeURIComponent(t.url())), { timeout: 8000 }).catch(() => null)
+    check('teams2: with no match, go searches the web with the default engine', miss?.searched === 'zzqx quarterly' && !!missTab, `${JSON.stringify(miss)} ${missTab?.url() ?? 'no tab'}`)
+    if (missTab) await (await missTab.page())?.close()
+    const searchWarn = await control.evaluate(async () => {
+      if (!chrome.management?.getPermissionWarningsByManifest) return null
+      const m = chrome.runtime.getManifest()
+      const without = { ...m, permissions: m.permissions.filter((p) => p !== 'search') }
+      const a = await chrome.management.getPermissionWarningsByManifest(JSON.stringify(m))
+      const b = await chrome.management.getPermissionWarningsByManifest(JSON.stringify(without))
+      return { a, b, has: m.permissions.includes('search') }
+    })
+    if (searchWarn) check('teams2: the search permission adds no install warning', searchWarn.has && JSON.stringify(searchWarn.a) === JSON.stringify(searchWarn.b), JSON.stringify(searchWarn))
+    else console.log('SKIP  teams2: chrome.management.getPermissionWarningsByManifest not available')
+
+    // T7: the first time this device shows company spaces, it opens on the start-here space.
+    await control.evaluate(() => localStorage.removeItem('stackable:companySeen'))
+    const page = await openNtp()
+    await page.bringToFront()
+    const ob = await page.evaluate(() => ({
+      h1: document.querySelector('main h1')?.textContent,
+      rows: [...document.querySelectorAll('[data-company-space]')].map((r) => r.dataset.companySpace),
+      badge: !!document.querySelector('[data-company-space="Welcome aboard"] [data-start-here]'),
+    }))
+    check('teams2: new people open on the start-here space, first and badged', ob.h1 === 'Welcome aboard' && ob.rows[0] === 'Welcome aboard' && ob.badge, JSON.stringify(ob))
+
+    // T8: the company's colour and name, for everyone (no Pro in this part of the suite).
+    const brand = await page.evaluate(() => ({
+      accent: document.documentElement.getAttribute('data-accent'),
+      hex: getComputedStyle(document.documentElement).getPropertyValue('--sb-custom-accent').trim(),
+      header: document.querySelector('aside [data-brand]')?.textContent?.trim(),
+    }))
+    check('teams2: the company accent and name show without Pro', brand.accent === 'custom' && brand.hex === '#0f766e' && brand.header === 'Acme Corp', JSON.stringify(brand))
+
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(page, () => !!document.querySelector('[data-keys]'))
+    const st = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('[role=dialog] button')].map((b) => b.textContent.trim())
+      return {
+        appearance: !!document.querySelector('[data-appearance]'),
+        managed: [...document.querySelectorAll('[data-managed-setting]')].map((s) => s.dataset.managedSetting),
+        packs: buttons.includes('Starter packs'),
+        exportJson: buttons.includes('Export JSON'),
+        copyIn: buttons.includes('Copy from Chrome bookmarks'),
+        note: document.querySelector('[role=dialog]')?.innerText.includes('Your company manages this setting.'),
+        goRow: !!document.querySelector('[data-keys]')?.textContent.includes('Go links'),
+      }
+    })
+    check('teams2: locked settings are hidden, each with a note', !st.appearance && !st.packs && !st.exportJson && !st.copyIn && st.note && st.managed.join('|') === 'Appearance|Add to your board|Backup', JSON.stringify(st))
+    // 0.8.0: the appearance lock covers the look; the layout stays the person's own choice.
+    const savedBefore = await page.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance ?? null)
+    const mirrorBefore = await page.evaluate(() => localStorage.getItem('stackable:appearance'))
+    const layoutBefore = savedBefore?.layout ?? null
+    const pick = layoutBefore === 'rows' ? 'Packed' : 'Rows'
+    const switched = await page.evaluate(async (label) => {
+      const opt = [...document.querySelectorAll('[data-layout-setting] [role=radio]')].find((b) => b.textContent.trim() === label)
+      if (!opt) return 'no switch'
+      opt.click()
+      await new Promise((r) => setTimeout(r, 400))
+      return (await chrome.storage.local.get('appearance')).appearance?.layout ?? null
+    }, pick)
+    check('teams2: under the appearance lock the Layout switch still works', switched === pick.toLowerCase(), `${layoutBefore} -> ${switched}`)
+    // Put the saved appearance back exactly as it was, for the blocks after this one.
+    await page.evaluate(async (before, mirror) => {
+      if (before) await chrome.storage.local.set({ appearance: before })
+      else await chrome.storage.local.remove('appearance')
+      await new Promise((r) => setTimeout(r, 200))
+      if (mirror === null) localStorage.removeItem('stackable:appearance')
+      else localStorage.setItem('stackable:appearance', mirror)
+    }, savedBefore, mirrorBefore)
+    check('teams2: Settings > Keys explains go links', st.goRow)
+    // Review batch 2, finding 4: the import/export lock also hides Export and Share as a link.
+    await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+    const lockSpace = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const sp = await chrome.bookmarks.create({ parentId: root.id, title: '🔒 Lock test' })
+      const st = await chrome.bookmarks.create({ parentId: sp.id, title: 'Links' })
+      await chrome.bookmarks.create({ parentId: st.id, title: 'One', url: 'https://example.com/lock-1' })
+      return sp.id
+    })
+    const locked = await openNtp()
+    await locked.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Lock test'))?.click())
+    await until(locked, () => document.querySelector('main h1')?.textContent === 'Lock test')
+    const exportShown = await locked.evaluate(() => !!document.querySelector('[data-export-button]'))
+    await locked.evaluate(() => document.querySelector('main [aria-label^="Stack options"], main button[aria-haspopup="menu"]')?.click())
+    await sleep(300)
+    const shareShown = await locked.evaluate(() => !!document.querySelector('[data-share-stack]'))
+    check('teams2: the import/export lock hides Export and Share as a link', !exportShown && !shareShown, JSON.stringify({ exportShown, shareShown }))
+    await control.evaluate(async () => {
+      await chrome.storage.session.set({ 'shareAdd:locktest00001': { stack: { title: 'Shared', links: [{ title: 'A', url: 'https://example.com/a' }] }, at: Date.now() } })
+    })
+    await locked.goto(NTP + '#share=locktest00001', { waitUntil: 'load' }).catch(() => {})
+    await locked.reload({ waitUntil: 'load' }).catch(() => {})
+    await until(locked, () => !!document.querySelector('[data-share-add]'))
+    const lockCard = await locked.evaluate(() => ({ note: document.querySelector('[data-share-note]')?.textContent ?? '', add: !!document.querySelector('[data-share-confirm]') }))
+    check('teams2: under the lock a shared stack can\'t be added, and the card says why', lockCard.note.includes('Your company manages this') && !lockCard.add, JSON.stringify(lockCard))
+    await locked.close()
+    await control.evaluate(async (id) => {
+      await chrome.bookmarks.removeTree(id)
+      await chrome.storage.session.remove('shareAdd:locktest00001')
+    }, lockSpace)
+    await page.close()
+
+    // After 30 days the start-here space follows the other company spaces, badge gone.
+    await control.evaluate(() => localStorage.setItem('stackable:companySeen', String(Date.now() - 31 * 86400000)))
+    const later = await openNtp()
+    const ob2 = await later.evaluate(() => ({
+      rows: [...document.querySelectorAll('[data-company-space]')].map((r) => r.dataset.companySpace),
+      badge: !!document.querySelector('[data-start-here]'),
+    }))
+    check('teams2: after 30 days the start-here space moves down and loses its badge', ob2.rows.join('|') === 'Acme Tools|Welcome aboard' && !ob2.badge, JSON.stringify(ob2))
+    await later.close()
+
+    await control.evaluate(async () => {
+      localStorage.removeItem('stackable:managedOverride')
+      localStorage.removeItem('stackable:companySeen')
+      await chrome.storage.local.remove('stackable:managedOverride')
+    })
+    const plain = await openNtp()
+    const cleared = await until(plain, () => document.documentElement.getAttribute('data-accent') === null && !document.querySelector('aside [data-brand]'))
+    check('teams2: with the policy gone, the company colour and name go too', cleared)
+    await plain.close()
+  }
+
+  // ---------- 0.8.0: nested folders ----------
+  // A folder inside a stack folder shows in the stack card as a folded section; deeper folders
+  // nest inside it. Open folders are remembered on this device. Search, open-all, share (as one
+  // flat list), delete and undo, drags and the clean-up all reach inside.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const mk = (parentId, title, url) => chrome.bookmarks.create({ parentId, title, url })
+      const space = await mk(root.id, '🪆 Nested test')
+      const projects = await mk(space.id, 'Projects')
+      await mk(projects.id, 'Top link', 'https://example.com/?nest=top')
+      await mk(projects.id, 'Second link', 'https://example.com/?nest=second')
+      const clients = await mk(projects.id, 'Clients')
+      for (let i = 0; i < 6; i++) await mk(clients.id, `Client ${i}`, `https://example.com/?nest=client${i}`)
+      const globex = await mk(clients.id, 'Globex')
+      for (let i = 0; i < 8; i++) await mk(globex.id, `Globex doc ${i}`, `https://example.com/?nest=globex${i}`)
+      await mk(globex.id, 'Zebra roadmap', 'https://example.com/?nest=zebra')
+      const other = await mk(space.id, 'Other')
+      await mk(other.id, 'Other link', 'https://example.com/?nest=other')
+      return { space: space.id, projects: projects.id, clients: clients.id, globex: globex.id, other: other.id }
+    })
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Nested test'))?.click())
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Nested test' && !!document.querySelector('[data-folder]'))
+    const folderState = (p) =>
+      p.evaluate(() => {
+        const f = (n) => [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === n)
+        const links = (q) => document.querySelectorAll(`a[href*="nest=${q}"]`).length
+        return {
+          clients: f('Clients') ? { open: f('Clients').querySelector('button[aria-expanded]').getAttribute('aria-expanded'), depth: f('Clients').dataset.depth, count: f('Clients').querySelector('[data-folder-count]').textContent } : null,
+          globex: f('Globex') ? { open: f('Globex').querySelector('button[aria-expanded]').getAttribute('aria-expanded'), depth: f('Globex').dataset.depth } : null,
+          top: links('top'),
+          client: links('client'),
+          globexLinks: links('globex') + links('zebra'),
+        }
+      })
+    const folded = await folderState(page)
+    check('nested: a folder in a stack shows as a folded section with its link count', folded.clients?.open === 'false' && folded.clients.depth === '1' && folded.clients.count === '15' && folded.top === 1 && folded.client === 0 && !folded.globex, JSON.stringify(folded))
+
+    const unfold = (p, name) => p.evaluate((n) => [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === n)?.querySelector('button[aria-expanded]')?.click(), name)
+    await unfold(page, 'Clients')
+    await until(page, () => document.querySelectorAll('a[href*="nest=client"]').length === 6)
+    const oneLevel = await folderState(page)
+    await unfold(page, 'Globex')
+    await until(page, () => document.querySelectorAll('a[href*="nest=globex"]').length === 8)
+    const twoLevels = await folderState(page)
+    check(
+      'nested: unfolding shows the links, one level at a time',
+      oneLevel.client === 6 && oneLevel.globex?.open === 'false' && oneLevel.globexLinks === 0 && twoLevels.globex?.open === 'true' && twoLevels.globex.depth === '2' && twoLevels.globexLinks === 9,
+      JSON.stringify({ oneLevel, twoLevels }),
+    )
+    await sleep(300)
+    await page.screenshot({ path: path.join(SHOTS, '40-nested-open.png') })
+
+    await page.reload()
+    await until(page, () => !!document.querySelector('[data-folder]'))
+    await sleep(300)
+    const reloaded = await folderState(page)
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('stackable:openFolders') ?? '[]'))
+    check('nested: open folders stay open after a reload', reloaded.clients?.open === 'true' && reloaded.globex?.open === 'true' && reloaded.globexLinks === 9 && stored.includes(made.clients) && stored.includes(made.globex), JSON.stringify({ reloaded, stored }))
+
+    // Search reaches into folders and says where a hit sits.
+    await page.mouse.click(120, 860)
+    await page.keyboard.press('/')
+    await page.keyboard.type('zebra')
+    await until(page, () => [...document.querySelectorAll('main section a')].some((a) => a.textContent.includes('Zebra roadmap')))
+    const where = await page.evaluate(() => [...document.querySelectorAll('[data-search-where]')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()))
+    check('nested: search finds a link two folders down and shows where it is', where.length === 1 && /Nested test\s*Projects\s*Clients\s*Globex/.test(where[0]), JSON.stringify(where))
+    await page.keyboard.press('Escape')
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Nested test')
+
+    // The stack's open-all counts its folders' links: 2 + 6 + 9 = 17, so it asks first.
+    const openAll = await page.evaluate(async () => {
+      const col = [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Projects')
+      const b = col.querySelector('button[aria-label^="Open all"]')
+      const label = b.getAttribute('aria-label')
+      b.click()
+      await new Promise((r) => setTimeout(r, 150))
+      return { label, armed: b.textContent }
+    })
+    check('nested: the stack\'s open-all counts links in its folders, and asks before 17 tabs', openAll.label === 'Open all 17 bookmarks as tabs' && openAll.armed === 'Open 17?', JSON.stringify(openAll))
+    await sleep(3300) // let it disarm
+
+    // Sharing stays one flat list: the folders' links ride along, and the toast says so.
+    await page.evaluate(() => {
+      window.__copied = null
+      navigator.clipboard.writeText = async (text) => { window.__copied = text } // headless has no real clipboard
+      const col = [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Projects')
+      col.querySelector('button[aria-label="Stack options"]').click()
+    })
+    await until(page, () => !!document.querySelector('[data-share-stack]'))
+    await page.evaluate(() => document.querySelector('[data-share-stack]').click())
+    await until(page, () => !!window.__copied && (document.querySelector('.toast')?.textContent ?? '').includes('Link copied'))
+    const shareToast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    check('nested: sharing a stack with folders sends all 17 links as one flat list, and says so', shareToast.includes('17 links') && shareToast.includes('Its folders are shared as one flat list'), shareToast)
+
+    // Drag a link out of a folder into another stack, with the real mouse.
+    const centre = (p, text) =>
+      p.evaluate((t) => {
+        const a = [...document.querySelectorAll('a[href^="http"]')].find((x) => x.textContent.includes(t))
+        const r = a.parentElement.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }, text)
+    const drag = async (p, from, to) => {
+      await p.mouse.move(from.x, from.y)
+      await p.mouse.down()
+      for (let i = 1; i <= 14; i++) await p.mouse.move(from.x + ((to.x - from.x) * i) / 14, from.y + ((to.y - from.y) * i) / 14)
+      await sleep(250)
+      await p.mouse.up()
+      await sleep(900)
+    }
+    const parentOf = (title) => control.evaluate(async (t) => (await chrome.bookmarks.search({ title: t }))[0]?.parentId, title)
+    await drag(page, await centre(page, 'Client 0'), await centre(page, 'Other link'))
+    check('nested: a link drags from a folder into another stack', (await parentOf('Client 0')) === made.other, String(await parentOf('Client 0')))
+
+    // And into a folder: let go over its header and it goes in last.
+    const globexHead = await page.evaluate(() => {
+      const r = [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === 'Globex').querySelector('[data-folder-head]').getBoundingClientRect()
+      return { x: r.x + r.width / 3, y: r.y + r.height / 2 }
+    })
+    await drag(page, await centre(page, 'Other link'), globexHead)
+    const globexKids = await control.evaluate(async (id) => (await chrome.bookmarks.getChildren(id)).map((c) => c.title), made.globex)
+    check('nested: a link let go on a folder header goes into that folder, last', globexKids.at(-1) === 'Other link', globexKids.join(' | '))
+
+    // Reorder inside a folder: the first link down past the third.
+    const doc0 = await centre(page, 'Globex doc 0')
+    const doc2 = await centre(page, 'Globex doc 2')
+    await drag(page, doc0, { x: doc2.x, y: doc2.y + 8 })
+    const reordered = await control.evaluate(async (id) => (await chrome.bookmarks.getChildren(id)).map((c) => c.title), made.globex)
+    check('nested: links reorder inside a folder', reordered.slice(0, 3).join(' | ') === 'Globex doc 1 | Globex doc 2 | Globex doc 0', reordered.join(' | '))
+
+    // Delete the whole stack, then Undo: the folders and every link come back.
+    const shape = () =>
+      control.evaluate(async (spaceId) => {
+        const [sub] = await chrome.bookmarks.getSubTree(spaceId)
+        const walk = (n) => (n.url ? n.title : { [n.title]: (n.children ?? []).map(walk) })
+        return JSON.stringify(sub.children.map(walk))
+      }, made.space)
+    const before = await shape()
+    await page.evaluate(() => {
+      const col = [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Projects')
+      col.querySelector('button[aria-label="Stack options"]').click()
+    })
+    await sleep(150)
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Delete').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Projects'))
+    const delToast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    const gone = await control.evaluate(async (id) => (await chrome.bookmarks.get(id).catch(() => [])).length, made.projects)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
+    await until(page, () => document.querySelector('.toast')?.textContent.startsWith('Restored'))
+    await sleep(500)
+    const after = await shape()
+    check('nested: the stack delete toast counts its folders and their links', delToast.includes('2 folders') && delToast.includes('17 links') && gone === 0, `${delToast} (${gone} left)`)
+    check('nested: undoing the stack delete brings back every folder and link in place', after === before, `${after.slice(0, 160)} vs ${before.slice(0, 160)}`)
+    // Clients and Globex were open before the delete: they come back open under their new ids.
+    const openAgain = (names) =>
+      page.evaluate((ns) => ns.every((n) => [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === n)?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') === 'true'), names)
+    const back = await until(page, (ns) => ns.every((n) => [...document.querySelectorAll('[data-folder]')].some((x) => x.dataset.folder === n)), ['Clients', 'Globex'])
+    check('nested: the restored folders show again, open as they were', back && (await openAgain(['Clients', 'Globex'])), String(back))
+
+    // A folder deletes at once with an Undo, like a stack.
+    await until(page, () => [...document.querySelectorAll('[data-folder]')].some((x) => x.dataset.folder === 'Globex'))
+    await page.evaluate(() => [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === 'Globex').querySelector('button[aria-label="Folder options"]').click())
+    await sleep(150)
+    await page.evaluate(() => [...document.querySelectorAll('[data-folder] button')].find((b) => b.textContent.trim() === 'Delete').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Globex'))
+    const folderToast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    const globexGone = await control.evaluate(async () => (await chrome.bookmarks.search({ title: 'Globex' })).filter((n) => !n.url).length)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
+    await until(page, () => document.querySelector('.toast')?.textContent.startsWith('Restored'))
+    await sleep(400)
+    check('nested: a folder deletes at once, and Undo brings it back whole and open', folderToast.includes('10 links') && globexGone === 0 && (await shape()) === before && (await openAgain(['Globex'])), `${folderToast} (${globexGone} left)`)
+
+    // New folder from the stack menu; a double-click on its name renames it.
+    await page.evaluate(() => {
+      const col = [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Other')
+      col.querySelector('button[aria-label="Stack options"]').click()
+    })
+    await sleep(150)
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'New folder').click())
+    await until(page, () => document.querySelector('[role=dialog]')?.textContent.includes('New folder'))
+    await page.keyboard.type('Fresh')
+    await page.keyboard.press('Enter')
+    await until(page, () => [...document.querySelectorAll('[data-folder]')].some((x) => x.dataset.folder === 'Fresh'))
+    const fresh = await control.evaluate(async (id) => (await chrome.bookmarks.getChildren(id)).filter((c) => !c.url).map((c) => c.title), made.other)
+    const freshOpen = await page.evaluate(() => [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === 'Fresh')?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded'))
+    check('nested: New folder in the stack menu makes a folder, opened', fresh.join() === 'Fresh' && freshOpen === 'true', `${fresh.join()} ${freshOpen}`)
+    const freshName = await page.evaluate(() => {
+      const r = [...document.querySelectorAll('[data-folder]')].find((x) => x.dataset.folder === 'Fresh').querySelector('button[aria-expanded] span').getBoundingClientRect()
+      return { x: r.x + 8, y: r.y + r.height / 2 }
+    })
+    await page.mouse.click(freshName.x, freshName.y, { count: 2 })
+    await until(page, () => document.querySelector('[role=dialog]')?.textContent.includes('Rename folder'))
+    await page.keyboard.down('Control')
+    await page.keyboard.press('KeyA')
+    await page.keyboard.up('Control')
+    await page.keyboard.type('Renamed')
+    await page.keyboard.press('Enter')
+    await until(page, () => [...document.querySelectorAll('[data-folder]')].some((x) => x.dataset.folder === 'Renamed'))
+    const renamed = await control.evaluate(async (id) => (await chrome.bookmarks.getChildren(id)).filter((c) => !c.url).map((c) => c.title), made.other)
+    check('nested: a double-click on a folder name renames it', renamed.join() === 'Renamed', renamed.join())
+
+    // Clean-up sees links in folders: a copy two folders down is the one ticked, says where it is,
+    // and Remove then Undo puts it back in its folder at its place.
+    const copy = await control.evaluate(async () => {
+      const [globex] = (await chrome.bookmarks.search({ title: 'Globex' })).filter((n) => !n.url)
+      const c = await chrome.bookmarks.create({ parentId: globex.id, index: 2, title: 'Nested copy', url: 'https://example.com/?nest=second' })
+      await chrome.storage.sync.set({ proTrial: { startedAt: Date.now() } })
+      return { id: c.id, folder: globex.id }
+    })
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(page, () => !!document.querySelector('[data-cleanup-open]'), null, 8000)
+    await page.evaluate(() => document.querySelector('[data-cleanup-open]').click())
+    await until(page, (id) => !!document.querySelector(`[data-cleanup-section="dupes"] [data-cleanup-row="${id}"]`), copy.id, 8000)
+    const copyRow = await page.evaluate((id) => {
+      const r = document.querySelector(`[data-cleanup-section="dupes"] [data-cleanup-row="${id}"]`)
+      return r ? { checked: r.querySelector('input').checked, text: r.textContent } : null
+    }, copy.id)
+    check('nested: clean-up finds a copy inside a folder, ticks it and shows its folders', !!copyRow?.checked && copyRow.text.includes('Projects › Clients › Globex'), JSON.stringify(copyRow))
+    await page.evaluate((keep) => {
+      for (const r of document.querySelectorAll('[data-cleanup-row]')) {
+        const box = r.querySelector('input')
+        if (box.checked !== (r.dataset.cleanupRow === keep)) box.click()
+      }
+    }, copy.id)
+    await until(page, () => document.querySelector('[data-cleanup-remove]')?.textContent.trim() === 'Remove 1 link')
+    await page.evaluate(() => document.querySelector('[data-cleanup-remove]').click())
+    await until(page, () => document.querySelector('.toast')?.textContent.includes('Removed'))
+    const copyGone = await control.evaluate(async (f) => (await chrome.bookmarks.getChildren(f)).map((c) => c.title), copy.folder)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.trim().startsWith('Undo'))?.click())
+    await until(page, () => document.querySelector('.toast')?.textContent.startsWith('Restored'), null, 8000)
+    await sleep(400)
+    const copyBack = await control.evaluate(async (f) => (await chrome.bookmarks.getChildren(f)).map((c) => c.title), copy.folder)
+    check('nested: clean-up removes a link in a folder, and Undo puts it back in place', !copyGone.includes('Nested copy') && copyBack[2] === 'Nested copy', `${copyGone.join(' | ')} / ${copyBack.join(' | ')}`)
+    await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+    await control.evaluate(() => chrome.storage.sync.remove('proTrial'))
+
+    await page.close()
+    await control.evaluate((id) => chrome.bookmarks.removeTree(id), made.space)
+  }
+
+  // ---------- 0.8.0: packed stacks (U1) ----------
+  // Settings > Appearance > Layout. Packed, the default, tucks each stack under the one above it and
+  // keeps the column it has in Rows (stack i in column i mod N); Rows is the plain grid.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const onPack = () => document.querySelector('main h1')?.textContent === 'Pack test'
+    // Where each stack sits, and whether the grid carries any packing.
+    const geo = (page) =>
+      page.evaluate(() => {
+        const grid = document.querySelector('[data-stack-grid]')
+        const stacks = [...grid.querySelectorAll(':scope > [id^="stack-"]')].map((el) => {
+          const r = el.getBoundingClientRect()
+          return { title: el.querySelector('h3').textContent, left: Math.round(r.left), top: r.top, bottom: r.bottom }
+        })
+        const styled = !!grid.getAttribute('style') || [...grid.children].some((el) => (el.getAttribute('style') ?? '').includes('grid'))
+        return { packed: grid.getAttribute('data-packed'), gap: parseFloat(getComputedStyle(grid).getPropertyValue('--stack-gap')), stacks, styled }
+      })
+    const gapOk = (px, gap) => px >= gap - 1 && px <= gap + 5 // 4px rows round the gap up a little
+    const pickLayout = async (page, value) => {
+      await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim().startsWith('Settings')).click())
+      await until(page, () => !!document.querySelector('[aria-label="Layout"]'))
+      const shown = await page.evaluate(() => [...document.querySelectorAll('[aria-label="Layout"] [role=radio]')].map((b) => `${b.textContent}:${b.getAttribute('aria-checked')}`).join(' '))
+      await page.evaluate((v) => document.querySelector(`[aria-label="Layout"] [data-option="${v}"]`).click(), value)
+      await sleep(300)
+      await page.keyboard.press('Escape')
+      await sleep(250)
+      return shown
+    }
+
+    // Packed is picked here, since settings saved before 0.8.0 keep Rows (the block after this one);
+    // the settings come back as they were at the end. The background stays as the blocks above
+    // left it (a picture by now), so the gaps are read from the page. The what's-new card would sit
+    // on the board, so it stays away.
+    const savedLook = await control.evaluate(async () => {
+      const { appearance } = await chrome.storage.local.get('appearance')
+      await chrome.storage.local.set({ appearance: { ...(appearance ?? {}), layout: 'packed', density: 'comfortable' } })
+      localStorage.setItem('stackable:whatsNew070', '-1')
+      return appearance ?? null
+    })
+    const [spaceId, dropSpaceId] = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧱 Pack test' })
+      const drop = await chrome.bookmarks.create({ parentId: root.id, title: '📦 Pack drop' })
+      const st = await chrome.bookmarks.create({ parentId: space.id, title: 'Short' })
+      for (let i = 0; i < 2; i++) await chrome.bookmarks.create({ parentId: st.id, title: `Short ${i}`, url: `https://example.com/short/${i}` })
+      localStorage.setItem('stackable:lastSpaceId', space.id)
+      return [space.id, drop.id]
+    })
+    const page = await openNtp(onPack)
+    await page.bringToFront()
+    const cols = Number(await page.evaluate(() => document.querySelector('[data-stack-grid]')?.getAttribute('data-packed')))
+    const stored = await control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance)
+    check('layout: Packed saved opens packed', cols >= 3 && stored?.layout === 'packed', `${cols} columns`)
+
+    // First row: Short and N-1 tall stacks. Second row: N small ones, "Tucked" first, so in Rows
+    // it is stack N, right below Short.
+    const titles = await control.evaluate(async (id, n) => {
+      const mk = async (title, count) => {
+        const st = await chrome.bookmarks.create({ parentId: id, title })
+        for (let i = 0; i < count; i++) await chrome.bookmarks.create({ parentId: st.id, title: `${title} ${i}`, url: `https://example.com/${title.replace(' ', '-')}/${i}` })
+      }
+      for (let i = 1; i < n; i++) await mk(`Tall ${i}`, 8 + i)
+      await mk('Tucked', 3)
+      for (let i = 1; i < n; i++) await mk(`Low ${i}`, 2)
+      return (await chrome.bookmarks.getChildren(id)).map((c) => c.title)
+    }, spaceId, cols)
+    await until(page, (n) => document.querySelectorAll('[data-stack-grid] > [id^="stack-"]').length === n, titles.length)
+    await sleep(400)
+    const g1 = await geo(page)
+    const short = g1.stacks[0]
+    const tucked = g1.stacks[cols]
+    const rowOneEnd = Math.max(...g1.stacks.slice(0, cols).map((s) => s.bottom))
+    check(
+      'packed: the stack below a short one in Rows tucks up under it, one gap down',
+      tucked.title === 'Tucked' && tucked.left === short.left && gapOk(tucked.top - short.bottom, g1.gap) && tucked.top < rowOneEnd - 100,
+      `${(tucked.top - short.bottom).toFixed(1)}px under Short, gap ${g1.gap}, the first row ends ${Math.round(rowOneEnd - short.bottom)}px lower`,
+    )
+    check('packed: every stack keeps its Rows column (i mod N)', g1.stacks.every((s, i) => s.left === g1.stacks[i % cols].left), g1.stacks.map((s) => s.left).join(' '))
+
+    // Growing a stack in the first row moves the stacks under it down, and none sideways.
+    await control.evaluate(async () => {
+      const [st] = (await chrome.bookmarks.search({ title: 'Short' })).filter((n) => !n.url)
+      for (let i = 2; i < 16; i++) await chrome.bookmarks.create({ parentId: st.id, title: `Short ${i}`, url: `https://example.com/short/${i}` })
+    })
+    await until(page, () => [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Short')?.querySelectorAll('a[href]').length === 16)
+    await sleep(300)
+    const g2 = await geo(page)
+    check(
+      'packed: growing a first-row stack leaves every stack in its column',
+      g2.stacks.every((s, i) => s.title === g1.stacks[i].title && s.left === g1.stacks[i].left) && g2.stacks[0].bottom > rowOneEnd,
+      g2.stacks.map((s) => `${s.title}@${s.left}`).join(' '),
+    )
+    check(
+      'packed: the stack under it moves down with it, still one gap below',
+      gapOk(g2.stacks[cols].top - g2.stacks[0].bottom, g2.gap) && g2.stacks[cols].top > tucked.top + 300,
+      `${(g2.stacks[cols].top - g2.stacks[0].bottom).toFixed(1)}px under, moved ${Math.round(g2.stacks[cols].top - tucked.top)}px`,
+    )
+    await control.evaluate(async () => {
+      const [st] = (await chrome.bookmarks.search({ title: 'Short' })).filter((n) => !n.url)
+      for (const b of (await chrome.bookmarks.getChildren(st.id)).slice(2)) await chrome.bookmarks.remove(b.id)
+    })
+    await until(page, () => [...document.querySelectorAll('[id^="stack-"]')].find((c) => c.querySelector('h3')?.textContent === 'Short')?.querySelectorAll('a[href]').length === 2)
+    await sleep(300)
+    const g3 = await geo(page)
+    check('packed: removing links pulls the stack under it back up', Math.abs(g3.stacks[cols].top - tucked.top) < 1, `${(g3.stacks[cols].top - tucked.top).toFixed(1)}px off`)
+
+    // A folder inside a first-row stack (nested folders, 0.8.0) opens in place: the stack grows, and
+    // only the stacks under it in its column move down, by that much (give or take a 4px row).
+    // Folding it puts every stack back.
+    await control.evaluate(async () => {
+      const [st] = (await chrome.bookmarks.search({ title: 'Tall 1' })).filter((n) => !n.url)
+      const folder = await chrome.bookmarks.create({ parentId: st.id, title: 'Archive' })
+      for (let i = 0; i < 6; i++) await chrome.bookmarks.create({ parentId: folder.id, title: `Archive ${i}`, url: `https://example.com/archive/${i}` })
+    })
+    await until(page, () => document.querySelector('[data-folder="Archive"] [data-folder-count]')?.textContent === '6')
+    await sleep(300)
+    const shut = await geo(page)
+    const toggle = () => page.evaluate(() => document.querySelector('[data-folder="Archive"] button[aria-expanded]').click())
+    await toggle()
+    await until(page, () => document.querySelectorAll('a[href^="https://example.com/archive/"]').length === 6)
+    await sleep(300)
+    const opened = await geo(page)
+    await toggle()
+    await until(page, () => document.querySelectorAll('a[href^="https://example.com/archive/"]').length === 0)
+    await sleep(300)
+    const closed = await geo(page)
+    const grew = opened.stacks[1].bottom - shut.stacks[1].bottom
+    const moves = opened.stacks.map((s, i) => s.top - shut.stacks[i].top)
+    check(
+      'packed: unfolding a folder in a first-row stack moves only the stacks below it, and folding it pulls them back',
+      grew > 100 &&
+        moves.every((d, i) => (i % cols === 1 && i >= cols ? Math.abs(d - grew) <= 4 : Math.abs(d) < 1)) &&
+        opened.stacks.every((s, i) => s.left === shut.stacks[i].left) &&
+        closed.stacks.every((s, i) => Math.abs(s.top - shut.stacks[i].top) < 1 && s.left === shut.stacks[i].left),
+      `grew ${Math.round(grew)}px; moved ${moves.map(Math.round).join(' ')}; back ${closed.stacks.map((s, i) => Math.round(s.top - shut.stacks[i].top)).join(' ')}`,
+    )
+
+    // Compact density has a smaller gap, and the board packs to it.
+    const setDensity = (density) => control.evaluate(async (d) => {
+      const { appearance } = await chrome.storage.local.get('appearance')
+      await chrome.storage.local.set({ appearance: { ...appearance, density: d } })
+    }, density)
+    await setDensity('compact')
+    await until(page, () => document.documentElement.dataset.density === 'compact')
+    await sleep(300)
+    const gc = await geo(page)
+    check('packed: compact density packs to its own smaller gap', gc.gap < g1.gap && gapOk(gc.stacks[cols].top - gc.stacks[0].bottom, gc.gap), `${(gc.stacks[cols].top - gc.stacks[0].bottom).toFixed(1)}px under, gap ${gc.gap}`)
+    await setDensity('comfortable')
+    await until(page, () => document.documentElement.dataset.density === 'comfortable')
+
+    // The placement lands in the same task that renders the stacks, so the first frame is packed.
+    const firstFrame = await page.evaluateOnNewDocument(() => {
+      new MutationObserver((_, mo) => {
+        const stack = document.querySelector('[data-stack-grid] > [id^="stack-"]')
+        if (!stack) return
+        window.__packedFirst = !!stack.parentElement.getAttribute('data-packed') && !!stack.style.gridRow
+        mo.disconnect()
+      }).observe(document, { childList: true, subtree: true })
+    })
+    await page.reload({ waitUntil: 'load' })
+    await until(page, onPack, undefined, 10000)
+    check('packed: stacks are placed before the first paint', (await page.evaluate(() => window.__packedFirst)) === true)
+    await page.removeScriptToEvaluateOnNewDocument(firstFrame.identifier)
+    await sleep(400)
+    await page.screenshot({ path: path.join(SHOTS, '40-packed.png') })
+
+    // Rows: the plain grid, as before 0.8.0.
+    const offered = await pickLayout(page, 'rows')
+    check('layout: Settings > Appearance offers Packed and Rows, Packed picked', offered === 'Packed:true Rows:false', offered)
+    const g4 = await geo(page)
+    const rowEnd = Math.max(...g4.stacks.slice(0, cols).map((s) => s.bottom))
+    check(
+      'rows: the same stack starts below the tallest stack of the first row',
+      !g4.packed && !g4.styled && g4.stacks[cols].title === 'Tucked' && Math.abs(g4.stacks[cols].top - rowEnd - g4.gap) < 1 && g4.stacks[cols].left === g4.stacks[0].left,
+      `${(g4.stacks[cols].top - rowEnd).toFixed(1)}px under the tallest, gap ${g4.gap}`,
+    )
+    await page.screenshot({ path: path.join(SHOTS, '41-rows.png') })
+    const savedRows = await control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance?.layout)
+    await page.reload({ waitUntil: 'load' })
+    await until(page, onPack, undefined, 10000)
+    await sleep(400)
+    const g5 = await geo(page)
+    check('layout: Rows is saved and persists across a reload', savedRows === 'rows' && !g5.packed && Math.abs(g5.stacks[cols].top - g4.stacks[cols].top) < 1, `${savedRows} ${g5.packed}`)
+
+    // Another open tab follows the switch back to Packed.
+    const other = await openNtp(onPack)
+    const otherRows = await other.evaluate(() => !document.querySelector('[data-stack-grid][data-packed]'))
+    await page.bringToFront()
+    await pickLayout(page, 'packed')
+    await other.bringToFront()
+    check('layout: other open tabs follow a change', otherRows && (await until(other, () => !!document.querySelector('[data-stack-grid][data-packed]'))))
+    await other.close()
+    await page.bringToFront()
+    await sleep(300)
+
+    // Drags in Packed, with the real mouse.
+    const drag = async (from, to) => {
+      await page.mouse.move(from.x, from.y)
+      await page.mouse.down()
+      for (let i = 1; i <= 15; i++) await page.mouse.move(from.x + ((to.x - from.x) * i) / 15, from.y + ((to.y - from.y) * i) / 15)
+      await sleep(250)
+      await page.mouse.up()
+      await sleep(1000)
+    }
+    const cardAt = (text) =>
+      page.evaluate((t) => {
+        const r = [...document.querySelectorAll('main a[href^="http"]')].find((a) => a.textContent.includes(t)).parentElement.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }, text)
+    const headerAt = (title) =>
+      page.evaluate((t) => {
+        const r = [...document.querySelectorAll('[aria-label="Drag stack header"]')].find((h) => h.querySelector('h3')?.textContent === t).getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }, title)
+    const kids = (id) => control.evaluate(async (i) => (await chrome.bookmarks.getChildren(i)).map((c) => c.title), id)
+    const childrenOf = (title) => control.evaluate(async (t) => {
+      const [n] = (await chrome.bookmarks.search({ title: t })).filter((x) => !x.url)
+      return (await chrome.bookmarks.getChildren(n.id)).map((c) => c.title)
+    }, title)
+
+    await drag(await cardAt('Short 0'), await cardAt('Tucked 1'))
+    const into = await childrenOf('Tucked')
+    const g6 = await geo(page)
+    check(
+      'packed: a link drags from one stack into another, and the board packs again',
+      into.join('|') === 'Tucked 0|Short 0|Tucked 1|Tucked 2' && (await childrenOf('Short')).join('|') === 'Short 1' && gapOk(g6.stacks[cols].top - g6.stacks[0].bottom, g6.gap),
+      into.join(' | '),
+    )
+
+    // "Tucked" (stack N, under Short) by its header onto "Tall 2" in the first row.
+    await drag(await headerAt('Tucked'), await headerAt('Tall 2'))
+    const want = titles.filter((t) => t !== 'Tucked')
+    want.splice(2, 0, 'Tucked')
+    const order = await kids(spaceId)
+    const g7 = await geo(page)
+    const packedRight = g7.stacks.every((s, i) =>
+      s.left === g7.stacks[i % cols].left && (i < cols ? Math.abs(s.top - g7.stacks[0].top) < 1 : gapOk(s.top - g7.stacks[i - cols].bottom, g7.gap)),
+    )
+    check(
+      'packed: a stack drags to a new place and the board packs around it',
+      order.join('|') === want.join('|') && g7.stacks.map((s) => s.title).join('|') === want.join('|') && packedRight && (await page.evaluate(() => !document.querySelector('[data-lifted]'))),
+      order.join(' | '),
+    )
+
+    // A stack dropped on another space's row in the sidebar moves there.
+    const row = await page.evaluate(() => {
+      const r = [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Pack drop')).getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    await drag(await headerAt('Low 1'), row)
+    const moved = await kids(dropSpaceId)
+    check('packed: a stack dropped on a sidebar space moves there', moved.join('|') === 'Low 1' && !(await kids(spaceId)).includes('Low 1'), moved.join(' | '))
+
+    // The drag preview packs the would-be order. On this board, shifting each stack into its
+    // neighbour's slot (dnd-kit's own preview) put the tall M3 over M8; now nothing overlaps
+    // mid-drag, and the drop puts every stack where the preview showed it.
+    const mixId = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧮 Pack mix' })
+      for (const [s, n] of [2, 9, 10, 11, 3, 2, 6, 2, 4, 7, 1].entries()) {
+        const st = await chrome.bookmarks.create({ parentId: space.id, title: `M${s}` })
+        for (let i = 0; i < n; i++) await chrome.bookmarks.create({ parentId: st.id, title: `M${s} link ${i}`, url: `https://example.com/m${s}/${i}` })
+      }
+      return space.id
+    })
+    await until(page, () => [...document.querySelectorAll('aside button')].some((b) => b.textContent.includes('Pack mix')))
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Pack mix')).click())
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Pack mix' && document.querySelectorAll('[data-stack-grid] > [id^="stack-"]').length === 11)
+    await sleep(400)
+    const boxes = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-stack-grid] > [id^="stack-"]')].map((el) => {
+          const r = el.getBoundingClientRect()
+          return { title: el.querySelector('h3').textContent, left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+        }),
+      )
+    // The add-stack button isn't a stack the preview can move, so it steps aside during the drag.
+    const addShown = () =>
+      page.evaluate(() => {
+        const b = [...document.querySelectorAll('[data-stack-grid] > button')].find((x) => x.textContent.includes('Add empty Stack'))
+        return !!b && getComputedStyle(b).visibility === 'visible'
+      })
+    const grab = await headerAt('M4')
+    const aim = await headerAt('M2')
+    await page.mouse.move(grab.x, grab.y)
+    await page.mouse.down()
+    for (let i = 1; i <= 15; i++) await page.mouse.move(grab.x + ((aim.x - grab.x) * i) / 15, grab.y + ((aim.y - grab.y) * i) / 15)
+    await sleep(500) // past the stacks' 250ms slide
+    const mid = await boxes()
+    const addMid = await addShown()
+    await page.screenshot({ path: path.join(SHOTS, '42-packed-mid-drag.png') })
+    await page.mouse.up()
+    await sleep(1000)
+    const end = await boxes()
+    const addEnd = await addShown()
+    const clashes = []
+    for (let i = 0; i < mid.length; i++) {
+      for (let j = i + 1; j < mid.length; j++) {
+        const w = Math.min(mid[i].right, mid[j].right) - Math.max(mid[i].left, mid[j].left)
+        const h = Math.min(mid[i].bottom, mid[j].bottom) - Math.max(mid[i].top, mid[j].top)
+        if (w > 3 && h > 3) clashes.push(`${mid[i].title}/${mid[j].title} by ${Math.round(h)}px`)
+      }
+    }
+    check('packed: mid-drag, no two stacks overlap and the add-stack button steps aside', mid.length === 11 && clashes.length === 0 && !addMid, clashes.join(', ') || `${mid.length} stacks, button shown: ${addMid}`)
+    const strays = mid.filter((m) => {
+      const e = end.find((x) => x.title === m.title)
+      return !e || Math.abs(e.left - m.left) > 2 || Math.abs(e.top - m.top) > 2
+    })
+    const mixOrder = await kids(mixId)
+    check(
+      'packed: each stack lands where the drag preview showed it',
+      mixOrder.join(' ') === 'M0 M1 M4 M2 M3 M5 M6 M7 M8 M9 M10' && strays.length === 0 && addEnd,
+      mixOrder.join(' ') + (strays.length ? `; not where shown: ${strays.map((s) => s.title).join(' ')}` : '') + (addEnd ? '' : '; add-stack button still hidden'),
+    )
+
+    await page.close()
+    await control.evaluate(async (ids, look) => {
+      for (const id of ids) await chrome.bookmarks.removeTree(id)
+      if (look) await chrome.storage.local.set({ appearance: look })
+      localStorage.removeItem('stackable:lastSpaceId')
+    }, [spaceId, dropSpaceId, mixId], savedLook)
+  }
+
+  // ---------- 0.8.0: Rows for boards from before 0.8.0 ----------
+  // Packed is the default for new installs only. An update from before 0.8.0 writes Rows into the
+  // saved settings unless a layout is saved (played here through the service worker's
+  // unpacked-only message, the same step the update runs), and a boot copy from before 0.8.0 has
+  // no layout, which reads as Rows, so the first frame already has it. The control page is a board
+  // too: it rewrites the boot copy when the saved settings change, so the copy is set last.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const MIRROR = 'stackable:appearance'
+    const was = await control.evaluate(async (k) => ({ mirror: localStorage.getItem(k), stored: (await chrome.storage.local.get('appearance')).appearance ?? null }), MIRROR)
+    const saved = () => control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance ?? null)
+    const store = async (value) => {
+      await control.evaluate((v) => (v === null ? chrome.storage.local.remove('appearance') : chrome.storage.local.set({ appearance: v })), value)
+      await sleep(400) // the control page adopts it and rewrites its boot copy
+    }
+    const mirror = (value) => control.evaluate((k, v) => (v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)), MIRROR, value)
+    const updatedFrom = (v) => askWorker(control, { type: 'e2e-updated-from', previousVersion: v })
+    // A new tab that notes the stack grid's layout from its first frame: ['rows'], ['packed'], or a jump.
+    const firstFrames = async () => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`ntp: ${e.message}`))
+      await p.evaluateOnNewDocument(() => {
+        window.__layouts = []
+        const note = () => {
+          const grid = document.querySelector('[data-stack-grid]')
+          if (!grid || !grid.querySelector(':scope > [id^="stack-"]')) return
+          const now = grid.hasAttribute('data-packed') ? 'packed' : 'rows'
+          if (window.__layouts[window.__layouts.length - 1] !== now) window.__layouts.push(now)
+        }
+        new MutationObserver(note).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-packed'] })
+      })
+      await p.goto(NTP)
+      await p.bringToFront()
+      await until(p, () => window.__layouts.length > 0)
+      await sleep(1500)
+      const seen = await p.evaluate(() => window.__layouts)
+      await p.close()
+      return seen
+    }
+    const oldSettings = (() => {
+      const { layout, ...rest } = was.stored ?? {}
+      void layout
+      return rest
+    })()
+    const oldMirror = (() => {
+      const m = JSON.parse(was.mirror ?? '{}')
+      if (m.settings) delete m.settings.layout
+      return JSON.stringify(m)
+    })()
+
+    // Saved settings and a boot copy from 0.7.0, then the update.
+    await store(oldSettings)
+    const reply = await updatedFrom('0.7.0')
+    await sleep(300)
+    await mirror(oldMirror)
+    const afterUpdate = await saved()
+    const updatedFrames = await firstFrames()
+    check(
+      'layout: an update from 0.7.0 keeps Rows, from the first frame, and writes it into the saved settings',
+      reply?.ok === true && afterUpdate?.layout === 'rows' && afterUpdate?.palette === oldSettings.palette && JSON.stringify(updatedFrames) === '["rows"]',
+      `${JSON.stringify(reply)} ${afterUpdate?.layout} ${JSON.stringify(updatedFrames)}`,
+    )
+
+    // An old board that never saved any settings: no boot copy, nothing saved, then the update.
+    await store(null)
+    await updatedFrom('0.7.0')
+    await sleep(400)
+    await mirror(null)
+    const bare = await saved()
+    const bareFrames = await firstFrames()
+    check('layout: an old board that never saved settings opens in Rows after the update, with no jump', bare?.layout === 'rows' && JSON.stringify(bareFrames) === '["rows"]', `${JSON.stringify(bare)} ${JSON.stringify(bareFrames)}`)
+
+    // A fresh install: nothing saved anywhere.
+    await store(null)
+    await mirror(null)
+    const freshFrames = await firstFrames()
+    check('layout: a fresh install opens Packed', JSON.stringify(freshFrames) === '["packed"]' && (await saved()) === null, JSON.stringify(freshFrames))
+
+    // A layout someone picked stays through the update; an update from 0.8.0 on writes nothing.
+    await store({ ...oldSettings, layout: 'packed' })
+    await updatedFrom('0.7.0')
+    await sleep(300)
+    const picked = await saved()
+    const pickedFrames = await firstFrames()
+    await store(oldSettings)
+    await updatedFrom('0.8.0')
+    await sleep(300)
+    const later = await saved()
+    check(
+      'layout: an update never overwrites a layout someone picked, and only a pre-0.8.0 version writes Rows',
+      picked?.layout === 'packed' && JSON.stringify(pickedFrames) === '["packed"]' && !!later && !('layout' in later),
+      `${picked?.layout} ${JSON.stringify(pickedFrames)} ${JSON.stringify(later)}`,
+    )
+
+    await store(was.stored)
+    await mirror(was.mirror)
+  }
+
+  // ---------- 0.8.0: what's new ----------
+  // An update from before 0.8.0 marks the computer (played through the worker's unpacked-only
+  // message with whatsNew: true), and the next new tab shows one corner note: free features first,
+  // a Pro line only for Pro, the trial or early users, and Try Packed with an Undo. A fresh install
+  // sees nothing, and the 0.7.0 Pro note keeps its turn: the two never share a tab.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const card = (page) =>
+      page.evaluate(() => {
+        const c = document.querySelector('[data-whats-new-080]')
+        return c ? { text: c.innerText, pro: !!c.querySelector('[data-whats-new-pro]'), proText: c.querySelector('[data-whats-new-pro]')?.innerText ?? '', tryPacked: !!c.querySelector('[data-try-packed]') } : null
+      })
+    const savedLayout = () => control.evaluate(async () => ((await chrome.storage.local.get('appearance')).appearance ?? {}).layout ?? null)
+    const was = await control.evaluate(async () => ({
+      appearance: (await chrome.storage.local.get('appearance')).appearance ?? null,
+      sync: await chrome.storage.sync.get(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey']),
+      w070: localStorage.getItem('stackable:whatsNew070'),
+      firstSeen: localStorage.getItem('stackable:firstSeen'),
+    }))
+    // A board on Rows, no Pro, the Pro note answered, no 0.8.0 mark yet. The rating tests leave an
+    // old first-seen date, which would make this board early (installed before Pro): start it today.
+    await control.evaluate(async () => {
+      localStorage.setItem('stackable:firstSeen', String(Date.now()))
+      localStorage.setItem('stackable:whatsNew070', '-1')
+      localStorage.removeItem('stackable:whatsNew080')
+      await chrome.storage.local.remove('whatsNew080')
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      const a = (await chrome.storage.local.get('appearance')).appearance ?? {}
+      await chrome.storage.local.set({ appearance: { ...a, layout: 'rows' } })
+    })
+    await sleep(400)
+    const fresh = await openNtp()
+    await sleep(1500)
+    check("what's new 0.8.0: no update, no note", !(await card(fresh)))
+    await fresh.close()
+
+    await askWorker(control, { type: 'e2e-updated-from', previousVersion: '0.7.0', whatsNew: true })
+    const p1 = await openNtp()
+    const c1 = (await until(p1, () => !!document.querySelector('[data-whats-new-080]'))) ? await card(p1) : null
+    check(
+      "what's new 0.8.0: an update from 0.7.0 shows the note, free features first, no Pro line without Pro",
+      !!c1 && c1.text.includes('folders inside stacks') && c1.text.includes('Settings > Appearance > Layout') && c1.text.includes('share a stack as a link') && c1.tryPacked && !c1.pro,
+      JSON.stringify(c1),
+    )
+    check("what's new 0.8.0: alone on its tab", await p1.evaluate(() => !document.querySelector('[data-whats-new]')))
+    await p1.evaluate(() => document.querySelector('[data-try-packed]').click())
+    await sleep(600)
+    const after = await savedLayout()
+    const answered = await p1.evaluate(() => !document.querySelector('[data-whats-new-080]') && localStorage.getItem('stackable:whatsNew080') === '-1')
+    check("what's new 0.8.0: Try Packed switches the layout and answers the note", after === 'packed' && answered, `${after} ${answered}`)
+    await p1.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo'))?.click())
+    await sleep(600)
+    check("what's new 0.8.0: Undo puts Rows back", (await savedLayout()) === 'rows')
+    await p1.close()
+
+    // An early board whose Pro note is still pending: the Pro note first and alone, the 0.8.0 note on a later tab.
+    await control.evaluate(async () => {
+      localStorage.setItem('stackable:whatsNew070', '0')
+      localStorage.removeItem('stackable:whatsNew080')
+      // An early user without a to-do list: since 0.8.0 the lists are part of Pro for them.
+      await chrome.storage.sync.set({ proEarly: { from: 'e2e', at: Date.now() }, proEarlyTodo: { keep: false, at: Date.now() } })
+    })
+    await sleep(400)
+    const p2 = await openNtp()
+    const first = await until(p2, () => !!document.querySelector('[data-whats-new]'))
+    check("what's new 0.8.0: the Pro note goes first, alone", first && (await p2.evaluate(() => !document.querySelector('[data-whats-new-080]'))))
+    const n2 = await p2.evaluate(() => document.querySelector('[data-whats-new]')?.innerText ?? '')
+    check("what's new 0.8.0: the Pro note counts to-do lists in Pro for an early user without one, and offers the trial", n2.includes('with to-do lists') && n2.includes('Try it free for 14 days') && !n2.includes('stay free'), n2.slice(0, 240))
+    await p2.evaluate(() => [...document.querySelectorAll('[data-whats-new] button')].find((b) => b.textContent.trim() === 'Got it')?.click())
+    await sleep(600)
+    check("what's new 0.8.0: answering the Pro note brings nothing else to that tab", await p2.evaluate(() => !document.querySelector('[data-whats-new]') && !document.querySelector('[data-whats-new-080]')))
+    await p2.close()
+    const p3 = await openNtp()
+    const c3 = (await until(p3, () => !!document.querySelector('[data-whats-new-080]'))) ? await card(p3) : null
+    check("what's new 0.8.0: a later tab shows it, with the Pro line for an early user", !!c3 && c3.pro, JSON.stringify(c3))
+    check("what's new 0.8.0: the Pro line says to-do lists moved into Pro and offers the 14-day trial", !!c3 && c3.proText.startsWith('To-do lists now come with Pro') && c3.proText.includes('Try it free for 14 days'), JSON.stringify(c3))
+    await p3.close()
+
+    // Put back what the blocks after this one expect.
+    await control.evaluate(async (w) => {
+      await chrome.storage.local.remove('whatsNew080')
+      localStorage.removeItem('stackable:whatsNew080')
+      if (w.appearance) await chrome.storage.local.set({ appearance: w.appearance })
+      else await chrome.storage.local.remove('appearance')
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      if (w.w070 === null) localStorage.removeItem('stackable:whatsNew070')
+      else localStorage.setItem('stackable:whatsNew070', w.w070)
+      if (w.firstSeen === null) localStorage.removeItem('stackable:firstSeen')
+      else localStorage.setItem('stackable:firstSeen', w.firstSeen)
+    }, was)
+    await sleep(400)
+  }
+
+  // ---------- 0.8.0: stack reorder past a loose link ----------
+  // Chrome counts every child of a folder, while the board shows stacks only: a loose link sitting
+  // straight in a space folder (easy to make in Chrome's bookmark manager) used to shift a dropped
+  // stack by one place. Drops now use Chrome's own index.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const mk = (parentId, title, url) => chrome.bookmarks.create({ parentId, title, url })
+      const space = await mk(root.id, '🧷 Loose test')
+      const ids = {}
+      for (const [name, loose] of [['Alpha', true], ['Bravo', false], ['Charlie', false]]) {
+        const st = await mk(space.id, name)
+        ids[name] = st.id
+        await mk(st.id, `${name} link`, `https://example.com/?loose=${name}`)
+        if (loose) await mk(space.id, 'Loose link', 'https://example.com/?loose=1')
+      }
+      return { space: space.id, ...ids }
+    })
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('Loose test'))?.click())
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Loose test' && document.querySelectorAll('main [aria-label="Drag stack header"]').length === 3)
+    const header = (id) =>
+      page.evaluate((sid) => {
+        const r = document.querySelector(`#stack-${sid} [aria-label="Drag stack header"]`).getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }, id)
+    const from = await header(made.Alpha)
+    const to = await header(made.Charlie)
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    for (let i = 1; i <= 16; i++) await page.mouse.move(from.x + ((to.x + 30 - from.x) * i) / 16, from.y + ((to.y - from.y) * i) / 16)
+    await sleep(300)
+    await page.mouse.up()
+    await sleep(900)
+    const order = await control.evaluate(async (sid) => (await chrome.bookmarks.getChildren(sid)).filter((c) => !c.url).map((c) => c.title), made.space)
+    check('reorder: a stack dropped on the last one lands after it, past a loose link', order.join('|') === 'Bravo|Charlie|Alpha', order.join('|'))
+    await page.close()
+    await control.evaluate((sid) => chrome.bookmarks.removeTree(sid), made.space)
+  }
+
+  // ---------- 0.8.0: to-do lists join Pro for early users ----------
+  // 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
+  // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const SPACE = 'Pro gate'
+    const was = await control.evaluate(async () => ({
+      sync: await chrome.storage.sync.get(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey']),
+      firstSeen: localStorage.getItem('stackable:firstSeen'),
+    }))
+    // An empty space to open New stack on. The rating tests leave an old first-seen date, which would
+    // make this board early by itself: start it today, so only proEarly decides.
+    const spaceId = await control.evaluate(async (name) => {
+      localStorage.setItem('stackable:firstSeen', String(Date.now()))
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      return (await chrome.bookmarks.create({ parentId: root.id, title: `\u{1F9EA} ${name}` })).id
+    }, SPACE)
+    const setPro = (s) => control.evaluate(async (s) => {
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      const now = Date.now()
+      const set = {}
+      if (s.early) set.proEarly = { from: 'e2e', at: now }
+      if (typeof s.keep === 'boolean') set.proEarlyTodo = { keep: s.keep, at: now }
+      if (s.trial) set.proTrial = { startedAt: now }
+      if (Object.keys(set).length) await chrome.storage.sync.set(set)
+    }, s)
+    // New stack > To-do list on the empty space: is the list behind Pro?
+    const gate = async () => {
+      const page = await openNtp()
+      await page.bringToFront()
+      await until(page, () => !!document.querySelector('main h1'))
+      await page.evaluate((n) => [...document.querySelectorAll('aside button, nav button, button')].find((b) => b.textContent.includes(n))?.click(), SPACE)
+      await until(page, (n) => document.querySelector('main h1')?.textContent === n, SPACE)
+      await sleep(400)
+      await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Add empty Stack').click())
+      await page.waitForSelector('[role=dialog] [data-option="todo"]', { timeout: 5000 })
+      await page.click('[role=dialog] [data-option="todo"]')
+      await sleep(300)
+      const out = await page.evaluate(() => {
+        const note = document.querySelector('[role=dialog] [data-todo-pro]')
+        return { locked: !!note, text: note ? note.innerText.replace(/\s+/g, ' ') : '' }
+      })
+      await page.close()
+      return out
+    }
+    const decision = () => control.evaluate(async () => (await chrome.storage.sync.get('proEarlyTodo')).proEarlyTodo ?? null)
+    const lists = await control.evaluate(async () => {
+      const keys = Object.keys(await chrome.storage.sync.get(null)).filter((k) => k.startsWith('todo:'))
+      const markers = (await chrome.bookmarks.search({ query: 'getstackboard.com/todo' })).filter((n) => (n.url || '').startsWith('https://getstackboard.com/todo#'))
+      return keys.length + markers.length
+    })
+
+    await setPro({})
+    const fresh = await gate()
+    check('to-do Pro: a new user needs Pro for a list, and the note offers the 14-day trial', fresh.locked && fresh.text.includes('Try it free for 14 days'), JSON.stringify(fresh))
+    check('to-do Pro: no early decision is stored for a new user', (await decision()) === null)
+
+    await setPro({ early: true })
+    const first = await gate()
+    let stored = null
+    for (let t = 0; t < 6000 && !stored; t += 200) {
+      stored = await decision()
+      if (!stored) await sleep(200)
+    }
+    check('to-do Pro: the first 0.8.0 board decides once for an early user, from the lists that exist', !!stored && stored.keep === lists > 0 && first.locked === !stored.keep, JSON.stringify({ stored, lists, first }))
+
+    await setPro({ early: true, keep: false })
+    const moved = await gate()
+    check('to-do Pro: an early user without a list needs Pro or the trial', moved.locked && moved.text.includes('Try it free for 14 days'), JSON.stringify(moved))
+    check('to-do Pro: a stored decision stands on later tabs', (await decision())?.keep === false)
+
+    await setPro({ early: true, keep: true })
+    check('to-do Pro: an early user who had a list keeps making them free', !(await gate()).locked)
+
+    await setPro({ early: true, keep: false, trial: true })
+    check('to-do Pro: the trial unlocks to-do lists for an early user too', !(await gate()).locked)
+
+    await control.evaluate(async (w) => {
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      if (w.firstSeen === null) localStorage.removeItem('stackable:firstSeen')
+      else localStorage.setItem('stackable:firstSeen', w.firstSeen)
+    }, was)
+    await control.evaluate((id) => chrome.bookmarks.removeTree(id), spaceId)
+    await sleep(300)
+  }
+
+  // ---------- 0.7.0: the what's-new note ----------
+  // People who had Stackboard before Pro see one corner note; answering it retires it. Since 0.8.0
+  // it names the 14-day trial while it can be started, and tells an early user who already had a
+  // to-do list that their lists stay free.
+  {
+    const before070 = await control.evaluate(() => chrome.storage.sync.get(['proTrial', 'proKey', 'proEarlyTodo']))
+    await control.evaluate(async () => {
+      localStorage.removeItem('stackable:whatsNew070')
+      await chrome.storage.sync.remove(['proTrial', 'proKey'])
+      await chrome.storage.sync.set({ proEarly: { from: 'e2e', at: Date.now() }, proEarlyTodo: { keep: true, at: Date.now() } })
+    })
+    const page = await openNtp()
+    const note = await page.waitForSelector('[data-whats-new]', { timeout: 6000 }).then(() => page.evaluate(() => document.querySelector('[data-whats-new]').innerText), () => '')
+    check("what's new: an early user sees the Pro note with the 14-day trial, and their to-do lists stay free", note.includes('Stackboard Pro') && note.includes('Try it free for 14 days') && note.includes('to-do lists stay free'), note.slice(0, 240))
+    await page.evaluate(() => [...document.querySelectorAll('[data-whats-new] button')].find((b) => b.textContent.trim() === 'Got it')?.click())
+    await page.close()
+    const again = await openNtp()
+    await sleep(800)
+    check("what's new: answering it retires the note", await again.evaluate(() => !document.querySelector('[data-whats-new]')))
+    await again.close()
+    await control.evaluate(async (w) => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proEarlyTodo'])
+      if (Object.keys(w).length) await chrome.storage.sync.set(w)
+    }, before070)
+  }
+
+  // ---------- 0.7.0: auto-archive (Pro) ----------
+  // The service worker saves idle web tabs into today's "Archived" stack, first in the Stash
+  // space, and closes them; the tab on screen, pinned tabs and browser pages stay. A 1 ms limit
+  // stands in for 12 hours. Last in the suite, since every idle web tab in every window goes.
+  {
+    // 0.8.0: tab switches are recorded only while auto-archive is on (tabSeen.ts).
+    const sessionRecord = () => control.evaluate(async () => (await chrome.storage.session.get('tabSeen')).tabSeen ?? null)
+    await control.evaluate(() => chrome.storage.sync.remove('proArchive'))
+    await sleep(400)
+    await control.evaluate(async () => {
+      const t = await chrome.tabs.create({ url: 'about:blank', active: true })
+      await chrome.tabs.update(t.id, { active: true })
+      await chrome.tabs.remove(t.id)
+    })
+    await sleep(400)
+    check('archive: with auto-archive off, tab switches leave no record', (await sessionRecord()) === null)
+    const onAt = Date.now()
+    await control.evaluate(() => chrome.storage.sync.set({ proArchive: { afterMs: 6 * 3600000 } }))
+    let rec = null
+    for (let t = 0; t < 20 && !rec; t++) {
+      await sleep(150)
+      rec = await sessionRecord()
+    }
+    check('archive: switching auto-archive on starts a fresh record', !!rec && rec.since >= onAt - 1000, JSON.stringify(rec && { since: rec.since - onAt }))
+    const arc = await control.evaluate(async () => {
+      const w = await chrome.windows.create({ url: ['https://example.com/?arc=1', 'https://example.org/?arc=2', 'https://example.net/?arc=3', 'about:blank'], focused: true })
+      const tabs = await chrome.tabs.query({ windowId: w.id })
+      for (const t of tabs) await chrome.tabs.update(t.id, { active: true })
+      await chrome.tabs.update(tabs[2].id, { pinned: true })
+      return { windowId: w.id }
+    })
+    await sleep(400)
+    // 3 Nov fix: the worker records when each tab was left (lastAccessed only moves on arrival).
+    const seen = await control.evaluate(async (windowId) => {
+      const s = (await chrome.storage.session.get('tabSeen')).tabSeen
+      const ids = (await chrome.tabs.query({ windowId })).filter((t) => !t.active).map((t) => t.id)
+      return { since: typeof s?.since === 'number', left: ids.filter((id) => typeof s?.left?.[id] === 'number').length, of: ids.length }
+    }, arc.windowId)
+    check('archive: the worker records when each tab was left', seen.since && seen.left === seen.of && seen.of >= 3, JSON.stringify(seen))
+    await control.evaluate(() => chrome.storage.local.remove('archiveRanAt'))
+    const first = await askWorker(control, { type: 'archive', afterMs: 1 })
+    const second = await askWorker(control, { type: 'archive', afterMs: 1 })
+    await sleep(300)
+    const after = await control.evaluate(async (windowId) => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const [sub] = await chrome.bookmarks.getSubTree(root.id)
+      const space = sub.children.find((c) => c.title === '📥 Stash')
+      const stack = space?.children.find((st) => st.title.startsWith('Archived '))
+      const left = (await chrome.tabs.query({ windowId })).map((t) => (t.pinned ? 'pinned' : t.pendingUrl || t.url))
+      return { links: stack ? stack.children.map((b) => b.url) : null, index: stack ? space.children.indexOf(stack) : -1, left }
+    }, arc.windowId)
+    check('archive: idle web tabs land in a dated stack, first in Stash', after.index === 0 && ['https://example.com/?arc=1', 'https://example.org/?arc=2'].every((u) => after.links?.includes(u)), JSON.stringify(after))
+    check('archive: the tab on screen and pinned tabs stay open', after.left.length === 2 && after.left.includes('pinned') && after.left.includes('about:blank'), JSON.stringify(after.left))
+    check('archive: a second ask inside 15 minutes does nothing', first?.archived >= 2 && second?.archived === 0, `${JSON.stringify(first)} ${JSON.stringify(second)}`)
+    await control.evaluate((w) => chrome.windows.remove(w), arc.windowId).catch(() => {})
+    await control.evaluate(() => chrome.storage.sync.remove('proArchive'))
+    let gone = false
+    for (let t = 0; t < 20 && !gone; t++) {
+      await sleep(150)
+      gone = (await sessionRecord()) === null
+    }
+    check('archive: switching auto-archive off drops the record', gone)
   }
 } catch (e) {
   console.log('ERROR', e.message)

@@ -2,6 +2,7 @@ import { ListChecks } from 'lucide-react'
 import type { Bookmark, Stack } from '../lib/types'
 import { parseBookmarkTitle } from '../lib/icon'
 import { displayTitle } from '../lib/title'
+import { allLinks } from '../lib/folderPlan'
 import { BookmarkIcon } from './BookmarkIcon'
 
 // What follows the pointer during a drag. `data-lifted` gives the tilt and shadow; the drop
@@ -22,7 +23,8 @@ export function BookmarkGhost({ bookmark }: { bookmark: Bookmark }) {
 }
 
 export function StackGhost({ stack }: { stack: Stack }) {
-  const preview = stack.bookmarks.slice(0, 4)
+  const links = allLinks(stack) // the folders inside it come along (0.8.0)
+  const preview = links.slice(0, 4)
   return (
     <div
       data-lifted
@@ -40,7 +42,7 @@ export function StackGhost({ stack }: { stack: Stack }) {
           )
         })}
       </span>
-      {!stack.todo && <span className="rounded bg-selected px-1.5 text-xs text-soft">{stack.bookmarks.length}</span>}
+      {!stack.todo && <span className="rounded bg-selected px-1.5 text-xs text-soft">{links.length}</span>}
     </div>
   )
 }

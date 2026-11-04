@@ -1,5 +1,6 @@
 import { IS_EXTENSION } from './bookmarks'
 import { prefs } from './prefs'
+import { allLinks } from './folderPlan'
 import type { StackableTree } from './types'
 
 // First-run and later-life nudges (0.4.0). Everything is counted on this device only.
@@ -49,8 +50,9 @@ export const RATING_LOAD_OPENS = 25
 export const RATING_MILESTONE_DAYS = 1
 export const RATING_MILESTONE_STASHES = 3
 
+/** Links on the board, the ones in folders inside stacks included (0.8.0). */
 export function linkCount(tree: StackableTree | null): number {
-  return tree ? tree.spaces.reduce((n, s) => n + s.stacks.reduce((m, st) => m + st.bookmarks.length, 0), 0) : 0
+  return tree ? tree.spaces.reduce((n, s) => n + s.stacks.reduce((m, st) => m + allLinks(st).length, 0), 0) : 0
 }
 
 /**

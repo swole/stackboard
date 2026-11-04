@@ -31,9 +31,21 @@ import { useOpenTabs } from './hooks/useOpenTabs'
 import { IS_EXTENSION, moveSpace, moveStack, moveBookmark } from './lib/bookmarks'
 import { takeOpenSpaceNote } from './lib/stash'
 import { sweepOrphans } from './lib/todos'
+import { usePro } from './lib/pro'
+import { hasPro } from './lib/proPlan'
+import { askToArchive, useArchive } from './lib/autoArchive'
+import { archivedNote } from './lib/archivePlan'
+import { maybeTakeDailySnapshot } from './lib/snapshots'
+import { WhatsNew } from './components/WhatsNew'
+import { ShareAddCard } from './components/ShareAddCard'
+import { readSearchHash } from './lib/goLinks'
+import { TodayView } from './components/TodayView'
+import { useAllTodos } from './lib/allTodos'
+import { AnnouncementBar } from './components/AnnouncementBar'
 import { plural } from './lib/importPlan'
 import { prefs } from './lib/prefs'
 import { RATING_MILESTONE_STASHES } from './lib/onboarding'
+import { holderOf, liveTodoIds, locate, moveIndex } from './lib/folderPlan'
 import type { Bookmark, Space, Stack } from './lib/types'
 
 type DragItem =
@@ -41,11 +53,14 @@ type DragItem =
   | { type: 'stack'; stack: Stack }
   | { type: 'bookmark'; bookmark: Bookmark }
 
-function parseId(id: string): { kind: 'sp' | 'st' | 'bm' | 'stack-drop'; rawId: string } | null {
+// sp: a sidebar space row, st: a stack, bm: a link, stack-drop: a stack's list, fd: the header of
+// a folder inside a stack (0.8.0).
+function parseId(id: string): { kind: 'sp' | 'st' | 'bm' | 'stack-drop' | 'fd'; rawId: string } | null {
   if (id.startsWith('sp:')) return { kind: 'sp', rawId: id.slice(3) }
   if (id.startsWith('st:')) return { kind: 'st', rawId: id.slice(3) }
   if (id.startsWith('bm:')) return { kind: 'bm', rawId: id.slice(3) }
   if (id.startsWith('stack-drop:')) return { kind: 'stack-drop', rawId: id.slice('stack-drop:'.length) }
+  if (id.startsWith('fd:')) return { kind: 'fd', rawId: id.slice(3) }
   return null
 }
 
@@ -78,6 +93,16 @@ const collisionDetectionStrategy: CollisionDetection = (args) => {
     if (onSidebar.length > 0) return onSidebar
     const stacks = args.droppableContainers.filter((c) => String(c.id).startsWith('st:'))
     return closestCenter({ ...args, droppableContainers: stacks })
+  }
+
+  // A link let go over a folder's header goes into that folder, last, so a folded folder still
+  // takes links (0.8.0). The pointer decides, as for the sidebar. The folder it already sits in
+  // is left out: a reorder to the top of a folder would overshoot onto its header.
+  if (activeId.startsWith('bm:')) {
+    const own = (args.active.data.current as { bookmark?: Bookmark } | undefined)?.bookmark?.parentStackId
+    const headers = args.droppableContainers.filter((c) => String(c.id).startsWith('fd:') && String(c.id) !== `fd:${own}`)
+    const into = pointerWithin({ ...args, droppableContainers: headers })
+    if (into.length > 0) return into
   }
 
   const allowed = activeId.startsWith('sp:')
@@ -116,6 +141,7 @@ export default function App() {
   const selectedId = useStackableStore((s) => s.selectedSpaceId)
   const search = useStackableStore((s) => s.search)
   const onboarding = useStackableStore((s) => s.onboarding)
+  const companyChosen = useStackableStore((s) => s.companyChosen)
   const flashItem = useStackableStore((s) => s.flashItem)
 
   const activeSpace = useMemo(
@@ -132,6 +158,14 @@ export default function App() {
   useEffect(() => {
     if (loaded) performance.mark('sb:board')
   }, [loaded])
+  // Go links (Teams T6): "go <words>" with no match opens a new tab that searches the board for them.
+  useEffect(() => {
+    if (!loaded) return
+    const q = readSearchHash(location.hash)
+    if (!q) return
+    useStackableStore.getState().setSearch(q)
+    history.replaceState(null, '', location.pathname + location.search)
+  }, [loaded])
   useEffect(() => {
     if (!loaded || !IS_EXTENSION) return
     void takeOpenSpaceNote().then((note) => {
@@ -146,6 +180,51 @@ export default function App() {
     })
   }, [loaded])
 
+  // A board made before Pro (0.7.0) marks an early user, for people the update marker missed.
+  useEffect(() => {
+    if (loaded) usePro.getState().seeBoard(useStackableStore.getState().tree?.rootDateAdded)
+  }, [loaded])
+
+  // 0.8.0: to-do lists joined Pro for early users too; one who already had a list keeps making
+  // them free. Decided once per Chrome profile, on the first board 0.8.0 loads.
+  const proReady = usePro((s) => s.ready)
+  const early = usePro((s) => s.early)
+  useEffect(() => {
+    if (!loaded || !proReady || !early) return
+    void usePro.getState().decideTodo((useStackableStore.getState().tree?.todoIds?.length ?? 0) > 0)
+  }, [loaded, proReady, early])
+
+  // Pro (0.7.0): a few seconds after the board loads, archive idle tabs (when switched on) and
+  // take today's snapshot. Both wait for the license state, and neither runs without Pro.
+  const proOn = usePro((s) => s.ready && hasPro(s.state))
+  const archiveAfter = useArchive((s) => s.afterMs)
+  useEffect(() => {
+    if (!loaded || !IS_EXTENSION || !proOn || !archiveAfter) return
+    const timer = setTimeout(() => {
+      void askToArchive(archiveAfter).then(async (n) => {
+        if (!n) return
+        const store = useStackableStore.getState()
+        await store.refresh()
+        store.showToast({ verb: 'Archived', title: archivedNote(n), detail: 'Saved in your Stash space', duration: 4000 })
+      })
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [loaded, proOn, archiveAfter])
+  useEffect(() => {
+    if (!loaded || !IS_EXTENSION || !proOn) return
+    const timer = setTimeout(() => {
+      void maybeTakeDailySnapshot().catch((err) => console.warn('Stackboard: snapshot failed', err))
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [loaded, proOn])
+
+  // Today (Pro, 0.7.1) follows every to-do list on the board while Pro or the trial is on.
+  const todayView = useStackableStore((s) => s.todayView)
+  useEffect(() => {
+    const ids = proOn && tree ? tree.spaces.flatMap((sp) => sp.stacks.flatMap((st) => (st.todo ? [st.todo.id] : []))) : []
+    useAllTodos.getState().track(ids)
+  }, [tree, proOn])
+
   // Lists whose to-do stack is gone get marked, then dropped a week later (todos.ts). Once per
   // new tab, a few seconds in, so it reads the tree after any sync burst has landed.
   useEffect(() => {
@@ -153,8 +232,8 @@ export default function App() {
     const timer = setTimeout(() => {
       const t = useStackableStore.getState().tree
       if (!t) return
-      const live = t.spaces.flatMap((sp) => sp.stacks.flatMap((st) => (st.todo ? [st.todo.id] : [])))
-      void sweepOrphans(live).catch((err) => console.warn('Stackboard: to-do sweep failed', err))
+      // A marker at any depth keeps its list, one moved inside another stack included (0.8.0).
+      void sweepOrphans(liveTodoIds(t)).catch((err) => console.warn('Stackboard: to-do sweep failed', err))
     }, 5000)
     return () => clearTimeout(timer)
   }, [loaded])
@@ -177,16 +256,27 @@ export default function App() {
     const o = parseId(String(over.id))
     if (!a || !o) return
 
+    // Teams (0.8.0): company spaces, stacks, folders and links never move, and nothing moves into
+    // them. Their sortables are disabled; this guards anything that slips through.
+    const companySpace = (id: string) => tree.spaces.some((s) => s.company && s.id === id)
+    const locked = (id: string) => !!locate(tree, id)?.container.readOnly
+    if (a.kind === 'sp' && companySpace(a.rawId)) return
+    if (o.kind === 'sp' && companySpace(o.rawId)) return
+    if (a.kind === 'st' && locked(a.rawId)) return
+    if ((o.kind === 'st' || o.kind === 'stack-drop' || o.kind === 'fd') && locked(o.rawId)) return
+    if (a.kind === 'bm' && holderOf(tree, a.rawId)?.container.readOnly) return
+    if (o.kind === 'bm' && holderOf(tree, o.rawId)?.container.readOnly) return
+
     // --- Space reorder ---
     if (a.kind === 'sp' && o.kind === 'sp' && a.rawId !== o.rawId) {
-      const spaces = tree.spaces
+      // Indexes count the person's own spaces only: those are the children of the root folder.
+      const spaces = tree.spaces.filter((s) => !s.company)
       const fromIdx = spaces.findIndex((s) => s.id === a.rawId)
       const toIdx = spaces.findIndex((s) => s.id === o.rawId)
       if (fromIdx < 0 || toIdx < 0) return
-      // Index convention for chrome.bookmarks.move on same-parent reorder: pass the
-      // target index as if the dragged item were still in the array (toIdx for a
-      // leftward move, toIdx+1 for rightward); Chrome applies the self-removal shift.
-      const chromeIdx = toIdx > fromIdx ? toIdx + 1 : toIdx
+      // Chrome counts every child of the folder, loose links included, so use the real indexes
+      // (moveIndex adds the one-place shift Chrome applies when moving down in the same folder).
+      const chromeIdx = moveIndex(spaces[fromIdx], fromIdx, spaces[toIdx], toIdx, true)
       await moveSpace(a.rawId, chromeIdx)
       flashItem(a.rawId)
       return
@@ -200,7 +290,7 @@ export default function App() {
       const fromIdx = space.stacks.findIndex((s) => s.id === a.rawId)
       const toIdx = space.stacks.findIndex((s) => s.id === o.rawId)
       if (fromIdx < 0 || toIdx < 0) return
-      const chromeIdx = toIdx > fromIdx ? toIdx + 1 : toIdx
+      const chromeIdx = moveIndex(space.stacks[fromIdx], fromIdx, space.stacks[toIdx], toIdx, true)
       await moveStack(a.rawId, space.id, chromeIdx)
       flashItem(a.rawId)
       return
@@ -213,47 +303,48 @@ export default function App() {
       if (!fromSpace || !toSpace || fromSpace.id === toSpace.id) return
       // Append to the end of the destination space's stack row — the row isn't
       // visible during the drop, so end-of-row is the only predictable target.
-      await moveStack(a.rawId, toSpace.id, toSpace.stacks.length)
+      await moveStack(a.rawId, toSpace.id)
       flashItem(toSpace.id) // the destination row in the sidebar glows
       return
     }
 
-    // --- Bookmark dropped on a bookmark (reorder, possibly across stacks) ---
+    // --- Bookmark dropped on a bookmark (reorder, possibly across stacks and folders) ---
     if (a.kind === 'bm' && o.kind === 'bm') {
       if (a.rawId === o.rawId) return
-      const fromStack = findStackOf(tree, a.rawId, 'bookmark')
-      const toStack = findStackOf(tree, o.rawId, 'bookmark')
-      if (!fromStack || !toStack) return
-      const fromIdx = fromStack.bookmarks.findIndex((b) => b.id === a.rawId)
-      const toIdx = toStack.bookmarks.findIndex((b) => b.id === o.rawId)
+      const from = holderOf(tree, a.rawId)?.container
+      const to = holderOf(tree, o.rawId)?.container
+      if (!from || !to) return
+      const fromIdx = from.bookmarks.findIndex((b) => b.id === a.rawId)
+      const toIdx = to.bookmarks.findIndex((b) => b.id === o.rawId)
       if (fromIdx < 0 || toIdx < 0) return
-      const sameStack = fromStack.id === toStack.id
-      const chromeIdx = sameStack && toIdx > fromIdx ? toIdx + 1 : toIdx
-      await moveBookmark(a.rawId, toStack.id, chromeIdx)
+      // Chrome's index counts the folders in a stack too, so it comes from the links themselves.
+      const chromeIdx = moveIndex(from.bookmarks[fromIdx], fromIdx, to.bookmarks[toIdx], toIdx, from.id === to.id)
+      await moveBookmark(a.rawId, to.id, chromeIdx)
       flashItem(a.rawId)
       return
     }
 
-    // --- Bookmark dropped onto an EMPTY stack's container ---
-    // Only reachable when the target stack has no bookmarks: a non-empty stack
-    // always has an inner `bm:` card whose center wins closestCenter, so those
-    // drops are handled by the bm→bm branch above. This branch appends to empties.
-    if (a.kind === 'bm' && o.kind === 'stack-drop') {
-      const targetStack = tree.spaces.flatMap((s) => s.stacks).find((s) => s.id === o.rawId)
-      if (!targetStack) return
-      const fromStack = findStackOf(tree, a.rawId, 'bookmark')
-      if (!fromStack) return
-      // Append at the end (index = current length; same-stack append needs +0 since item is removed first)
-      const chromeIdx = targetStack.bookmarks.length
-      await moveBookmark(a.rawId, targetStack.id, chromeIdx)
+    // --- Bookmark dropped onto a stack's container, or onto a folder's header (0.8.0) ---
+    // The container is only reachable when the target stack has no bookmarks near the
+    // pointer: a non-empty stack has inner `bm:` cards whose centers win closestCenter, so
+    // those drops are handled by the bm→bm branch above. Both append at the end: Chrome puts
+    // the link after everything in the folder, so it shows last among the links.
+    if (a.kind === 'bm' && (o.kind === 'stack-drop' || o.kind === 'fd')) {
+      const target = locate(tree, o.rawId)
+      if (!target || !holderOf(tree, a.rawId)) return
+      await moveBookmark(a.rawId, target.container.id)
+      // Into a folder: open it (and the folders around it) so the link is seen landing.
+      if (o.kind === 'fd') useStackableStore.getState().unfoldFolders(target.path.map((f) => f.id))
       flashItem(a.rawId)
       return
     }
   }
 
   const searching = search.trim().length > 0
-  // An empty board gets the welcome screen, which stays up while it fills the board.
-  const welcoming = !!tree && !searching && (tree.spaces.length === 0 || onboarding)
+  // An empty board gets the welcome screen, which stays up while it fills the board. Only the
+  // person's own spaces count: company spaces show once they pick one (or the start-here space opens).
+  const ownSpaces = tree ? tree.spaces.filter((s) => !s.company).length : 0
+  const welcoming = !!tree && !searching && (onboarding || (ownSpaces === 0 && !companyChosen))
 
   return (
     <DndContext
@@ -265,25 +356,31 @@ export default function App() {
       <div className="flex h-screen text-fg">
         <Backdrop />
         <Sidebar />
-        <main className="flex-1 overflow-hidden">
-          {loading && !tree && (
-            <div className="flex h-full items-center justify-center text-sm text-muted">
-              Loading…
-            </div>
-          )}
-          {error && (
-            <div className="flex h-full items-center justify-center text-sm text-danger">
-              {error}
-            </div>
-          )}
-          {welcoming && <Welcome />}
-          {tree && searching && <SearchResults query={search} />}
-          {activeSpace && !searching && !welcoming && <SpaceView space={activeSpace} />}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <AnnouncementBar />
+          <div className="min-h-0 flex-1">
+            {loading && !tree && (
+              <div className="flex h-full items-center justify-center text-sm text-muted">
+                Loading…
+              </div>
+            )}
+            {error && (
+              <div className="flex h-full items-center justify-center text-sm text-danger">
+                {error}
+              </div>
+            )}
+            {welcoming && <Welcome />}
+            {tree && searching && <SearchResults query={search} />}
+            {proOn && todayView && !searching && !welcoming && <TodayView />}
+            {activeSpace && !searching && !welcoming && !(proOn && todayView) && <SpaceView space={activeSpace} />}
+          </div>
         </main>
         <ModalHost />
         <UndoToast />
         <KeepItHint />
         <RatingPrompt />
+        <WhatsNew />
+        <ShareAddCard />
         {certificate && (
           <Certificate
             bankruptcy={certificate}
@@ -308,18 +405,4 @@ export default function App() {
       </div>
     </DndContext>
   )
-}
-
-function findStackOf(
-  tree: { spaces: Space[] },
-  rawId: string,
-  kind: 'bookmark' | 'stack',
-): Stack | null {
-  for (const space of tree.spaces) {
-    for (const stack of space.stacks) {
-      if (kind === 'stack' && stack.id === rawId) return stack
-      if (kind === 'bookmark' && stack.bookmarks.some((b) => b.id === rawId)) return stack
-    }
-  }
-  return null
 }

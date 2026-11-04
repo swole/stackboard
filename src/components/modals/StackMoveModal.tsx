@@ -16,14 +16,14 @@ export function StackMoveModal({ stackId, title, currentSpaceId }: Props) {
   const tree = useStackableStore((s) => s.tree)
   const [movingTo, setMovingTo] = useState<string | null>(null)
 
-  const targets = (tree?.spaces ?? []).filter((s) => s.id !== currentSpaceId)
+  // Company spaces (Teams, 0.8.0) are read-only, so nothing moves into them.
+  const targets = (tree?.spaces ?? []).filter((s) => s.id !== currentSpaceId && !s.company)
 
   const onMove = async (spaceId: string) => {
     setMovingTo(spaceId)
     try {
-      const target = tree?.spaces.find((s) => s.id === spaceId)
-      // Append to the end of the destination space's stack row.
-      await moveStack(stackId, spaceId, target?.stacks.length ?? 0)
+      // Last in the destination space (no index: loose links in its folder can't shift it).
+      await moveStack(stackId, spaceId)
       await refresh()
       close()
     } catch (err) {

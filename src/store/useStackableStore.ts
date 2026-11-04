@@ -10,6 +10,9 @@ import {
 } from '../lib/bookmarks'
 import type { OpenTabIndex } from '../lib/openTabs'
 import { prefs } from '../lib/prefs'
+import { readCompany, withCompany } from '../lib/company'
+import { setFolderOpen } from '../lib/folderPlan'
+import { appearanceSettled, setPolicyAccent } from './useAppearance'
 
 type ModalState =
   | { kind: 'none' }
@@ -17,6 +20,9 @@ type ModalState =
   | { kind: 'space-edit'; id: string; name: string; emoji: string; focusField?: 'emoji' | 'name' }
   | { kind: 'stack-add'; spaceId: string }
   | { kind: 'stack-edit'; id: string; title: string }
+  /** A folder inside a stack, or inside another folder (0.8.0). */
+  | { kind: 'folder-add'; parentId: string }
+  | { kind: 'folder-edit'; id: string; title: string }
   | { kind: 'stack-move'; id: string; title: string; currentSpaceId: string }
   | { kind: 'bookmark-add'; stackId: string }
   | { kind: 'bookmark-edit'; id: string; title: string; url: string; stackId: string }
@@ -24,6 +30,7 @@ type ModalState =
   | { kind: 'settings' }
   | { kind: 'import' }
   | { kind: 'packs' }
+  | { kind: 'cleanup' }
 
 export interface ToastState {
   id: number
@@ -41,24 +48,33 @@ export interface Cue {
   seq: number
 }
 
-type DeletableKind = 'space' | 'stack' | 'bookmark'
+type DeletableKind = 'space' | 'stack' | 'folder' | 'bookmark'
 
 interface StackableState {
   tree: StackableTree | null
   loading: boolean
   error: string | null
   selectedSpaceId: string | null
+  /** The Today list (Pro, 0.7.1) is on screen in place of the selected space. */
+  todayView: boolean
   search: string
   modal: ModalState
   sidebarCollapsed: boolean
+  /** Folders inside stacks that are open on this device (0.8.0); every other folder shows folded. */
+  openFolders: ReadonlySet<string>
   toast: ToastState | null
-  /** Glow an item (bookmark, stack or space row) where it sits. */
+  /** Glow an item (bookmark, folder, stack or space row) where it sits. */
   flash: Cue | null
   /** Scroll a stack into view, then glow it. */
   reveal: Cue | null
   openTabs: OpenTabIndex | null
   /** True while the welcome screen is filling an empty board, so it stays up until done. */
   onboarding: boolean
+  /**
+   * Someone with no spaces of their own picked a company space (or the company's start-here space
+   * opened): show it in place of the welcome screen. Company spaces alone never skip the welcome.
+   */
+  companyChosen: boolean
   /** Bumped when something goes well (import, starter pack, stash): a good moment to ask for a rating (0.4.1). */
   wins: number
   /** Bumped at a rating milestone: the first saved certificate or the third stash (0.5.3). */
@@ -66,15 +82,21 @@ interface StackableState {
 
   refresh: () => Promise<void>
   selectSpace: (id: string | null) => void
+  /** Shows the Today list; picking a space (or a jump to a stack) leaves it. */
+  showToday: () => void
   setSearch: (q: string) => void
   openModal: (m: ModalState) => void
   closeModal: () => void
   toggleSidebar: () => void
+  toggleFolder: (id: string) => void
+  /** Opens these folders (a link landing in one, a search hit inside one). */
+  unfoldFolders: (ids: string[]) => void
   showToast: (t: Omit<ToastState, 'id'>) => void
   /** "Couldn't <what> (<error>)": a failed write must never look like nothing happened. */
   reportError: (what: string, err: unknown) => void
   dismissToast: (id: number) => void
   flashItem: (id: string) => void
+  /** Shows the space, then scrolls the stack (or a folder inside one, once it's open) into view and glows it. */
   revealStack: (spaceId: string, stackId: string) => void
   setOpenTabs: (index: OpenTabIndex) => void
   setOnboarding: (on: boolean) => void
@@ -94,30 +116,42 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   loading: true,
   error: null,
   selectedSpaceId: null,
+  todayView: false,
   search: '',
   modal: { kind: 'none' },
   sidebarCollapsed: prefs.sidebarCollapsed(),
+  openFolders: new Set(prefs.openFolders()),
   toast: null,
   flash: null,
   reveal: null,
   openTabs: null,
   onboarding: false,
+  companyChosen: false,
   wins: 0,
   milestones: 0,
 
   refresh: async () => {
     try {
       set({ loading: true, error: null })
-      const tree = await readTree()
+      // Teams (0.8.0): the company's read-only spaces from Chrome policy go first. The board also
+      // waits for the saved settings when there was no boot copy, so it shows in its own layout.
+      const [own, company] = await Promise.all([readTree(), readCompany().catch(() => null), appearanceSettled])
+      const tree = withCompany(own, company)
+      // Teams T8: the company's accent shows for everyone while the policy sets it.
+      setPolicyAccent(company?.config.brand?.accent ?? null)
       const has = (id: string | null) => !!id && tree.spaces.some((s) => s.id === id)
       const current = get().selectedSpaceId
       const remembered = prefs.lastSpaceId()
-      const next = has(current)
-        ? current
-        : has(remembered)
-          ? remembered
-          : (tree.spaces[0]?.id ?? null)
-      set({ tree, selectedSpaceId: next, loading: false })
+      // Teams T7: the first time this device shows company spaces, it opens on the onboarding space.
+      const startHere = !!company?.startHereId && has(company.startHereId)
+      const next = startHere
+        ? company!.startHereId
+        : has(current)
+          ? current
+          : has(remembered)
+            ? remembered
+            : (tree.spaces[0]?.id ?? null)
+      set({ tree, selectedSpaceId: next, loading: false, ...(startHere ? { companyChosen: true } : {}) })
     } catch (err) {
       console.error('Failed to load Stackboard tree', err)
       set({ error: err instanceof Error ? err.message : 'Unknown error', loading: false })
@@ -126,8 +160,10 @@ export const useStackableStore = create<StackableState>((set, get) => ({
 
   selectSpace: (id) => {
     prefs.setLastSpaceId(id)
-    set({ selectedSpaceId: id })
+    const company = !!id && !!get().tree?.spaces.find((s) => s.id === id)?.company
+    set({ selectedSpaceId: id, todayView: false, ...(company ? { companyChosen: true } : {}) })
   },
+  showToday: () => set({ todayView: true, search: '' }),
   setSearch: (q) => set({ search: q }),
   openModal: (m) => set({ modal: m }),
   closeModal: () => set({ modal: { kind: 'none' } }),
@@ -135,6 +171,19 @@ export const useStackableStore = create<StackableState>((set, get) => ({
     set((s) => {
       prefs.setSidebarCollapsed(!s.sidebarCollapsed)
       return { sidebarCollapsed: !s.sidebarCollapsed }
+    }),
+  toggleFolder: (id) =>
+    set((s) => {
+      const list = setFolderOpen([...s.openFolders], id, !s.openFolders.has(id))
+      prefs.setOpenFolders(list)
+      return { openFolders: new Set(list) }
+    }),
+  unfoldFolders: (ids) =>
+    set((s) => {
+      if (ids.every((id) => s.openFolders.has(id))) return {}
+      const list = ids.reduce((l, id) => setFolderOpen(l, id, true), [...s.openFolders])
+      prefs.setOpenFolders(list)
+      return { openFolders: new Set(list) }
     }),
 
   showToast: (t) => set({ toast: { ...t, id: ++cueSeq } }),
@@ -157,7 +206,7 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   revealStack: (spaceId, stackId) => {
     prefs.setLastSpaceId(spaceId)
     const cue = { id: stackId, seq: ++cueSeq }
-    set({ selectedSpaceId: spaceId, search: '', reveal: cue })
+    set({ selectedSpaceId: spaceId, todayView: false, search: '', reveal: cue })
     setTimeout(() => set((s) => (s.reveal === cue ? { reveal: null } : {})), CUE_MS)
   },
 
@@ -167,9 +216,9 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   removeWithUndo: async (kind, id, title, detail) => {
     let snapshot: Awaited<ReturnType<typeof snapshotNode>>
     try {
-      snapshot = await snapshotNode(id)
+      snapshot = await snapshotNode(id) // the whole subtree: a stack's folders and their links come back too
       if (kind === 'space') await deleteSpace(id)
-      else if (kind === 'stack') await deleteStack(id)
+      else if (kind === 'stack' || kind === 'folder') await deleteStack(id)
       else await deleteBookmark(id)
     } catch (err) {
       get().reportError(`delete ${title}`, err)
@@ -179,12 +228,16 @@ export const useStackableStore = create<StackableState>((set, get) => ({
 
     const restore = async () => {
       try {
-        const newId = snapshot ? await restoreSnapshot(snapshot) : null
+        const ids = new Map<string, string>()
+        const newId = snapshot ? await restoreSnapshot(snapshot, ids) : null
         await get().refresh()
-        // Show what came back: select a space, scroll to a stack, glow a bookmark.
+        // Folders that were open come back open under their new ids (0.8.0), the ones inside too.
+        const open = get().openFolders
+        get().unfoldFolders([...ids].filter(([was]) => open.has(was)).map(([, now]) => now))
+        // Show what came back: select a space, scroll to a stack, glow a folder or a bookmark.
         if (newId && kind === 'space') get().selectSpace(newId)
         if (newId && kind === 'stack' && snapshot) get().revealStack(snapshot.parentId, newId)
-        if (newId && kind === 'bookmark') get().flashItem(newId)
+        if (newId && (kind === 'bookmark' || kind === 'folder')) get().flashItem(newId)
         get().showToast({ verb: 'Restored', title, detail, duration: NOTE_MS })
       } catch (err) {
         console.error('Undo failed', err)
