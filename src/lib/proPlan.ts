@@ -1,7 +1,7 @@
 // Stackboard Pro (0.7.0): who gets what. Pure: no chrome.*, no DOM, so tests/unit.test.ts covers
 // every rule. Storage and the calls to Polar live in lib/pro.ts.
 //
-// The rules (Pro launch rules, 31 Oct and 1 Nov 2026):
+// The rules (the Pro launch rules, 31 Oct and 1 Nov 2026):
 // - Nothing free moves behind Pro for anyone who already uses it. To-do lists are Pro for installs
 //   from 0.7.0 on, and since 0.8.0 (3 Nov) for earlier installs ("early users") too, except
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
@@ -76,8 +76,12 @@ export function trialDaysLeft(startedAt: number | null, now: number): number {
   return left > 0 ? Math.ceil(left / DAY) : 0
 }
 
-/** A good key wins, then a running trial, then a key that needs attention, then free. */
-export function proState(p: { license: License | null; trialStartedAt: number | null; now: number }): ProState {
+/**
+ * A good key wins, then a running trial, then a key that needs attention, then free. School mode
+ * (`lockPro`, the company's pro lock): a trial doesn't count on this computer, so only a paid key
+ * turns Pro on.
+ */
+export function proState(p: { license: License | null; trialStartedAt: number | null; now: number; lockPro?: boolean }): ProState {
   const { license, now } = p
   let paused: PauseReason | null = null
   if (license) {
@@ -90,7 +94,7 @@ export function proState(p: { license: License | null; trialStartedAt: number | 
     else if (s === 'disabled' || s === 'unknown-key' || s === 'device-limit' || s === 'removed') paused = s
     else paused = 'checking'
   }
-  const daysLeft = trialDaysLeft(p.trialStartedAt, now)
+  const daysLeft = p.lockPro ? 0 : trialDaysLeft(p.trialStartedAt, now)
   if (daysLeft > 0) return { kind: 'trial', daysLeft }
   if (paused) return { kind: 'paused', reason: paused }
   return { kind: 'free', trialUsed: !!p.trialStartedAt }
@@ -103,6 +107,14 @@ export function hasPro(s: ProState): boolean {
 /** New to-do lists: Pro or the trial, or an early user who kept them free (`keepsTodo`, 0.8.0). */
 export function canMakeTodo(s: ProState, keepsTodo: boolean): boolean {
   return keepsTodo || hasPro(s)
+}
+
+/**
+ * Whether the New stack dialog offers To-do list. School mode (`lockPro`): only to someone who can
+ * make one, so there is never a Pro note to show. Otherwise always, with the note when it needs Pro.
+ */
+export function offersTodo(p: { lockPro: boolean; canMake: boolean }): boolean {
+  return !p.lockPro || p.canMake
 }
 
 /** sync `proEarlyTodo` = { keep, at }: whether an early user keeps making to-do lists free (0.8.0); null until decided. */

@@ -3,6 +3,7 @@ import { ensureRoot } from './bookmarks'
 import { bankruptcyStackTitle, planStash, stashLabel, type Bankruptcy, type StashPlan } from './stashPlan'
 import { ARCHIVE_EVERY_MS, archiveStackTitle, isIdle, planArchive, type ArchiveTab } from './archivePlan'
 import { tabSeen } from './tabSeen'
+import { bumpStat } from './proStats'
 
 // "Stash this window" (0.4.0): save every tab into stacks in a "📥 Stash" space, newest first,
 // then optionally close them. Runs from the popup and from the keyboard shortcut (background.ts).
@@ -146,6 +147,8 @@ export async function archiveIdleTabs(afterMs: number, now = Date.now()): Promis
     const still = await Promise.all(plan.tabIds.map((id) => chrome.tabs.get(id).catch(() => null)))
     const close = still.filter((t): t is chrome.tabs.Tab => !!t && !t.incognito && isIdle(t as ArchiveTab, afterMs, now2, seen2)).map((t) => t.id!)
     if (close.length) await chrome.tabs.remove(close)
+    // 0.9.0: counted for the trial-end recap (this computer only).
+    if (close.length) await bumpStat('archived', close.length)
     return { archived: close.length, spaceId }
   } finally {
     archiving = false

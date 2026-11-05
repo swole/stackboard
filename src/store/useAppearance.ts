@@ -5,13 +5,13 @@ import {
   mergeAppearance,
   policyAccentFromMirror,
   parseSavedAppearance,
-  resolveScheme,
+  schemeNow,
   settingsFromMirror,
   type Appearance,
   type AppearancePatch,
   type Scheme,
 } from '../lib/appearance'
-import { ACCENT_VAR_NAMES, lookMirror, mergeLooks, parseLooks, type LookMirror, type Looks } from '../lib/looks'
+import { ACCENT_VAR_NAMES, DEFAULT_LOOKS, effectiveLooks, lookMirror, mergeLooks, parseLooks, type LookMirror, type Looks } from '../lib/looks'
 import { hasPro } from '../lib/proPlan'
 
 // Appearance (0.5.0). The settings live in chrome.storage.local["appearance"]; a copy in
@@ -20,6 +20,9 @@ import { hasPro } from '../lib/proPlan'
 // CSS variables (styles/palettes.css), so a switch costs one style recalc.
 // Pro looks (0.7.0) live in chrome.storage.local["looks"] and show only while Pro or the trial is
 // on (usePro). The last known answer rides in the localStorage copy, so the first frame matches.
+// 0.9.0: without Pro the Pro looks controls are a try-on: the board shows the picks (`trying`)
+// until Settings closes, and nothing is saved; starting the trial meanwhile keeps them. Time of
+// day (a Pro look) picks light or dark by the clock, checked each minute while the page shows.
 
 const STORAGE_KEY = 'appearance'
 const LOOKS_KEY = 'looks'
@@ -30,6 +33,15 @@ const HAS_STORAGE = typeof chrome !== 'undefined' && !!chrome.storage?.local
 const darkQuery: MediaQueryList | null =
   typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null
 const prefersDark = () => darkQuery?.matches ?? false
+
+/** The Pro looks on screen: a try-on, else the saved looks while Pro is on, else the stock look. */
+function shownLooks(s: { trying: Looks | null; looks: Looks; proOn: boolean }): Looks {
+  return s.trying ?? effectiveLooks(s.looks, s.proOn)
+}
+
+function schemeOf(a: Appearance, shown: Looks): Scheme {
+  return schemeNow(a.mode, a.palette, prefersDark(), !!shown.timeOfDay, new Date().getHours())
+}
 
 function readMirror(): string | null {
   try {
@@ -53,7 +65,7 @@ function applyToDocument(a: Appearance, scheme: Scheme, look: LookMirror): void 
   const root = document.documentElement
   const next: Record<string, string | null> = {
     'data-palette': a.palette,
-    'data-mode': a.mode,
+    'data-mode': look.timeOfDay ? 'time' : a.mode,
     'data-scheme': scheme,
     'data-density': a.density,
     'data-accent': look.accent ? 'custom' : null,
@@ -87,6 +99,8 @@ interface AppearanceState {
   appearance: Appearance
   /** The saved Pro looks; they show only while `proOn`. */
   looks: Looks
+  /** 0.9.0: Pro looks a free user is trying in Settings; shown, never saved, gone when Settings closes. */
+  trying: Looks | null
   /** Pro or the trial is on (the last known answer until usePro has loaded). */
   proOn: boolean
   /** Teams T8: the company's accent from Chrome policy; it shows for everyone and wins over looks.accent. */
@@ -97,8 +111,10 @@ interface AppearanceState {
   systemDark: boolean
   /** Change some settings. `gentle` waits a moment before saving (slider drags). */
   update: (patch: AppearancePatch, opts?: { gentle?: boolean }) => void
-  /** Change the Pro looks. `gentle` waits a moment before saving (the colour picker). */
+  /** Change the Pro looks. `gentle` waits a moment before saving (the colour picker). Without Pro it's a try-on. */
   updateLooks: (patch: Partial<Looks>, opts?: { gentle?: boolean }) => void
+  /** Settings closed: a try-on goes away (Pro started meanwhile has kept it already). */
+  endTry: () => void
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -154,36 +170,58 @@ else setTimeout(() => settle(), SETTLE_MAX_MS)
 export const useAppearance = create<AppearanceState>((set, get) => ({
   appearance: initial,
   looks: initialLooks.looks,
+  trying: null,
   proOn: initialLooks.pro,
   policyAccent: initialPolicyAccent,
-  scheme: resolveScheme(initial.mode, initial.palette, prefersDark()),
+  scheme: schemeOf(initial, effectiveLooks(initialLooks.looks, initialLooks.pro)),
   systemDark: prefersDark(),
 
   update: (patch, opts) => {
-    const { looks, proOn, policyAccent } = get()
-    const appearance = mergeAppearance(get().appearance, patch)
-    const scheme = resolveScheme(appearance.mode, appearance.palette, prefersDark())
-    applyToDocument(appearance, scheme, lookMirror(looks, proOn, policyAccent))
+    const s = get()
+    const appearance = mergeAppearance(s.appearance, patch)
+    const shown = shownLooks(s)
+    const scheme = schemeOf(appearance, shown)
+    applyToDocument(appearance, scheme, lookMirror(shown, true, s.policyAccent))
     set({ appearance, scheme })
-    writeMirror(appearance, looks, proOn)
+    writeMirror(appearance, s.looks, s.proOn)
     save(appearance, !!opts?.gentle)
   },
 
   updateLooks: (patch, opts) => {
-    const { appearance, scheme, proOn, policyAccent } = get()
-    const looks = mergeLooks(get().looks, patch)
-    applyToDocument(appearance, scheme, lookMirror(looks, proOn, policyAccent))
-    set({ looks })
-    writeMirror(appearance, looks, proOn)
+    const s = get()
+    if (!s.proOn) {
+      // A try-on starts from what the board shows, so a lapsed key's old picks don't jump back; back
+      // at the stock look, nothing is being tried any more.
+      const merged = mergeLooks(shownLooks(s), patch)
+      const trying = JSON.stringify(merged) === JSON.stringify(DEFAULT_LOOKS) ? null : merged
+      const scheme = schemeOf(s.appearance, merged)
+      applyToDocument(s.appearance, scheme, lookMirror(merged, true, s.policyAccent))
+      set({ trying, scheme })
+      return
+    }
+    const looks = mergeLooks(s.looks, patch)
+    const scheme = schemeOf(s.appearance, looks)
+    applyToDocument(s.appearance, scheme, lookMirror(looks, true, s.policyAccent))
+    set({ looks, scheme })
+    writeMirror(s.appearance, looks, true)
     saveLooks(looks, !!opts?.gentle)
+  },
+
+  endTry: () => {
+    if (!get().trying) return
+    set({ trying: null })
+    render()
   },
 }))
 
 /** Shows the current state on <html> and in the boot copy. */
 function render(): void {
-  const { appearance, looks, proOn, scheme, policyAccent } = useAppearance.getState()
-  applyToDocument(appearance, scheme, lookMirror(looks, proOn, policyAccent))
-  writeMirror(appearance, looks, proOn)
+  const s = useAppearance.getState()
+  const shown = shownLooks(s)
+  const scheme = schemeOf(s.appearance, shown)
+  if (scheme !== s.scheme) useAppearance.setState({ scheme })
+  applyToDocument(s.appearance, scheme, lookMirror(shown, true, s.policyAccent))
+  writeMirror(s.appearance, s.looks, s.proOn)
 }
 
 /** Teams T8: the board read the company policy; its accent (or none) shows from now on. */
@@ -197,7 +235,7 @@ export function setPolicyAccent(hex: string | null): void {
 function adopt(next: Appearance): void {
   const { appearance } = useAppearance.getState()
   if (JSON.stringify(next) === JSON.stringify(appearance)) return
-  useAppearance.setState({ appearance: next, scheme: resolveScheme(next.mode, next.palette, prefersDark()) })
+  useAppearance.setState({ appearance: next })
   render()
 }
 
@@ -209,8 +247,13 @@ function adoptLooks(next: Looks): void {
 
 /** Pro started or stopped: the saved looks come back or step aside. */
 function setProOn(on: boolean): void {
-  if (useAppearance.getState().proOn === on) return
-  useAppearance.setState({ proOn: on })
+  const s = useAppearance.getState()
+  if (s.proOn === on) return
+  if (on && s.trying) {
+    // The trial started from a try-on in Settings: the look being tried is the one kept.
+    useAppearance.setState({ proOn: on, looks: s.trying, trying: null })
+    saveLooks(s.trying, false)
+  } else useAppearance.setState({ proOn: on })
   render()
 }
 
@@ -225,10 +268,20 @@ export function initAppearance(): void {
 
   // System mode follows the OS live.
   darkQuery?.addEventListener('change', () => {
-    const { appearance: a } = useAppearance.getState()
-    useAppearance.setState({ scheme: resolveScheme(a.mode, a.palette, prefersDark()), systemDark: prefersDark() })
+    useAppearance.setState({ systemDark: prefersDark() })
     render()
   })
+
+  // Time of day (0.9.0): the clock is checked each minute while the page shows, and when it comes back.
+  if (typeof document !== 'undefined') {
+    const tick = () => {
+      if (document.hidden) return
+      const s = useAppearance.getState()
+      if (schemeOf(s.appearance, shownLooks(s)) !== s.scheme) render()
+    }
+    setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+  }
 
   // Pro looks follow Pro on the board; until usePro has loaded, the last known answer from the boot
   // copy stands. The popup keeps that answer: it never loads lib/pro.ts, because importing it

@@ -28,10 +28,11 @@ export interface SharedStack {
 
 /**
  * A to-do stack's marker bookmark (getstackboard.com/todo#<id>, todoPlan.ts) keys someone's private
- * list: it never travels in a share link, and a link carrying one is refused.
+ * list: it never travels in a share link, and a link carrying one is refused. A stack's colour
+ * marker (getstackboard.com/stack#c=…, 0.9.0) isn't a link either.
  */
 export function isTodoMarker(u: URL): boolean {
-  return /^(www\.)?getstackboard\.com$/i.test(u.hostname) && u.pathname.replace(/\/+$/, '') === '/todo'
+  return /^(www\.)?getstackboard\.com$/i.test(u.hostname) && ['/todo', '/stack'].includes(u.pathname.replace(/\/+$/, ''))
 }
 
 /** Web pages only: http and https, a real host, no credentials, not over MAX_URL, no to-do marker. */

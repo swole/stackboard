@@ -7,6 +7,8 @@ import { initAppearance } from './store/useAppearance'
 import { initPro } from './lib/pro'
 import { initArchive } from './lib/autoArchive'
 import { initToday } from './lib/today'
+import { initSchedule } from './lib/spaceSchedule'
+import { initTodayStrip } from './lib/todayStrip'
 
 // Dev server only: lets the browser console poke the store (fake open tabs, toasts).
 if (import.meta.env.DEV) {
@@ -23,6 +25,10 @@ void initArchive()
 
 // Due dates (0.8.0): the day moves on at local midnight in a tab left open.
 initToday()
+
+// Pro (0.9.0): the Today strip and the spaces that open by time.
+initTodayStrip()
+initSchedule()
 
 // A failed bookmark write must never look like "nothing happened" (a Brave user on r/startpages,
 // 2026-10-11, clicked New space and a starter pack with no effect). Show the error so people can

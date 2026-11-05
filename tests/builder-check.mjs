@@ -74,5 +74,18 @@ titles.forEach((t, i) => {
   const args = [].concat(commands[i]?.args ?? [])
   eq(`builder: value ${i} stays one string, read back exactly`, args.map((a) => [a.kind, a.value]), [['string', `v${i}`], ['string', t]])
 })
+
+// School mode (4 Nov 2026): the builder offers every lock the extension's schema declares, one
+// checkbox each, and its preset ticks the three for school or shared computers. Read from the
+// files themselves, so the builder and the extension can't drift apart.
+const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/managed_schema.json'), 'utf8'))
+const schemaLocks = Object.keys(schema.properties.lock.properties)
+const listIn = (name) => JSON.parse((src.match(new RegExp(`var ${name} = (\\[[^\\]]*\\])`))?.[1] ?? '[]').replace(/'/g, '"'))
+const page = fs.readFileSync(path.join(ROOT, 'site/teams/builder/index.html'), 'utf8')
+eq('builder: one lock for each lock in the extension schema', listIn('LOCKS'), schemaLocks)
+eq('builder: a checkbox for each lock', [...page.matchAll(/data-lock="(\w+)"/g)].map((m) => m[1]), schemaLocks)
+eq('builder: every lock in the schema is a switch', Object.values(schema.properties.lock.properties).map((p) => p.type), schemaLocks.map(() => 'boolean'))
+eq('builder: the school preset ticks pro, ai and rating', listIn('SCHOOL_LOCKS'), ['pro', 'ai', 'rating'])
+eq('builder: the school preset button is on the page', /data-act="preset-school"/.test(page), true)
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)

@@ -7,6 +7,7 @@ import { useTwoStep } from './hooks/useTwoStep'
 import { planSelected, staysNote, type SelectionPlan, type StashPlan } from './lib/stashPlan'
 import { plural } from './lib/importPlan'
 import { allLinks } from './lib/folderPlan'
+import { SuggestedStack, useSuggestedStack } from './components/SuggestedStack'
 
 interface CurrentTab {
   url: string
@@ -76,6 +77,8 @@ export default function SaveTabPopup() {
 
   const saveable = !!tab && isSaveableUrl(tab.url)
   const canSave = selection ? selection.links.length > 0 : saveable && !!title.trim()
+  // 0.9.0: one stack offered first, for a single web page.
+  const { suggestion, asking } = useSuggestedStack(selection ? null : tree, saveable && !selection ? tab : null)
 
   const handleSave = async (stackId: string, stackName: string, spaceName: string) => {
     if (!canSave || saving) return
@@ -163,6 +166,11 @@ export default function SaveTabPopup() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || !suggestion) return
+                e.preventDefault()
+                void handleSave(suggestion.stackId, suggestion.stackTitle, suggestion.spaceName)
+              }}
               placeholder="Title for the bookmark"
               className="w-full rounded-md border border-line-strong bg-card px-2.5 py-1.5 text-sm text-fg placeholder:text-faint focus:border-focus focus:outline-none"
             />
@@ -177,7 +185,13 @@ export default function SaveTabPopup() {
           </div>
           )}
 
-          <div className="mb-1 text-xs font-medium text-soft">Where to save</div>
+          <SuggestedStack
+            suggestion={suggestion}
+            asking={asking}
+            disabled={!canSave || saving}
+            onSave={(s) => void handleSave(s.stackId, s.stackTitle, s.spaceName)}
+          />
+          <div className="mb-1 text-xs font-medium text-soft">{suggestion ? 'Or pick a stack' : 'Where to save'}</div>
           <div className="no-scrollbar max-h-[320px] overflow-y-auto rounded-md border border-line bg-card">
             {spaces.length === 0 && (
               <div className="px-3 py-3 text-xs text-muted">
@@ -233,7 +247,9 @@ export default function SaveTabPopup() {
           <div className="mt-2 text-[11px] text-muted">
             {selection
               ? `Tap a stack to save all ${plural(selection.links.length, 'tab')} there.`
-              : 'Tap a stack to save. No save button needed.'}
+              : suggestion
+                ? 'Enter saves to the suggested stack. Or tap any stack.'
+                : 'Tap a stack to save. No save button needed.'}
           </div>
         </>
       )}

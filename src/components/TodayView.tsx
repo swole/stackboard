@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
 import { CalendarCheck, Check } from 'lucide-react'
 import { useAllTodos } from '../lib/allTodos'
-import { checkItem, dueToday, localDay, nextDue, shortDate, spokenDue, unrollItem } from '../lib/duePlan'
+import { dueToday, shortDate } from '../lib/duePlan'
 import type { TodoItem } from '../lib/todoPlan'
 import { useToday } from '../lib/today'
 import { useStackableStore } from '../store/useStackableStore'
 import { DueChip } from './DueChip'
 import { TICK_GUARD_MS } from './TodoItems'
+import { tickDue } from './tickDue'
 
 /** A ticked row stays in place, ticked, this long before it leaves the list. */
 const LINGER_MS = 1000
@@ -53,46 +54,8 @@ export function TodayView() {
     ticking.current.add(item.id)
     setLingering((s) => ({ ...s, [item.id]: { listId, item, index } }))
     setTimeout(() => setLingering(({ [item.id]: _gone, ...rest }) => rest), LINGER_MS)
-    const store = useStackableStore.getState()
-    const { change } = useAllTodos.getState()
-    const day = localDay()
     try {
-      try {
-        await change(listId, (l) => checkItem(l, item.id, day, true).list)
-      } catch (err) {
-        store.reportError('update the to-do', err)
-        return
-      }
-      if (item.r && item.d) {
-        const from = item.d
-        const next = nextDue(from, item.r, day, item.md)
-        store.showToast({
-          verb: 'Done',
-          title: item.text,
-          detail: `next due ${spokenDue(next, day)}`,
-          duration: 6000,
-          undo: async () => {
-            try {
-              await change(listId, (l) => unrollItem(l, item.id, from, next))
-            } catch (err) {
-              useStackableStore.getState().reportError('put the date back', err)
-            }
-          },
-        })
-        return
-      }
-      store.showToast({
-        verb: 'Done',
-        title: item.text,
-        duration: 6000,
-        undo: async () => {
-          try {
-            await change(listId, (l) => ({ ...l, items: l.items.map((x) => (x.id === item.id ? { ...x, done: false } : x)) }))
-          } catch (err) {
-            useStackableStore.getState().reportError('restore the to-do', err)
-          }
-        },
-      })
+      await tickDue(listId, item)
     } finally {
       setTimeout(() => ticking.current.delete(item.id), TICK_GUARD_MS)
     }

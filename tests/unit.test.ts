@@ -1242,6 +1242,155 @@ import type { Space } from '../src/lib/types'
   eq('tidy undo: the rest of the space comes back exactly', JSON.stringify(shape('S')) === before, true)
 }
 
+// ---------- 0.9.0: time of day, moving wallpapers, stack colours (Pro looks) ----------
+import { DAY_ENDS as todEnds, DAY_STARTS as todStarts, schemeNow as todSchemeNow, timeScheme as todTimeScheme } from '../src/lib/appearance'
+import { WALLPAPERS as todWallpapers, lookMirror as todLookMirror, mergeLooks as todMergeLooks, parseLooks as todParseLooks } from '../src/lib/looks'
+import {
+  QUICK_ICONS as styleQuickIcons,
+  STACK_COLORS as styleColors,
+  buildStackTitle as styleBuildTitle,
+  chipColors as styleChip,
+  isStackMarker as styleIsMarker,
+  parseStackColor as styleParseColor,
+  splitStackTitle as styleSplitTitle,
+  stackColorFromUrl as styleColorFromUrl,
+  stackColorUrl as styleColorUrl,
+} from '../src/lib/stackStylePlan'
+import { backupStack as styleBackupStack, mapTree as styleMapTree, writeBackupStack as styleWriteBackupStack, writeStackColor as styleWriteColor } from '../src/lib/folderPlan'
+import { boardLinks as styleBoardLinks } from '../src/lib/cleanupPlan'
+import { isShareableUrl as styleShareable } from '../src/lib/sharePlan'
+{
+  // Time of day: light from 07:00, dark from 19:00, by the clock; a one-version palette keeps its own.
+  eq('time of day: light from 07:00, dark from 19:00', [0, 6, 7, 12, 18, 19, 23].map(todTimeScheme), ['dark', 'dark', 'light', 'light', 'light', 'dark', 'dark'])
+  eq('time of day: hours (theme-boot.js repeats them)', [todStarts, todEnds], [7, 19])
+  eq(
+    'time of day: the clock picks the scheme in place of the mode',
+    [todSchemeNow('dark', 'stackboard', false, true, 10), todSchemeNow('light', 'stackboard', false, true, 22), todSchemeNow('system', 'nord', false, true, 10), todSchemeNow('light', 'stackboard', true, false, 22)],
+    ['light', 'dark', 'dark', 'light'],
+  )
+  eq(
+    'time of day: stored only when on, and switching it off drops it',
+    [todParseLooks({ timeOfDay: true }).timeOfDay, 'timeOfDay' in todParseLooks({ timeOfDay: false }), 'timeOfDay' in todMergeLooks(todParseLooks({ timeOfDay: true }), { timeOfDay: false }), 'timeOfDay' in todParseLooks({ timeOfDay: 'yes' })],
+    [true, false, false, false],
+  )
+  eq('time of day: the boot copy carries it only with Pro', [todLookMirror(todParseLooks({ timeOfDay: true }), true).timeOfDay, 'timeOfDay' in todLookMirror(todParseLooks({ timeOfDay: true }), false)], [true, false])
+
+  // Moving wallpapers: slow loops that move only transform, still under reduced motion.
+  const moving = todWallpapers.filter((w) => w.moving).map((w) => w.id)
+  eq('moving wallpapers: Drift, Tide and Orbit', moving, ['drift', 'tide', 'orbit'])
+  eq(
+    'moving wallpapers: each loop takes a minute or more',
+    moving.filter((id) => {
+      const m = new RegExp(`animation: wp-${id} (\\d+)s`).exec(indexCss)
+      return !m || Number(m[1]) < 60
+    }),
+    [],
+  )
+  eq(
+    'moving wallpapers: keyframes move transform and nothing else',
+    moving.filter((id) => {
+      const at = indexCss.indexOf(`@keyframes wp-${id}`)
+      const body = at < 0 ? '' : indexCss.slice(at, indexCss.indexOf('\n}', at))
+      return !/transform/.test(body) || /background|opacity|left:|top:|width|height/.test(body)
+    }),
+    [],
+  )
+  eq(
+    'moving wallpapers: reduced motion holds them still',
+    /prefers-reduced-motion: reduce\)\s*\{\s*:root\[data-bg="wallpaper"\] body::before,\s*\[data-wallpaper-preview\]::before\s*\{\s*animation: none !important;/.test(indexCss),
+    true,
+  )
+
+  // Stack colours: Chrome's tab-group colours, kept as a marker bookmark in the stack folder.
+  eq("stack colours: the nine tab-group colours, in Chrome's order", styleColors.map((c) => c.id), ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'])
+  eq('stack colours: every colour round-trips through its marker', styleColors.filter((c) => styleColorFromUrl(styleColorUrl(c.id)) !== c.id).map((c) => c.id), [])
+  eq(
+    'stack colours: markers are known by address, junk is no colour',
+    [
+      styleIsMarker('https://getstackboard.com/stack#c=blue'),
+      styleIsMarker('https://www.getstackboard.com/stack/#c=teal'),
+      styleIsMarker('https://getstackboard.com/todo#abcdefghijklmnop'),
+      styleIsMarker('https://example.com/stack#c=blue'),
+      styleColorFromUrl('https://getstackboard.com/stack#c=teal'),
+      styleParseColor('BLUE'),
+      styleParseColor(3),
+    ],
+    [true, true, false, false, null, null, null],
+  )
+  eq(
+    'stack colours: label text clears 4.5:1 on every colour, light and dark',
+    styleColors.flatMap((c) => (['light', 'dark'] as const).filter((s) => contrastRatio(styleChip(c.id, s).fg, styleChip(c.id, s).bg) < 4.5).map((s) => `${c.id} ${s}`)),
+    [],
+  )
+  eq('stack icons: the leading emoji is the icon', [styleSplitTitle('📚 Reading'), styleSplitTitle('Reading'), styleSplitTitle('📚')], [{ icon: '📚', name: 'Reading' }, { icon: null, name: 'Reading' }, { icon: null, name: '📚' }])
+  eq('stack icons: building a title', [styleBuildTitle('📚', 'Reading'), styleBuildTitle(null, 'Reading'), styleBuildTitle('📚', '  '), styleBuildTitle('  ', ' Docs ')], ['📚 Reading', 'Reading', '📚', 'Docs'])
+  eq('stack icons: each quick pick reads back as the icon', styleQuickIcons.filter((e) => styleSplitTitle(`${e} Docs`).icon !== e), [])
+
+  const styled = {
+    id: 'r',
+    title: 'Stackboard',
+    children: [
+      {
+        id: 's',
+        title: '🧪 Space',
+        index: 0,
+        children: [
+          {
+            id: 'a',
+            title: 'Docs',
+            index: 0,
+            children: [
+              { id: 'm', title: 'Stackboard stack colour', url: 'https://getstackboard.com/stack#c=blue', index: 0 },
+              { id: 'l1', title: 'One', url: 'https://one.example/', index: 1 },
+            ],
+          },
+          {
+            id: 'b',
+            title: 'List',
+            index: 1,
+            children: [
+              { id: 't', title: 'Stackboard to-do list', url: 'https://getstackboard.com/todo#abcdefghijklmnop', index: 0 },
+              { id: 'm2', title: 'Stackboard stack colour', url: 'https://getstackboard.com/stack#c=green', index: 1 },
+            ],
+          },
+          {
+            id: 'c',
+            title: 'Plain',
+            index: 2,
+            children: [
+              { id: 'm3', title: 'x', url: 'https://getstackboard.com/stack#c=teal', index: 0 },
+              { id: 'l2', title: 'Two', url: 'https://two.example/', index: 1 },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  const [docs, list, plain] = styleMapTree(styled).spaces[0].stacks
+  eq(
+    'stack colours: the marker colours its stack and is never a link',
+    [docs.color, docs.bookmarks.map((b) => b.id), list.color, !!list.todo, plain.color ?? null, plain.bookmarks.map((b) => b.id)],
+    ['blue', ['l1'], 'green', true, null, ['l2']],
+  )
+  eq('stack colours: backups carry the colour', [styleBackupStack(docs).color, 'color' in styleBackupStack(plain)], ['blue', false])
+  const made: Array<{ parentId: string; title: string; url?: string }> = []
+  const api = {
+    create: async (a: { parentId: string; title: string; url?: string }) => {
+      made.push(a)
+      return { id: `n${made.length}` }
+    },
+  }
+  await styleWriteBackupStack(api, 'sp', { name: 'Docs', bookmarks: [{ title: 'One', url: 'https://one.example/' }], color: 'blue' })
+  await styleWriteColor(api, 'x', 'teal')
+  eq('stack colours: a restore writes the marker last and skips an unknown colour', made.map((m) => m.url ?? m.title), ['Docs', 'https://one.example/', 'https://getstackboard.com/stack#c=blue'])
+  eq('stack colours: clean-up never lists a marker', styleBoardLinks(styled).map((l) => l.id), ['l1', 'l2'])
+  eq(
+    'stack colours: a marker never travels in a share link',
+    [styleShareable('https://getstackboard.com/stack#c=blue'), styleShareable('https://getstackboard.com/stacks'), pageIsShareableUrl('https://getstackboard.com/stack#c=blue')],
+    [false, true, false],
+  )
+}
+
 // ---------- 0.8.0: Teams company space ----------
 {
   const policy = {
@@ -1327,6 +1476,72 @@ import type { Space } from '../src/lib/types'
   eq('teams: dismissing twice keeps one entry', addDismissed(['a', 'b'], 'a'), ['b', 'a'])
 }
 
+import { DAY_SETS, MAX_RULES, daysPreset, minutesOf, newRule, parseRules, ruleMatches, scheduledSpace, spaceFor } from '../src/lib/schedulePlan'
+import { FOCUS_MAX, cleanFocus, focusFor, stripOn, stripShown } from '../src/lib/todayStripPlan'
+import { ACTIONS, COMMAND_CAPS, commandItems, nameScore, stepIndex, type CommandAction } from '../src/lib/commandPlan'
+
+// ---------- 0.9.0: Today strip, spaces by time, command bar (Pro) ----------
+{
+  // 2 Nov 2026 is a Monday.
+  const at = (day: number, h: number, m = 0) => new Date(2026, 10, day, h, m)
+  eq('schedule: times read as minutes, anything else is no time', [minutesOf('09:30'), minutesOf('00:00'), minutesOf('23:59'), minutesOf('24:00'), minutesOf('9:30'), minutesOf(570)], [570, 0, 1439, null, null, null])
+  eq('schedule: day sets name their preset', [daysPreset([1, 2, 3, 4, 5]), daysPreset([5, 4, 3, 2, 1]), daysPreset([0, 6]), daysPreset(DAY_SETS.every), daysPreset([1, 3])], ['weekdays', 'weekdays', 'weekends', 'every', 'pick'])
+  const work = { space: 'Work', days: [...DAY_SETS.weekdays], from: '09:00', to: '18:00' }
+  const rules = parseRules({
+    v: 1,
+    rules: [work, { space: '', days: [1], from: '09:00', to: '10:00' }, { space: 'X', days: [], from: '09:00', to: '10:00' }, { space: 'Y', days: [9], from: '09:00', to: '10:00' }, { space: 'Z', days: [1], from: '9am', to: '10:00' }, { space: 'Home', days: [0, 6], from: '00:00', to: '00:00' }, { space: 'A', days: [1], from: '07:00', to: '08:00' }, { space: 'B', days: [1], from: '07:00', to: '08:00' }],
+  })
+  eq('schedule: broken rules drop out and three is the most', rules.map((r) => r.space), ['Work', 'Home', 'A'])
+  eq('schedule: no stored rules', [parseRules(null), parseRules({ rules: 'x' })], [[], []])
+  eq('schedule: MAX_RULES is three', MAX_RULES, 3)
+  eq('schedule: weekdays 9 to 6 covers Monday morning, up to six', [ruleMatches(work, at(2, 10, 30)), ruleMatches(work, at(2, 9)), ruleMatches(work, at(2, 17, 59)), ruleMatches(work, at(2, 18)), ruleMatches(work, at(2, 8, 59)), ruleMatches(work, at(7, 10, 30))], [true, true, true, false, false, false])
+  const night = { space: 'Night', days: [...DAY_SETS.weekdays], from: '22:00', to: '06:00' }
+  eq('schedule: a rule past midnight counts from the day it started', [ruleMatches(night, at(2, 23)), ruleMatches(night, at(3, 5)), ruleMatches(night, at(7, 5)), ruleMatches(night, at(8, 5)), ruleMatches(night, at(2, 5)), ruleMatches(night, at(2, 12))], [true, true, true, false, false, false])
+  const weekend = { space: 'Home', days: [...DAY_SETS.weekends], from: '00:00', to: '00:00' }
+  eq('schedule: the same start and end is all day', [ruleMatches(weekend, at(7, 15)), ruleMatches(weekend, at(8, 0)), ruleMatches(weekend, at(2, 15))], [true, true, false])
+  const spaces = [{ id: '1', name: 'Work' }, { id: '2', name: 'Home' }]
+  const both = [work, { space: 'Home', days: [...DAY_SETS.every], from: '00:00', to: '00:00' }]
+  eq('schedule: the first matching rule picks the space', [scheduledSpace(both, spaces, at(2, 10, 30)), scheduledSpace(both, spaces, at(2, 20)), scheduledSpace([], spaces, at(2, 10))], ['1', '2', null])
+  eq('schedule: a rule whose space is gone is skipped', scheduledSpace([{ ...work, space: 'Gone' }, both[1]], spaces, at(2, 10, 30)), '2')
+  eq('schedule: spaces match by name, ignoring case and spaces', [spaceFor({ ...work, space: ' work ' }, spaces)?.id, spaceFor({ ...work, space: 'Play' }, spaces)], ['1', null])
+  eq('schedule: a new rule starts on the first space, weekdays 9 to 6', [newRule(spaces), newRule([]).space], [{ space: 'Work', days: [1, 2, 3, 4, 5], from: '09:00', to: '18:00' }, ''])
+
+  eq('today strip: the focus belongs to its day', [focusFor({ day: '2026-11-03', text: ' Ship 0.9.0 ' }, '2026-11-03'), focusFor({ day: '2026-11-02', text: 'Old' }, '2026-11-03'), focusFor(null, '2026-11-03'), focusFor({ day: '2026-11-03', text: 5 }, '2026-11-03')], ['Ship 0.9.0', '', '', ''])
+  eq('today strip: one line, capped, emoji kept whole', [cleanFocus('a\n  b '), cleanFocus('x'.repeat(200)).length, [...cleanFocus('\u{1F600}'.repeat(150))].length], ['a b', FOCUS_MAX, FOCUS_MAX])
+  eq('today strip: on only when stored as on', [stripOn({ on: true }), stripOn({ on: 'yes' }), stripOn(undefined)], [true, false, false])
+  eq('today strip: three shown, the rest counted', [stripShown([1, 2, 3, 4, 5]), stripShown([1])], [{ shown: [1, 2, 3], more: 2 }, { shown: [1], more: 0 }])
+
+  eq('command bar: word starts count double, every term must match', [nameScore('Open Settings', 'set'), nameScore('Open Settings', 'ttings'), nameScore('Open Settings', 'open xyz'), nameScore('Open Settings', '  ')], [2, 1, 0, 0])
+  const bm = (id: string, title: string, url: string, stack: string) => ({ id, title, url, parentStackId: stack })
+  const tree = {
+    rootId: 'r',
+    spaces: [
+      {
+        id: 's1', rawTitle: '\u{1F4BC} Work', name: 'Work', emoji: '\u{1F4BC}',
+        stacks: [
+          { id: 't1', title: 'Docs', parentSpaceId: 's1', folders: [], bookmarks: [bm('b1', 'Design doc', 'https://docs.example.com/design', 't1'), bm('b2', 'Workday', 'https://workday.example.com/', 't1')] },
+          { id: 't2', title: 'Homework', parentSpaceId: 's1', folders: [], bookmarks: [] },
+        ],
+      },
+      {
+        id: 's2', rawTitle: '\u{1F3E0} Home', name: 'Home', emoji: '\u{1F3E0}',
+        stacks: [{ id: 't3', title: 'Reading', parentSpaceId: 's2', folders: [], bookmarks: Array.from({ length: 10 }, (_, i) => bm(`r${i}`, `Article ${i}`, `https://read.example.com/${i}`, 't3')) }],
+      },
+    ],
+  }
+  const all = new Set<CommandAction>(ACTIONS.map((a) => a.id))
+  const label = (it: ReturnType<typeof commandItems>[number]) =>
+    it.kind === 'action' ? `action:${it.id}` : it.kind === 'space' ? `space:${it.space.name}` : it.kind === 'stack' ? `stack:${it.stack.title}` : `link:${it.bookmark.title}`
+  eq('command bar: with no query, the actions on offer and then the spaces', commandItems({ tree, query: '', available: new Set<CommandAction>(['new-space', 'settings']) }).map(label), ['action:new-space', 'action:settings', 'space:Work', 'space:Home'])
+  eq('command bar: an action asked for by name comes first', commandItems({ tree, query: 'dark', available: all }).map(label)[0], 'action:dark')
+  eq('command bar: actions match their other words too', commandItems({ tree, query: 'theme', available: all }).map(label), ['action:light', 'action:dark'])
+  eq('command bar: a stack named for the query comes before an action found only by a related word', commandItems({ tree, query: 'do', available: all }).map(label).slice(0, 2), ['stack:Docs', 'action:new-stack'])
+  eq('command bar: spaces, then stacks, then links', commandItems({ tree, query: 'work', available: all }).map(label), ['space:Work', 'stack:Homework', 'link:Workday', 'link:Design doc'])
+  eq('command bar: an action not on offer never lists', commandItems({ tree, query: 'tidy', available: new Set<CommandAction>(['settings']) }).map(label), [])
+  eq('command bar: links stop at the cap', commandItems({ tree, query: 'article', available: all }).filter((i) => i.kind === 'link').length, COMMAND_CAPS.link)
+  eq('command bar: arrows wrap at both ends', [stepIndex(0, -1, 5), stepIndex(4, 1, 5), stepIndex(2, 1, 5), stepIndex(0, 1, 0)], [4, 0, 3, 0])
+}
+
 // ---------- 0.8.0: share a stack ----------
 {
   const stack = {
@@ -1388,6 +1603,68 @@ import type { Space } from '../src/lib/types'
   eq('share: nothing to share without a web link', await encodeShare({ title: 'x', links: [{ title: 'a', url: 'chrome://flags' }] }), null)
   eq('share: toast wording', [shareNote({ links: 3, total: 3 }).title, shareNote({ links: 1, total: 1 }).title, shareNote({ links: 120, total: 400 }).title, shareNote({ links: 3, total: 3 }).detail], ['3 links', '1 link', '120 of 400 links', 'Anyone with the link sees these titles and addresses.'])
   eq('share: the page draws a letter, never a favicon request', [pageMonogram('https://www.github.com/x'), pageMonogram('https://docs.google.com/'), pageMonogram('https://a.co/')], ['G', 'G', 'A'])
+}
+
+import type { StackableTree as SaveTree } from '../src/lib/types'
+import { fileBody, fileTargets, readPick, siteOf as fileSiteOf, suggestStack, words as titleWords } from '../src/lib/filePlan'
+import { BACKUP_KEEP, backupFileName, backupsToPrune, lastBackupText } from '../src/lib/backupPlan'
+
+// ---------- 0.9.0: suggested stack when saving, backup to a folder ----------
+{
+  const link = (id: string, url: string, stack: string) => ({ id, title: id, url, parentStackId: stack })
+  const stack = (id: string, title: string, space: string, urls: string[], extra: object = {}) => ({
+    id,
+    title,
+    parentSpaceId: space,
+    bookmarks: urls.map((u, i) => link(`${id}-${i}`, u, id)),
+    ...extra,
+  })
+  const space = (id: string, emoji: string, name: string, stacks: unknown[], extra: object = {}) => ({ id, rawTitle: `${emoji} ${name}`, name, emoji, stacks, ...extra })
+  const tree = {
+    rootId: 'r',
+    spaces: [
+      space('c', '🏢', 'Company', [stack('c1', 'Tools', 'c', ['https://www.allrecipes.com/a', 'https://www.allrecipes.com/b'])], { company: true }),
+      space('w', '💼', 'Work', [
+        stack('w1', 'Docs', 'w', ['https://docs.google.com/1', 'https://docs.google.com/2']),
+        stack('w2', 'Meetings', 'w', ['https://zoom.us/j/1', 'https://docs.google.com/3']),
+        stack('w3', 'Plan', 'w', [], { todo: { id: 't', anchorId: 'a' } }),
+      ]),
+      space('k', '🍳', 'Cooking', [stack('k1', 'Recipes', 'k', ['https://www.allrecipes.com/x']), stack('k2', 'Groceries', 'k', ['https://shop.example.com/'])]),
+      space('s', '📥', 'Stash', [stack('s1', 'Stashed Nov 2', 's', ['https://www.allrecipes.com/1', 'https://allrecipes.com/2', 'https://www.allrecipes.com/3'])]),
+    ],
+  } as unknown as SaveTree
+
+  eq('file: a site is its host without www', [fileSiteOf('https://www.Example.com/a?b=1'), fileSiteOf('http://sub.example.com'), fileSiteOf('chrome://flags'), fileSiteOf('not a link')], ['example.com', 'sub.example.com', '', ''])
+  eq('file: title words, common words and numbers left out, plurals folded', titleWords('The Best Chicken Recipes for 2026 | Allrecipes: groceries'), ['chicken', 'recipe', 'allrecipe', 'grocery'])
+  eq('file: save targets skip company spaces and to-do stacks, Stash last', fileTargets(tree).map((t) => t.path), [
+    'Work › Docs',
+    'Work › Meetings',
+    'Cooking › Recipes',
+    'Cooking › Groceries',
+    'Stash › Stashed Nov 2',
+  ])
+  const site = suggestStack(tree, { url: 'https://www.allrecipes.com/recipe/9', title: 'Garlic chicken' })
+  eq('file: the stack holding links from the same site wins, Stash and company spaces aside', [site?.stackId, site?.reason, site?.path], ['k1', 'site', 'Cooking › Recipes'])
+  eq('file: most links from the site wins', suggestStack(tree, { url: 'https://docs.google.com/document/d/x', title: 'Weekly sync notes' })?.stackId, 'w1')
+  const byWords = suggestStack(tree, { url: 'https://new.example.org/list', title: 'My grocery list for the week' })
+  eq('file: with no site match, the stack name matching the title', [byWords?.stackId, byWords?.reason], ['k2', 'words'])
+  eq('file: a space name alone is not enough', suggestStack(tree, { url: 'https://new.example.org/', title: 'Cooking class schedule' }), null)
+  eq('file: nothing in common, no suggestion', suggestStack(tree, { url: 'https://new.example.org/', title: 'Passport renewal' }), null)
+  eq('file: browser pages and an empty board get none', [suggestStack(tree, { url: 'chrome://settings', title: 'Settings' }), suggestStack(null, { url: 'https://a.example/', title: 'Docs' })], [null, null])
+  const tie = { rootId: 'r', spaces: [space('x', '🧪', 'Test', [stack('a', 'A', 'x', ['https://site.example/1']), stack('b', 'B', 'x', ['https://site.example/2'])])] } as unknown as SaveTree
+  eq('file: a tie goes to the first stack on the board', suggestStack(tie, { url: 'https://site.example/3', title: 'x' })?.stackId, 'a')
+  const targets = fileTargets(tree)
+  eq('file: the AI answer is a stack from the list it was sent', [readPick({ ok: true, stack: 2 }, targets)?.stackId, readPick({ ok: true, stack: 2 }, targets)?.reason], ['k1', 'ai'])
+  eq('file: no pick, out of range or not a number reads as none', [readPick({ stack: null }, targets), readPick({ stack: -1 }, targets), readPick({ stack: 5 }, targets), readPick({ stack: '1' }, targets), readPick(null, targets)], [null, null, null, null, null])
+  const body = fileBody({ url: `https://a.example/${'x'.repeat(3000)}`, title: 't'.repeat(400) }, targets, { key: 'SB-1', activationId: 'a1' })
+  eq('file: the request carries the page, the stack paths and the key, trimmed', [body.page.title.length, body.page.url.length, body.stacks.length, body.stacks[0], body.license.key], [300, 2000, 5, 'Work › Docs', 'SB-1'])
+
+  eq('backup: one file a day, named by the day', [backupFileName('2026-11-03'), BACKUP_KEEP], ['stackboard-2026-11-03.json', 30])
+  const days = Array.from({ length: 32 }, (_, i) => backupFileName(`2026-10-${String(i + 1).padStart(2, '0')}`.replace('2026-10-32', '2026-11-01')))
+  const names = [...days, 'notes.txt', 'stackboard-notes.json', 'stackboard-2026-1-1.json', 'Stackboard-2026-01-01.json']
+  eq('backup: only our own files past the newest 30 go, oldest first out', backupsToPrune(names), ['stackboard-2026-10-02.json', 'stackboard-2026-10-01.json'])
+  eq('backup: nothing goes while there are 30 or fewer', backupsToPrune(days.slice(0, 30)), [])
+  eq('backup: the last backup line', [lastBackupText(null, '2026-11-03'), lastBackupText({ day: '2026-11-03' }, '2026-11-03'), lastBackupText({ day: '2026-11-02' }, '2026-11-03')], ['No backup yet', 'Last backup: today', 'Last backup: 2 Nov'])
 }
 
 // ---------- 0.8.0: Teams pack 2 ----------
@@ -1496,8 +1773,8 @@ import type { Space } from '../src/lib/types'
   // T8: brand and locks
   eq('brand: name tidied, accent lowercased', cfg.brand, { name: 'Acme', accent: '#0f766e' })
   eq('brand: only #rrggbb accents', [parseBrand({ accent: 'red' }), parseBrand({ accent: '#abc' }), parseBrand({ name: 'X', accent: '#12345g' })], [null, null, { name: 'X', accent: null }])
-  eq('locks: true (or the registry 1) locks, anything else does not', cfg.lock, { appearance: true, starterPacks: true, importExport: false })
-  eq('locks: none by default', parseLocks(undefined), { appearance: false, starterPacks: false, importExport: false })
+  eq('locks: true (or the registry 1) locks, anything else does not', cfg.lock, { appearance: true, starterPacks: true, importExport: false, pro: false, ai: false, rating: false })
+  eq('locks: none by default', parseLocks(undefined), { appearance: false, starterPacks: false, importExport: false, pro: false, ai: false, rating: false })
   eq('teams pack 2: a policy that only sets locks or go links still applies', [isEmptyConfig(parseManagedConfig({ lock: { appearance: true } })), isEmptyConfig(parseManagedConfig({ goLinks: { a: 'https://a.example.com' } })), anyLock(parseLocks({ importExport: true }))], [false, false, true])
   eq('brand: the company accent shows without Pro and wins over a personal one', [lookMirror(DEFAULT_LOOKS, false, '#0f766e').accent, lookMirror(parseLooks({ accent: '#dc2626' }), true, '#0f766e').accent, lookMirror(parseLooks({ accent: '#dc2626' }), true, null).accent], ['#0f766e', '#0f766e', '#dc2626'])
   eq('brand: the boot copy carries the company accent', [
@@ -1505,6 +1782,70 @@ import type { Space } from '../src/lib/types'
     policyAccentFromMirror(JSON.stringify(bootMirror(DEFAULT_APPEARANCE))),
     bootMirror(DEFAULT_APPEARANCE, DEFAULT_LOOKS, false, '#0f766e').look.accent,
   ], ['#0f766e', null, '#0f766e'])
+}
+
+// ---------- 0.9.0: what Pro did, the trial-end recap and the auto-archive line ----------
+import { STATS_KEY, addStat, readStats, statsLine } from '../src/lib/statsPlan'
+import { MOMENT_SHOWS, TRIAL_CARD_SHOWS, TRIAL_ENDED_WINDOW_MS, claimable, daysUntil, momentLine, pickTrialCard, trialCardTitle, trialEndsAt } from '../src/lib/nudgePlan'
+{
+  const D = 24 * 60 * 60 * 1000
+  const zero = readStats(undefined)
+  eq('pro stats: kept under proStats, nothing at first', [STATS_KEY, zero], ['proStats', { archived: 0, snapshots: 0, todosDone: 0, cleaned: 0, tidied: 0 }])
+  eq('pro stats: anything unreadable counts as zero', readStats({ archived: -3, snapshots: 'x', todosDone: 2.7, cleaned: Infinity, tidied: 4, extra: 9 }), { archived: 0, snapshots: 0, todosDone: 2, cleaned: 0, tidied: 4 })
+  eq('pro stats: adding counts whole positive numbers only', [addStat(zero, 'archived', 214).archived, addStat(zero, 'snapshots').snapshots, addStat(zero, 'tidied', -2).tidied, addStat(zero, 'cleaned', 2.9).cleaned], [214, 1, 0, 2])
+  eq('pro stats: nothing to say when Pro did nothing', statsLine(zero), null)
+  eq('pro stats: the recap sentence', statsLine({ ...zero, archived: 214, snapshots: 12, todosDone: 9 }), 'Pro archived 214 tabs, kept 12 snapshots and checked off 9 to-dos.')
+  eq('pro stats: one of each reads in the singular', statsLine({ archived: 1, snapshots: 1, todosDone: 1, cleaned: 1, tidied: 1 }), 'Pro archived 1 tab, kept 1 snapshot, checked off 1 to-do, cleaned up 1 link and tidied 1 space.')
+  eq('pro stats: a single count', statsLine({ ...zero, cleaned: 23 }), 'Pro cleaned up 23 links.')
+
+  const now = new Date(2026, 10, 3, 9, 0).getTime()
+  const base = { trialStartedAt: now - 13 * D, now, endingShows: 0, endedShows: 0, checkoutPending: false }
+  eq('trial recap: the last two days bring the ending card', [
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 2 } }),
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 1 } }),
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 3 } }),
+  ], ['ending', 'ending', null])
+  eq('trial recap: two tabs, then retired; answered stays away', [
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 2 }, endingShows: 1 }),
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 2 }, endingShows: TRIAL_CARD_SHOWS }),
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 2 }, endingShows: -1 }),
+  ], ['ending', null, null])
+  eq('trial recap: not while a checkout this computer opened is pending, never for a key', [
+    pickTrialCard({ ...base, state: { kind: 'trial', daysLeft: 2 }, checkoutPending: true }),
+    pickTrialCard({ ...base, state: { kind: 'pro' } }),
+    pickTrialCard({ ...base, state: { kind: 'paused', reason: 'ended' } }),
+    pickTrialCard({ ...base, trialStartedAt: null, state: { kind: 'free', trialUsed: false } }),
+  ], [null, null, null, null])
+  const start = now - 15 * D
+  const ended = { ...base, trialStartedAt: start, state: { kind: 'free', trialUsed: true } as const }
+  eq('trial recap: the ended card in the week after the end, two tabs at most', [
+    pickTrialCard({ ...ended, now: trialEndsAt(start) + D }),
+    pickTrialCard({ ...ended, now: trialEndsAt(start) + TRIAL_ENDED_WINDOW_MS + 1 }),
+    pickTrialCard({ ...ended, now: trialEndsAt(start) + D, endedShows: TRIAL_CARD_SHOWS }),
+  ], ['ended', null, null])
+  const endAt = (y: number, mo: number, d: number, h: number) => new Date(y, mo, d, h, 0).getTime() - 14 * D
+  eq('trial recap: today, tomorrow, in 2 days on the local calendar', [
+    trialCardTitle('ending', endAt(2026, 10, 3, 18), now),
+    trialCardTitle('ending', endAt(2026, 10, 4, 8), now),
+    trialCardTitle('ending', endAt(2026, 10, 5, 8), now),
+    trialCardTitle('ended', endAt(2026, 10, 2, 8), now),
+  ], ['Your Pro trial ends today', 'Your Pro trial ends tomorrow', 'Your Pro trial ends in 2 days', 'Your Pro trial has ended'])
+  eq('trial recap: calendar days, not hours', [daysUntil(new Date(2026, 10, 4, 0, 30).getTime(), new Date(2026, 10, 3, 23, 45).getTime()), daysUntil(now, now)], [1, 0])
+
+  const free = { kind: 'free', trialUsed: false } as const
+  const used = { kind: 'free', trialUsed: true } as const
+  const say = (l: ReturnType<typeof momentLine>) => (l ? `${l.text} ${l.link}` : null)
+  eq('auto-archive line: free users before and after their trial', [say(momentLine({ state: free, shown: 0 })), say(momentLine({ state: used, shown: 2 }))], [
+    'Auto-archive can do this while you work: idle tabs save themselves. Try Pro free for 14 days.',
+    "Auto-archive does this while you work. It's part of Pro.",
+  ])
+  eq('auto-archive line: three times at most, never for Pro, the trial or a key with a problem', [
+    momentLine({ state: free, shown: MOMENT_SHOWS }),
+    momentLine({ state: { kind: 'pro' }, shown: 0 }),
+    momentLine({ state: { kind: 'trial', daysLeft: 5 }, shown: 0 }),
+    momentLine({ state: { kind: 'paused', reason: 'offline' }, shown: 0 }),
+  ], [null, null, null, null])
+  eq('corner: one card at a time, and the holder may claim again', [claimable(null, 'moment'), claimable('whatsNew', 'trialEnd'), claimable('trialEnd', 'trialEnd')], [true, false, true])
 }
 
 // ---------- 0.8.0: nested folders ----------
@@ -1978,6 +2319,36 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: with import and export locked, sharing goes unmentioned', whatsNew080({ lockAppearance: true, lockImportExport: true, layout: 'rows', proLine: false }).lead, 'New in Stackboard 0.8.0: folders inside stacks.')
 }
 
+// ---------- 0.9.0: help link ----------
+import { HELP_URL, helpUrl } from '../src/lib/onboarding'
+{
+  eq('help link: the version rides in the hash', helpUrl('0.9.0'), 'https://getstackboard.com/support#v=0.9.0')
+  eq('help link: no version, or a strange one, opens the plain page', [helpUrl(undefined), helpUrl('dev build')], [HELP_URL, HELP_URL])
+}
+
+// ---------- 0.9.0: what's new ----------
+import { whatsNew090 } from '../src/lib/whatsNewPlan'
+{
+  const b = { early: false, shows070: 0, updated080: false, shows080: 0 }
+  eq('whats new 0.9.0: an update from 0.8.0 shows the 0.9.0 note', pickWhatsNew({ ...b, updated090: true, shows090: 0 }), '090')
+  eq('whats new 0.9.0: it takes the place of the 0.8.0 note, answered or not', [pickWhatsNew({ ...b, updated080: true, updated090: true, shows090: 0 }), pickWhatsNew({ ...b, updated080: true, updated090: true, shows090: -1 })], ['090', null])
+  eq('whats new 0.9.0: the Pro note still goes first for early users', pickWhatsNew({ ...b, early: true, updated090: true, shows090: 0 }), '070')
+  eq('whats new 0.9.0: without a 0.9.0 mark the 0.8.0 note works as before', pickWhatsNew({ ...b, updated080: true }), '080')
+  const plain = whatsNew090({ lockAppearance: false, lockImportExport: false, layout: 'rows', missed080: false, todoMoved: false, trialOpen: true })
+  eq('whats new 0.9.0: from 0.8.0, the free line and Pro with the trial', [plain.lead, plain.pro, plain.tryPacked], [
+    'New in Stackboard 0.9.0: saving a page suggests the right stack.',
+    'Stackboard Pro adds a Today strip, stack colours, a command bar (Ctrl+K) and looks that follow the time of day. Try it free for 14 days, no card needed.',
+    false,
+  ])
+  const missed = whatsNew090({ lockAppearance: false, lockImportExport: false, layout: 'rows', missed080: true, todoMoved: true, trialOpen: false })
+  eq('whats new 0.9.0: from before 0.8.0, the 0.8.0 items too, and to-do lists moved into Pro', [missed.lead, missed.pro, missed.tryPacked], [
+    'New in Stackboard 0.9.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), share a stack as a link, and saving a page suggests the right stack.',
+    'To-do lists now come with Stackboard Pro, along with a Today strip, stack colours, a command bar (Ctrl+K) and looks that follow the time of day.',
+    true,
+  ])
+  eq('whats new 0.9.0: company locks drop Packed and sharing', whatsNew090({ lockAppearance: true, lockImportExport: true, layout: 'rows', missed080: true, todoMoved: false, trialOpen: false }).lead, 'New in Stackboard 0.9.0: folders inside stacks and saving a page suggests the right stack.')
+}
+
 // ---------- 0.8.0: the Pro card and finishing a purchase ----------
 {
   const DAY = 86_400_000
@@ -2023,6 +2394,78 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
 
   const base = { early: true, shows070: 0, updated080: false, shows080: 0 }
   eq('whats new: someone who bought Pro skips the Pro note', [pickWhatsNew({ ...base, paid: true }), pickWhatsNew({ ...base, paid: true, updated080: true })], [null, '080'])
+}
+
+// ---------- School mode: the pro, ai and rating locks ----------
+import { NO_LOCKS } from '../src/lib/managedPlan'
+import { offersTodo } from '../src/lib/proPlan'
+import managedSchema from '../public/managed_schema.json'
+{
+  // Parsing: on with true (or the registry's DWORD 1), off by default, junk locks nothing.
+  const school = parseManagedConfig({ lock: { pro: true, ai: true, rating: true } })
+  eq('school: the three new locks parse', [school.lock.pro, school.lock.ai, school.lock.rating], [true, true, true])
+  eq('school: they leave the other locks alone', school.lock, { appearance: false, starterPacks: false, importExport: false, pro: true, ai: true, rating: true })
+  eq('school: the registry DWORD 1 locks too', parseLocks({ pro: 1, ai: 1, rating: 1 }), { ...NO_LOCKS, pro: true, ai: true, rating: true })
+  eq('school: off by default', [NO_LOCKS.pro, NO_LOCKS.ai, NO_LOCKS.rating, parseLocks({}).pro, parseLocks(null).ai, parseManagedConfig({}).lock.rating, parseManagedConfig(undefined).lock.pro], [false, false, false, false, false, false, false])
+  eq('school: junk values lock nothing', [parseLocks({ pro: 'yes', ai: 2, rating: {} }), parseLocks({ pro: 'true', ai: [true], rating: null }), parseLocks({ pro: 0, ai: false, rating: -1 }), parseLocks('lock everything')], [NO_LOCKS, NO_LOCKS, NO_LOCKS, NO_LOCKS])
+  eq('school: the admin console and JSON-string forms unwrap', [
+    parseManagedConfig({ lock: { Value: { pro: true } } }).lock.pro,
+    parseManagedConfig({ lock: JSON.stringify({ ai: true }) }).lock.ai,
+    parseLocks({ rating: { Value: true } }).rating,
+    parseManagedConfig({ lock: { Value: { pro: true } } }).lock.ai,
+  ], [true, true, true, false])
+  eq('school: anyLock counts each new lock on its own', [anyLock({ ...NO_LOCKS, pro: true }), anyLock({ ...NO_LOCKS, ai: true }), anyLock({ ...NO_LOCKS, rating: true }), anyLock(NO_LOCKS)], [true, true, true, false])
+  eq('school: a policy with only these locks still applies', [isEmptyConfig(school), isEmptyConfig(parseManagedConfig({ lock: { rating: true } })), isEmptyConfig(parseManagedConfig({ lock: { pro: false, ai: 'yes' } }))], [false, false, true])
+  eq('school: the managed schema declares each lock the parser reads, as a switch', Object.entries(managedSchema.properties.lock.properties).map(([k, v]) => `${k}:${v.type}`), Object.keys(NO_LOCKS).map((k) => `${k}:boolean`))
+  eq('school: the schema says what each new lock does', ['pro', 'ai', 'rating'].map((k) => (managedSchema.properties.lock.properties as Record<string, { title: string }>)[k].title), [
+    'Hide Stackboard Pro: no prices, trial or upgrade prompts',
+    'Turn off AI tidy and AI pick',
+    'Never ask people to rate Stackboard',
+  ])
+
+  // Pro under the pro lock: a trial counts for nothing, a paid key keeps working.
+  const DAY = 86_400_000
+  const now = Date.UTC(2026, 11, 1)
+  const good = { key: 'SB-1', activationId: 'a', status: 'granted' as const, checkedAt: now, okAt: now }
+  eq('school pro: a running trial counts for nothing', proState({ license: null, trialStartedAt: now - DAY, now, lockPro: true }), { kind: 'free', trialUsed: true })
+  eq('school pro: a paid key keeps working', proState({ license: good, trialStartedAt: now - DAY, now, lockPro: true }), { kind: 'pro' })
+  eq('school pro: a key with a problem stays paused, with no trial to fall back on', proState({ license: { key: 'x', status: 'revoked' }, trialStartedAt: now - DAY, now, lockPro: true }), { kind: 'paused', reason: 'ended' })
+  eq('school pro: no key and no trial is plain free', proState({ license: null, trialStartedAt: null, now, lockPro: true }), { kind: 'free', trialUsed: false })
+  eq('school pro: without the lock the trial runs as before', [proState({ license: null, trialStartedAt: now - DAY, now, lockPro: false }), proState({ license: null, trialStartedAt: now - DAY, now })], [{ kind: 'trial', daysLeft: 13 }, { kind: 'trial', daysLeft: 13 }])
+  eq('school pro: New stack offers To-do list only to someone who can make one', [offersTodo({ lockPro: true, canMake: false }), offersTodo({ lockPro: true, canMake: true }), offersTodo({ lockPro: false, canMake: false }), offersTodo({ lockPro: false, canMake: true })], [false, true, true, true])
+  const trialHere = proState({ license: null, trialStartedAt: now - DAY, now, lockPro: true })
+  eq('school pro: the trial unlocks no list, an early user who kept lists free still makes them', [offersTodo({ lockPro: true, canMake: canMakeTodo(trialHere, false) }), offersTodo({ lockPro: true, canMake: canMakeTodo(trialHere, true) })], [false, true])
+
+  // No trial-end recap, auto-archive line or Pro note under the pro lock.
+  const t0 = new Date(2026, 10, 3, 9, 0).getTime()
+  const card = { trialStartedAt: t0 - 13 * DAY, now: t0, endingShows: 0, endedShows: 0, checkoutPending: false }
+  const ended = { ...card, trialStartedAt: t0 - 15 * DAY, state: { kind: 'free', trialUsed: true } as const }
+  eq('school pro: no trial-end recap, ending or ended', [pickTrialCard({ ...card, state: { kind: 'trial', daysLeft: 1 }, lockPro: true }), pickTrialCard({ ...ended, lockPro: true })], [null, null])
+  eq('school pro: the same recap shows without the lock', [pickTrialCard({ ...card, state: { kind: 'trial', daysLeft: 1 } }), pickTrialCard(ended)], ['ending', 'ended'])
+  eq('school pro: no auto-archive line, before or after a trial', [momentLine({ state: { kind: 'free', trialUsed: false }, shown: 0, lockPro: true }), momentLine({ state: { kind: 'free', trialUsed: true }, shown: 0, lockPro: true }), !!momentLine({ state: { kind: 'free', trialUsed: false }, shown: 0 })], [null, null, true])
+  const notes = { early: true, shows070: 0, updated080: false, shows080: 0 }
+  eq('school pro: an early user gets no Pro note, and the next note still comes', [pickWhatsNew({ ...notes, lockPro: true }), pickWhatsNew({ ...notes, lockPro: true, updated090: true, shows090: 0 }), pickWhatsNew(notes)], [null, '090', '070'])
+  eq('school pro: the 0.8.0 note keeps its lead and drops the Pro line', [
+    whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, todoMoved: true, trialOpen: true, lockPro: true }).pro,
+    whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, lockPro: true }).lead,
+  ], [null, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.'])
+  const n090 = whatsNew090({ lockAppearance: false, lockImportExport: false, layout: 'rows', missed080: true, todoMoved: true, trialOpen: true, lockPro: true })
+  eq('school pro: the 0.9.0 note keeps the free line and drops Pro and the trial', [n090.lead, n090.pro, n090.tryPacked], [
+    'New in Stackboard 0.9.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), share a stack as a link, and saving a page suggests the right stack.',
+    null,
+    true,
+  ])
+
+  // The ai lock: a note never names AI tidy while the company has it off.
+  eq('school ai: the 0.8.0 Pro line leaves out AI tidy', [
+    whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, lockAi: true }).pro,
+    whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: true, todoMoved: true, trialOpen: true, lockAi: true }).pro,
+  ], ['Pro adds due dates, a Today list and clean-up.', 'To-do lists now come with Pro, along with due dates, a Today list and clean-up. Try it free for 14 days, no card needed.'])
+
+  // The rating lock: never, whichever rule would fire.
+  const r = { opens: 40, firstSeen: t0 - 10 * DAY, now: t0, answered: false, links: 5 }
+  eq('school rating: no rating card on a new tab, after a win or at a milestone', [shouldAskForRating({ ...r, lockRating: true }), shouldAskForRating({ ...r, trigger: 'win', lockRating: true }), shouldAskForRating({ ...r, trigger: 'milestone', lockRating: true })], [false, false, false])
+  eq('school rating: the same board is asked without the lock', [shouldAskForRating(r), shouldAskForRating({ ...r, trigger: 'win' }), shouldAskForRating({ ...r, trigger: 'milestone' }), shouldAskForRating({ ...r, lockRating: false })], [true, true, true, true])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

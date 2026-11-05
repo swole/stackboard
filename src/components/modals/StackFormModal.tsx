@@ -5,7 +5,7 @@ import { createFolder, createStack, createTodoStack, renameStack } from '../../l
 import { locate } from '../../lib/folderPlan'
 import { useStackableStore } from '../../store/useStackableStore'
 import { usePro } from '../../lib/pro'
-import { canMakeTodo, checkoutUrl, keepsTodoFree } from '../../lib/proPlan'
+import { canMakeTodo, checkoutUrl, keepsTodoFree, offersTodo } from '../../lib/proPlan'
 import { openInNewTab } from '../../lib/tabs'
 
 interface Props {
@@ -26,7 +26,7 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '', fold
 
   const [title, setTitle] = useState(initialTitle)
   // 0.6.0: a new stack holds links or is a to-do list; an existing one keeps its kind.
-  const [kind, setKind] = useState<'links' | 'todo'>('links')
+  const [picked, setPicked] = useState<'links' | 'todo'>('links')
   const [submitting, setSubmitting] = useState(false)
   // New to-do lists come with Pro (0.7.0), for early users too since 0.8.0 unless they already had
   // a list when 0.8.0 arrived. Lists that exist keep working.
@@ -36,6 +36,10 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '', fold
   const keepsTodo = usePro((s) => keepsTodoFree(s))
   const trialUsed = usePro((s) => !!s.trialStartedAt)
   const startTrial = usePro((s) => s.startTrial)
+  // School mode: under the company's pro lock To-do list is offered only to someone who can make one.
+  const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
+  const offerTodo = offersTodo({ lockPro, canMake: !proReady || canMakeTodo(proState, keepsTodo) })
+  const kind = offerTodo ? picked : 'links'
   const todoLocked = mode === 'add' && !folder && kind === 'todo' && proReady && !canMakeTodo(proState, keepsTodo)
   const noun = folder ? 'folder' : 'stack'
 
@@ -83,12 +87,12 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '', fold
       }
     >
       <form onSubmit={onSubmit}>
-        {mode === 'add' && !folder && (
+        {mode === 'add' && !folder && offerTodo && (
           <div className="mb-3">
             <Segmented
               label="Stack type"
               value={kind}
-              onChange={setKind}
+              onChange={setPicked}
               options={[
                 { value: 'links', label: 'Links', icon: <Link2 className="h-3.5 w-3.5" /> },
                 { value: 'todo', label: 'To-do list', icon: <ListChecks className="h-3.5 w-3.5" /> },

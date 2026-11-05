@@ -37,6 +37,10 @@ import { askToArchive, useArchive } from './lib/autoArchive'
 import { archivedNote } from './lib/archivePlan'
 import { maybeTakeDailySnapshot } from './lib/snapshots'
 import { WhatsNew } from './components/WhatsNew'
+import { TrialEndCard } from './components/TrialEndCard'
+import { MomentLine } from './components/MomentLine'
+import { useCorner } from './lib/corner'
+import { CommandBar } from './components/CommandBar'
 import { ShareAddCard } from './components/ShareAddCard'
 import { readSearchHash } from './lib/goLinks'
 import { TodayView } from './components/TodayView'
@@ -177,6 +181,8 @@ export default function App() {
       store.celebrate()
       // The third stash is a rating milestone; a bankruptcy waits for its certificate to close.
       if (prefs.bumpStashes() >= RATING_MILESTONE_STASHES && !note.bankruptcy) store.reachMilestone()
+      // 0.9.0: free users hear once in a while that auto-archive does this by itself.
+      if (!note.bankruptcy) useCorner.getState().requestMoment('stash')
     })
   }, [loaded])
 
@@ -380,6 +386,9 @@ export default function App() {
         <KeepItHint />
         <RatingPrompt />
         <WhatsNew />
+        <TrialEndCard />
+        <MomentLine />
+        <CommandBar />
         <ShareAddCard />
         {certificate && (
           <Certificate
@@ -387,6 +396,7 @@ export default function App() {
             onClose={(saved) => {
               setCertificate(null)
               if (saved || prefs.stashes() >= RATING_MILESTONE_STASHES) useStackableStore.getState().reachMilestone()
+              useCorner.getState().requestMoment('bankruptcy')
             }}
           />
         )}

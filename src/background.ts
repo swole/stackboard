@@ -41,13 +41,20 @@ async function keepRows(previousVersion: string): Promise<void> {
   if (next) await chrome.storage.local.set({ [APPEARANCE_KEY]: next })
 }
 
-// Keep in sync with WHATS_NEW_080_KEY in src/components/WhatsNew.tsx.
+// Keep in sync with WHATS_NEW_080_KEY and WHATS_NEW_090_KEY in src/components/WhatsNew.tsx.
 const WHATS_NEW_080_KEY = 'whatsNew080'
+const WHATS_NEW_090_KEY = 'whatsNew090'
 
 /** 8. (0.8.0) An update from before 0.8.0 marks this computer for the 0.8.0 what's-new note. */
 async function markWhatsNew080(previousVersion: string): Promise<void> {
   if (compareVersions(previousVersion, PACKED_VERSION) >= 0) return
   await chrome.storage.local.set({ [WHATS_NEW_080_KEY]: { from: previousVersion, at: Date.now() } })
+}
+
+/** 9. (0.9.0) An update from before 0.9.0 marks this computer for the 0.9.0 what's-new note. */
+async function markWhatsNew090(previousVersion: string): Promise<void> {
+  if (compareVersions(previousVersion, '0.9.0') >= 0) return
+  await chrome.storage.local.set({ [WHATS_NEW_090_KEY]: { from: previousVersion, at: Date.now() } })
 }
 
 chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
@@ -59,6 +66,7 @@ chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
     }
     if (previousVersion) void keepRows(previousVersion).catch(() => {})
     if (previousVersion) void markWhatsNew080(previousVersion).catch(() => {})
+    if (previousVersion) void markWhatsNew090(previousVersion).catch(() => {})
     return
   }
   if (reason !== chrome.runtime.OnInstalledReason.INSTALL) return
@@ -89,7 +97,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   //    update runs. Unpacked builds only (a store build always has an update_url).
   //    `whatsNew: true` also plays the what's-new mark, which the other update tests leave out.
   if (msg?.type === 'e2e-updated-from' && typeof msg.previousVersion === 'string' && !('update_url' in chrome.runtime.getManifest())) {
-    Promise.all([keepRows(msg.previousVersion), msg.whatsNew === true ? markWhatsNew080(msg.previousVersion) : null])
+    Promise.all([
+      keepRows(msg.previousVersion),
+      msg.whatsNew === true ? markWhatsNew080(msg.previousVersion) : null,
+      msg.whatsNew090 === true ? markWhatsNew090(msg.previousVersion) : null,
+    ])
       .then(() => reply({ ok: true }), (err) => reply({ error: String(err) }))
     return true
   }

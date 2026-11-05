@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { IS_EXTENSION } from './bookmarks'
+import { readLocks } from './company'
 import { installedAt, visit } from './onboarding'
 import {
   LICENSE_API,
@@ -69,8 +70,15 @@ interface ProStore {
   decideTodo: (hasLists: boolean) => Promise<void>
 }
 
+/**
+ * School mode: the company's pro lock (Chrome policy). While it's on, a trial doesn't count here and
+ * can't start; a paid key keeps working. Read before the store is ready, then kept in step by the
+ * board (setProLock), which sees policy changes.
+ */
+let lockPro = false
+
 function derive(license: License | null, trialStartedAt: number | null): ProState {
-  return proState({ license, trialStartedAt, now: Date.now() })
+  return proState({ license, trialStartedAt, now: Date.now(), lockPro })
 }
 
 /** "Chrome on Windows": shown next to each computer in Polar's customer portal. */
@@ -285,7 +293,8 @@ export const usePro = create<ProStore>((set, get) => ({
   },
 
   startTrial: async () => {
-    if (!IS_EXTENSION || get().trialStartedAt) return
+    // The trial syncs, so starting one under the pro lock would also use it up on every other computer.
+    if (!IS_EXTENSION || get().trialStartedAt || lockPro) return
     const startedAt = Date.now()
     set({ trialStartedAt: startedAt, state: derive(get().license, startedAt) })
     await chrome.storage.sync.set({ [TRIAL]: { startedAt } })
@@ -361,6 +370,14 @@ function preview(): void {
   usePro.setState({ ready: true, early, earlyTodo: early ? p === 'early-todo' : null, license, sub, checkoutAt, trialStartedAt, state: derive(license, trialStartedAt) })
 }
 
+/** School mode: the board calls this with the pro lock each time it reads the policy. */
+export function setProLock(on: boolean): void {
+  if (on === lockPro) return
+  lockPro = on
+  const s = usePro.getState()
+  usePro.setState({ state: derive(s.license, s.trialStartedAt) })
+}
+
 let started = false
 
 /** Call once per new tab: reads the stored state, follows other tabs and computers, checks the key when due. */
@@ -370,10 +387,13 @@ export function initPro(): void {
   if (!IS_EXTENSION) return preview()
   void (async () => {
     try {
-      const [sync, local] = await Promise.all([
+      // The lock comes with the stored state, so a trial never shows as Pro under it, even for a moment.
+      const [sync, local, locks] = await Promise.all([
         chrome.storage.sync.get([KEY, TRIAL, EARLY_KEY, EARLY_TODO_KEY, SUB_KEY]),
         chrome.storage.local.get([LICENSE, CHECKOUT_KEY]),
+        readLocks(),
       ])
+      lockPro = locks.pro
       const held = local[LICENSE] as License | undefined
       // A key kept on this computer only (sync storage was full when it was added) still counts.
       const license = forKey(readKey(sync[KEY]) ?? (held?.localOnly ? held.key : null), held)

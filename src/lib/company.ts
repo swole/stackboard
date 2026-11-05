@@ -2,6 +2,7 @@ import { IS_EXTENSION } from './bookmarks'
 import type { FolderNode } from './importPlan'
 import {
   EMPTY_CONFIG,
+  NO_LOCKS,
   addDismissed,
   arrangeOnboarding,
   companyLabel,
@@ -13,7 +14,7 @@ import {
   parseManagedConfig,
   type ManagedConfig,
 } from './managedPlan'
-import type { StackableTree } from './types'
+import type { CompanyLocks, StackableTree } from './types'
 
 // Teams (0.8.0): reads the company board from Chrome policy. The rules are in managedPlan.ts.
 // Nothing here needs a permission: chrome.storage.managed comes with "storage" plus the
@@ -173,6 +174,18 @@ export async function readCompany(now = Date.now()): Promise<CompanyBoard> {
       ? { name: companyLabel(config), announcement: config.announcement, brand: config.brand, lock: config.lock }
       : null
   return { config, spaces, info, startHereId }
+}
+
+/**
+ * Just the policy's locks, for code that runs without the board's tree: the save popup, the calls
+ * to the AI server, and Pro before the board has loaded (school mode). Never throws.
+ */
+export async function readLocks(): Promise<CompanyLocks> {
+  try {
+    return parseManagedConfig(await readPolicy()).lock
+  } catch {
+    return NO_LOCKS
+  }
 }
 
 /** Calls back when the admin's Stackboard policy changes (ManagedBookmarks changes arrive as bookmark events). */

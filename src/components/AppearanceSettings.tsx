@@ -1,12 +1,12 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Check, Monitor, Moon, Sparkles, Sun } from 'lucide-react'
+import { Check, Clock, Monitor, Moon, Sparkles, Sun } from 'lucide-react'
 import {
   BLUR_MAX,
   DIM_MAX,
   PALETTES,
   onlyScheme,
   paletteInfo,
-  resolveScheme,
+  schemeNow,
   variantName,
   type BgKind,
   type Density,
@@ -23,11 +23,14 @@ import {
   FONTS,
   TILES,
   WALLPAPERS,
+  effectiveLooks,
   onAccentFor,
   type TileSize,
 } from '../lib/looks'
 import { useAppearance } from '../store/useAppearance'
+import { useStackableStore } from '../store/useStackableStore'
 import { Segmented } from './modals/Modal'
+import { KeepWithPro } from './KeepWithPro'
 
 /**
  * Settings > Appearance (0.5.0). Every change applies to the board behind the dialog at once,
@@ -38,8 +41,13 @@ export function AppearanceSettings() {
   const scheme = useAppearance((s) => s.scheme)
   const systemDark = useAppearance((s) => s.systemDark)
   const update = useAppearance((s) => s.update)
-  // A Pro wallpaper (0.7.0) stands in for the free background while it shows.
-  const wallpaperShown = useAppearance((s) => s.proOn && !!s.looks.wallpaper)
+  // The Pro looks on screen (0.7.0), a free user's try-on included (0.9.0).
+  const onScreen = useAppearance((s) => s.trying ?? effectiveLooks(s.looks, s.proOn))
+  const proOn = useAppearance((s) => s.proOn)
+  // School mode: under the company's pro lock, Pro looks show only with Pro on, and nothing is tried on.
+  const noTryOn = useStackableStore((s) => !!s.tree?.company?.lock.pro) && !proOn
+  // A Pro wallpaper stands in for the free background while it shows.
+  const wallpaperShown = !!onScreen.wallpaper
   const fileRef = useRef<HTMLInputElement | null>(null)
   const [hasImage, setHasImage] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
@@ -91,11 +99,29 @@ export function AppearanceSettings() {
     update({ bg: { kind: 'solid', imageRev: Date.now() } })
   }
 
+  // Time of day (Pro, 0.9.0) sits beside the free modes; underneath, the free mode goes back to
+  // System, which is what shows if Pro stops.
+  const timed = !!onScreen.timeOfDay
+  const pickMode = (mode: Mode | 'time') => {
+    const { updateLooks, proOn: pro } = useAppearance.getState()
+    if (mode === 'time') {
+      if (pro && a.mode !== 'system') update({ mode: 'system' })
+      updateLooks({ timeOfDay: true })
+      return
+    }
+    if (timed) updateLooks({ timeOfDay: false })
+    update({ mode })
+  }
+  const hour = new Date().getHours()
+
   const info = paletteInfo(a.palette)
   const only = onlyScheme(a.palette)
   const shown = variantName(a.palette, scheme)
   let note = `Showing ${shown}.`
-  if (only && a.mode !== 'system' && a.mode !== only) note = `${info.name} only comes in ${only}, so it stays ${only}.`
+  if (timed) {
+    note = only ? `${info.name} only comes in ${only}, so it stays ${only}.` : `Showing ${shown}. Light from 7 am, dark from 7 pm.`
+    if (!proOn) note += ' Time of day is part of Pro: your board shows it until you close Settings.'
+  } else if (only && a.mode !== 'system' && a.mode !== only) note = `${info.name} only comes in ${only}, so it stays ${only}.`
   else if (only) note += ` It only comes in ${only}.`
   else if (a.mode === 'system') {
     note += ` Switches to ${variantName(a.palette, scheme === 'dark' ? 'light' : 'dark')} when your system turns ${scheme === 'dark' ? 'light' : 'dark'}.`
@@ -107,7 +133,7 @@ export function AppearanceSettings() {
 
       <div role="radiogroup" aria-label="Palette" className="grid grid-cols-4 gap-2.5">
         {PALETTES.map((p) => {
-          const s = resolveScheme(a.mode, p.id, systemDark)
+          const s = schemeNow(a.mode, p.id, systemDark, timed, hour)
           return (
             <PaletteOption
               key={p.id}
@@ -125,14 +151,15 @@ export function AppearanceSettings() {
       <div className="mt-4 grid grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3 gap-y-3.5">
         <RowLabel>Mode</RowLabel>
         <div>
-          <Segmented<Mode>
+          <Segmented<Mode | 'time'>
             label="Mode"
-            value={a.mode}
-            onChange={(mode) => update({ mode })}
+            value={timed ? 'time' : a.mode}
+            onChange={pickMode}
             options={[
               { value: 'system', label: 'System', icon: <Monitor className="h-3.5 w-3.5" /> },
               { value: 'light', label: 'Light', icon: <Sun className="h-3.5 w-3.5" /> },
               { value: 'dark', label: 'Dark', icon: <Moon className="h-3.5 w-3.5" /> },
+              ...(noTryOn ? [] : [{ value: 'time' as const, label: 'Time of day', icon: <Clock className="h-3.5 w-3.5" /> }]),
             ]}
           />
           <p data-mode-note className="mt-1.5 text-xs leading-relaxed text-muted">
@@ -210,7 +237,7 @@ export function AppearanceSettings() {
         <LayoutSwitch value={a.layout} onChange={(layout) => update({ layout })} />
       </div>
 
-      <ProLooks />
+      {!noTryOn && <ProLooks />}
     </section>
   )
 }
@@ -245,31 +272,33 @@ export function LayoutSetting() {
 }
 
 /**
- * Pro looks (0.7.0): accent, font, tile size and wallpaper. Without Pro the rows stay visible but
- * switched off, and what was picked before stays saved for when Pro comes back.
+ * Pro looks (0.7.0): accent, font, tile size and wallpaper. What was picked before stays saved for
+ * when Pro comes back. 0.9.0: without Pro every control is a try-on: the board shows the picks
+ * until Settings closes, nothing is saved, and the trial keeps them.
  */
 function ProLooks() {
-  const looks = useAppearance((s) => s.looks)
+  const looks = useAppearance((s) => s.trying ?? effectiveLooks(s.looks, s.proOn))
+  const trying = useAppearance((s) => !!s.trying)
   const proOn = useAppearance((s) => s.proOn)
+  // Closing Settings puts the free look back.
+  useEffect(() => () => useAppearance.getState().endTry(), [])
   const updateLooks = useAppearance((s) => s.updateLooks)
   const policyAccent = useAppearance((s) => s.policyAccent)
   const custom = looks.accent && !ACCENT_PRESETS.some((p) => p.hex === looks.accent) ? looks.accent : null
 
   return (
-    <div data-pro-looks={proOn ? 'on' : 'off'} className="mt-5 border-t border-line pt-4">
+    <div data-pro-looks={proOn ? 'on' : 'off'} data-looks-trying={trying ? '' : undefined} className="mt-5 border-t border-line pt-4">
       <h4 className="mb-1 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
         <Sparkles className="h-3.5 w-3.5" />
         Pro looks
       </h4>
-      {!proOn && (
+      {!proOn && !trying && (
         <p data-pro-looks-note className="mb-1 text-xs leading-relaxed text-muted">
-          Part of Stackboard Pro. Start the free trial or add a key in Stackboard Pro below.
+          Part of Stackboard Pro. Try any of them: your board shows each pick until you close Settings.
         </p>
       )}
-      <fieldset
-        disabled={!proOn}
-        className="mt-2.5 grid min-w-0 grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3 gap-y-3.5 disabled:opacity-50"
-      >
+      {!proOn && trying && <KeepWithPro data-looks-keep="" text="Trying Pro looks. Keep this look:" />}
+      <fieldset className="mt-2.5 grid min-w-0 grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3 gap-y-3.5">
         <RowLabel>Accent</RowLabel>
         {policyAccent ? (
           <p data-policy-accent className="flex items-center gap-2 pt-1 text-xs text-muted">
@@ -378,6 +407,7 @@ function ProLooks() {
                   role="radio"
                   aria-checked={on}
                   data-wallpaper-option={w.id}
+                  title={w.moving ? `${w.name}: moves slowly` : w.name}
                   onClick={() => updateLooks({ wallpaper: on ? null : w.id })}
                   className="group/wp flex min-w-0 flex-col gap-1 rounded-lg text-left focus-visible:outline-none"
                 >
@@ -392,7 +422,9 @@ function ProLooks() {
               )
             })}
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted">Click a wallpaper again to take it off.</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">
+            Click a wallpaper again to take it off. Drift, Tide and Orbit move slowly, and hold still when your computer asks for less motion.
+          </p>
         </div>
       </fieldset>
     </div>

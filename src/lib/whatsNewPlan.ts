@@ -7,7 +7,7 @@
 
 export const WHATS_NEW_SHOWS = 3
 
-export type WhatsNewCard = '070' | '080'
+export type WhatsNewCard = '070' | '080' | '090'
 
 /** A note that hasn't been answered and hasn't used up its new tabs. */
 export function stillPending(shows: number): boolean {
@@ -18,10 +18,22 @@ export function stillPending(shows: number): boolean {
  * The note for this new tab, if any. The 0.7.0 note is for people who had Stackboard before Pro
  * (`early`); the 0.8.0 note for people who updated to 0.8.0 from an older version.
  */
-export function pickWhatsNew(p: { early: boolean; shows070: number; updated080: boolean; shows080: number; paid?: boolean }): WhatsNewCard | null {
+export function pickWhatsNew(p: {
+  early: boolean
+  shows070: number
+  updated080: boolean
+  shows080: number
+  paid?: boolean
+  /** 0.9.0: updated from a version before 0.9.0. Its note takes the place of the 0.8.0 one. */
+  updated090?: boolean
+  shows090?: number
+  /** School mode: the company hides Pro, so the Pro note never comes. */
+  lockPro?: boolean
+}): WhatsNewCard | null {
   // The 0.7.0 card announces Pro, so someone who already bought it skips to the next one.
-  if (p.early && !p.paid && stillPending(p.shows070)) return '070'
-  if (p.updated080 && stillPending(p.shows080)) return '080'
+  if (p.early && !p.paid && !p.lockPro && stillPending(p.shows070)) return '070'
+  if (p.updated090 && stillPending(p.shows090 ?? 0)) return '090'
+  if (p.updated080 && !p.updated090 && stillPending(p.shows080)) return '080'
   return null
 }
 
@@ -61,7 +73,7 @@ export interface WhatsNew080 {
 /**
  * What the 0.8.0 note says. Features a company switched off (Teams locks) aren't mentioned: with
  * appearance locked there's no Packed line, layout hint or button, and with import and export
- * locked no share line.
+ * locked no share line. School mode: the pro lock drops the Pro line, the ai lock drops AI tidy.
  */
 export function whatsNew080(p: {
   lockAppearance: boolean
@@ -72,22 +84,57 @@ export function whatsNew080(p: {
   todoMoved?: boolean
   /** The trial can still be started. */
   trialOpen?: boolean
+  lockPro?: boolean
+  lockAi?: boolean
 }): WhatsNew080 {
   const items = ['folders inside stacks']
   if (!p.lockAppearance) items.push('a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout)')
   if (!p.lockImportExport) items.push('share a stack as a link')
+  const adds = p.lockAi ? 'due dates, a Today list and clean-up' : 'due dates and a Today list, clean-up and AI tidy'
   return {
     lead: `New in Stackboard 0.8.0: ${joinList(items)}.`,
-    pro: p.proLine
+    pro: p.proLine && !p.lockPro
       ? [
-          p.todoMoved
-            ? 'To-do lists now come with Pro, along with due dates and a Today list, clean-up and AI tidy.'
-            : 'Pro adds due dates and a Today list, clean-up and AI tidy.',
+          p.todoMoved ? `To-do lists now come with Pro, along with ${adds}.` : `Pro adds ${adds}.`,
           p.trialOpen ? TRIAL_LINE : '',
         ]
           .filter(Boolean)
           .join(' ')
       : null,
     tryPacked: !p.lockAppearance && p.layout !== 'packed',
+  }
+}
+
+/** What 0.9.0 brings to Pro, in the 0.9.0 note. */
+const PRO_090 = 'a Today strip, stack colours, a command bar (Ctrl+K) and looks that follow the time of day'
+
+/**
+ * What the 0.9.0 note says. Someone whose 0.8.0 note never had its turn (they came from before
+ * 0.8.0) also hears the 0.8.0 items, since this note takes its place, and an early user without a
+ * to-do list hears that lists moved into Pro. The Pro line goes to everyone and names the trial
+ * while it can start (3 Nov: convert free users without nagging), unless the company hides
+ * Pro (school mode).
+ */
+export function whatsNew090(p: {
+  lockAppearance: boolean
+  lockImportExport: boolean
+  layout: 'packed' | 'rows'
+  missed080: boolean
+  todoMoved: boolean
+  trialOpen: boolean
+  lockPro?: boolean
+}): WhatsNew080 {
+  const items: string[] = []
+  if (p.missed080) {
+    items.push('folders inside stacks')
+    if (!p.lockAppearance) items.push('a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout)')
+    if (!p.lockImportExport) items.push('share a stack as a link')
+  }
+  items.push('saving a page suggests the right stack')
+  const pro = p.todoMoved && p.missed080 ? `To-do lists now come with Stackboard Pro, along with ${PRO_090}.` : `Stackboard Pro adds ${PRO_090}.`
+  return {
+    lead: `New in Stackboard 0.9.0: ${joinList(items)}.`,
+    pro: p.lockPro ? null : [pro, p.trialOpen ? TRIAL_LINE : ''].filter(Boolean).join(' '),
+    tryPacked: p.missed080 && !p.lockAppearance && p.layout !== 'packed',
   }
 }

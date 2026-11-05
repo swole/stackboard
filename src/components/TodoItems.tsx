@@ -16,6 +16,7 @@ import { checkItem, localDay, nextDue, setDue, setRepeat, spokenDue, unrollItem 
 import { usePro } from '../lib/pro'
 import { hasPro } from '../lib/proPlan'
 import { useToday } from '../lib/today'
+import { bumpStat } from '../lib/proStats'
 import { useStackableStore } from '../store/useStackableStore'
 
 /**
@@ -73,6 +74,7 @@ export function TodoItems({ stack, list, change, revealSeq }: Props) {
       const day = localDay()
       const rolls = proOn && !it.done && !!it.r && !!it.d
       const ok = await change('update the to-do', (l) => checkItem(l, it.id, day, proOn).list)
+      if (ok && proOn && !it.done) void bumpStat('todosDone') // 0.9.0: the trial-end recap
       if (ok && rolls) {
         const from = it.d!
         const next = nextDue(from, it.r!, day, it.md)

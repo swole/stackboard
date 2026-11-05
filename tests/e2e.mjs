@@ -1768,6 +1768,10 @@ try {
     const before = await shapeOf(spaceId)
     const beforeIds = await idsOf(spaceId)
     const page = await openStubbed(true)
+    // 0.9.0: a new key with no answer yet gets the button on a plain new tab, still without asking.
+    const early = await until(page, () => !!document.querySelector('[data-tidy-button]'))
+    const unasked = await page.evaluate(() => window.__tidyCalls.length === 0)
+    check('tidy: with a Pro key and no answer yet, a plain new tab shows the button and asks nothing', early && unasked, await page.evaluate(() => JSON.stringify(window.__tidyCalls)))
     await askViaSettings(page)
     const shown = await until(page, () => !!document.querySelector('[data-tidy-button]'))
     check('tidy: the button shows with a Pro key once the server is on', shown)
@@ -1811,6 +1815,246 @@ try {
       await chrome.storage.sync.remove('proKey')
       localStorage.removeItem('stackable:lastSpaceId')
     }, spaceId)
+  }
+
+  // ---------- 0.9.0: looks (time of day, moving wallpapers, stack colours, try-on) ----------
+  // Pro looks gain time of day (light from 07:00, dark from 19:00, by the clock) and three slowly
+  // moving wallpapers. A stack takes one of Chrome's tab-group colours from a marker bookmark in its
+  // folder and an icon from its title. Without Pro every looks control is a try-on: the board shows
+  // it while Settings (or the colour dialog) is open, nothing is saved, and the trial keeps it.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const was = await control.evaluate(async () => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey']),
+      local: await chrome.storage.local.get(['looks', 'appearance', 'proLicense']),
+      mirror: localStorage.getItem('stackable:appearance'),
+      lastSpace: localStorage.getItem('stackable:lastSpaceId'),
+    }))
+    // A board page whose clock reads `hour` (null: the real one). The boot script and the app both
+    // ask Date, and __boot keeps the scheme the boot script painted before any module ran.
+    const openAt = async (hour = null) => {
+      const page = await browser.newPage()
+      await page.setViewport({ width: 1400, height: 900 })
+      page.on('pageerror', (e) => errors.push(`looks: ${e.message}`))
+      await page.evaluateOnNewDocument((h) => {
+        if (h !== null) Date.prototype.getHours = function () { return h }
+        document.addEventListener('readystatechange', () => {
+          if (document.readyState === 'interactive' && !window.__boot) window.__boot = document.documentElement.dataset.scheme
+        })
+      }, hour)
+      await page.goto(NTP, { waitUntil: 'load' })
+      await page.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      await page.bringToFront()
+      await sleep(500)
+      return page
+    }
+    const look = (page) =>
+      page.evaluate(() => {
+        const d = document.documentElement.dataset
+        const before = getComputedStyle(document.body, '::before')
+        return { scheme: d.scheme, mode: d.mode, font: d.font, bg: d.bg, wallpaper: d.wallpaper ?? null, anim: before.animationName, dur: before.animationDuration, boot: window.__boot ?? null }
+      })
+    const openSettings = async (page) => {
+      await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+      await page.waitForSelector('[data-pro-looks]', { timeout: 5000 })
+    }
+    const escape = (page) => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    const click = (page, sel) => page.evaluate((s) => { const el = document.querySelector(s); el?.click(); return !!el }, sel)
+    const stored = () => control.evaluate(async () => ({ looks: (await chrome.storage.local.get('looks')).looks ?? null, mode: (await chrome.storage.local.get('appearance')).appearance?.mode, mirror: JSON.parse(localStorage.getItem('stackable:appearance') || 'null')?.look ?? null }))
+    const MODE_TIME = '[role=radiogroup][aria-label="Mode"] [data-option="time"]'
+
+    // A free board on Light, nothing saved for Pro. The free background stays as it is: a Pro
+    // wallpaper shows in its place, and swapping a picture off and on makes open tabs reload it.
+    await control.evaluate(async () => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey'])
+      await chrome.storage.local.remove(['proLicense', 'looks'])
+      const a = (await chrome.storage.local.get('appearance')).appearance ?? {}
+      await chrome.storage.local.set({ appearance: { ...a, mode: 'light', palette: 'stackboard' } })
+    })
+    await sleep(300)
+
+    // 1. Try-on without Pro: picks show, nothing is saved, closing Settings puts the free look back.
+    const p1 = await openAt(22)
+    await openSettings(p1)
+    await click(p1, '[data-font-option="mono"]')
+    await click(p1, MODE_TIME)
+    await click(p1, '[data-wallpaper-option="drift"]')
+    await sleep(300)
+    const tried = await look(p1)
+    const keep = await p1.evaluate(() => document.querySelector('[data-looks-keep]')?.textContent ?? '')
+    // A picture background steps aside for a wallpaper being tried, as it does for a saved one.
+    const noPicture = await p1.evaluate(() => !document.querySelector('[data-backdrop]'))
+    check(
+      'looks try-on: a free user sees the Pro picks on the board while Settings is open',
+      tried.font === 'mono' && tried.mode === 'time' && tried.scheme === 'dark' && tried.wallpaper === 'drift' && tried.anim === 'wp-drift' && noPicture && keep.includes('Keep this look') && keep.includes('Start free trial'),
+      JSON.stringify({ tried, keep, noPicture }),
+    )
+    const s1 = await stored()
+    check('looks try-on: nothing is saved', s1.looks === null && s1.mode === 'light' && s1.mirror?.font !== 'mono' && !s1.mirror?.timeOfDay && !s1.mirror?.wallpaper, JSON.stringify(s1))
+    await escape(p1)
+    await until(p1, () => !document.querySelector('[data-pro-looks]'))
+    await sleep(300)
+    const back = await look(p1)
+    check('looks try-on: closing Settings puts the free look back', back.font === 'default' && back.mode === 'light' && back.scheme === 'light' && back.wallpaper === null, JSON.stringify(back))
+
+    // 2. Starting the trial from the try-on keeps the look.
+    await openSettings(p1)
+    await click(p1, '[data-font-option="serif"]')
+    await until(p1, () => !!document.querySelector('[data-looks-keep] button'))
+    await click(p1, '[data-looks-keep] button')
+    const started = await until(p1, () => document.querySelector('[data-pro-looks]')?.dataset.proLooks === 'on')
+    await escape(p1)
+    await sleep(500)
+    const kept = await look(p1)
+    const s2 = await stored()
+    check('looks try-on: starting the trial from it keeps the look', started && kept.font === 'serif' && s2.looks?.font === 'serif' && s2.mirror?.font === 'serif', JSON.stringify({ started, kept, s2 }))
+    await p1.close()
+
+    // 3. Time of day with Pro: saved, light by day and dark by night from the first frame.
+    const p2 = await openAt(10)
+    await openSettings(p2)
+    await click(p2, MODE_TIME)
+    await sleep(400)
+    await escape(p2)
+    await sleep(300)
+    const s3 = await stored()
+    await p2.close()
+    const day = await openAt(10)
+    const atDay = await look(day)
+    await day.close()
+    const night = await openAt(22)
+    const atNight = await look(night)
+    check(
+      'time of day: saved with Pro, the free mode underneath goes back to System',
+      s3.looks?.timeOfDay === true && s3.mode === 'system' && s3.mirror?.timeOfDay === true,
+      JSON.stringify(s3),
+    )
+    check(
+      'time of day: light by day and dark by night, from the first frame',
+      atDay.scheme === 'light' && atDay.boot === 'light' && atDay.mode === 'time' && atNight.scheme === 'dark' && atNight.boot === 'dark',
+      JSON.stringify({ atDay, atNight }),
+    )
+
+    // 4. A moving wallpaper: a slow loop, held still under reduced motion.
+    await openSettings(night)
+    await click(night, '[data-wallpaper-option="tide"]')
+    await sleep(300)
+    await escape(night)
+    await sleep(300)
+    const moving = await look(night)
+    await night.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+    await sleep(200)
+    const still = await look(night)
+    await night.emulateMediaFeatures([])
+    check(
+      'moving wallpapers: a slow loop behind the board, still under reduced motion',
+      moving.wallpaper === 'tide' && moving.bg === 'wallpaper' && moving.anim === 'wp-tide' && moving.dur === '120s' && still.anim === 'none' && (await stored()).looks?.wallpaper === 'tide',
+      JSON.stringify({ moving, still }),
+    )
+    await night.close()
+
+    // 5. Stack colours and icons. Time of day and the wallpaper off again, so the board is plain.
+    await control.evaluate(async () => {
+      const l = (await chrome.storage.local.get('looks')).looks ?? {}
+      delete l.timeOfDay
+      await chrome.storage.local.set({ looks: { ...l, wallpaper: null, font: 'default' } })
+    })
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🎨 Colour test' })
+      const stack = await chrome.bookmarks.create({ parentId: space.id, title: 'Docs' })
+      await chrome.bookmarks.create({ parentId: stack.id, title: 'Example', url: 'https://example.com/colour' })
+      localStorage.setItem('stackable:lastSpaceId', space.id)
+      return { space: space.id, stack: stack.id }
+    })
+    const p3 = await openAt()
+    await until(p3, () => document.querySelector('main h1')?.textContent === 'Colour test')
+    const openStyle = async (page) => {
+      await page.evaluate((id) => document.querySelector(`#stack-${id} [aria-label="Stack options"]`).click(), made.stack)
+      await until(page, () => !!document.querySelector('[data-stack-style]'))
+      await click(page, '[data-stack-style]')
+      await page.waitForSelector('[data-stack-style-dialog]', { timeout: 5000 })
+    }
+    const header = (page) =>
+      page.evaluate((id) => {
+        const chip = document.querySelector(`#stack-${id} h3 [data-stack-color]`)
+        return {
+          title: document.querySelector(`#stack-${id} h3`)?.textContent ?? null,
+          color: chip?.dataset.stackColor ?? null,
+          bg: chip ? getComputedStyle(chip).backgroundColor : null,
+          scheme: document.documentElement.dataset.scheme,
+          links: document.querySelectorAll(`#stack-${id} [data-card]`).length,
+        }
+      }, made.stack)
+    const folder = () => control.evaluate(async (id) => ({ title: (await chrome.bookmarks.get(id))[0].title, kids: (await chrome.bookmarks.getChildren(id)).map((k) => k.url) }), made.stack)
+
+    await openStyle(p3)
+    await click(p3, '[data-stack-color-option="blue"]')
+    await click(p3, '[data-stack-icon-option="📚"]')
+    await p3.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Save').click())
+    await until(p3, () => !document.querySelector('[data-stack-style-dialog]'))
+    await until(p3, (id) => !!document.querySelector(`#stack-${id} h3 [data-stack-color="blue"]`), made.stack)
+    const f1 = await folder()
+    const h1 = await header(p3)
+    const blue = h1.scheme === 'dark' ? 'rgb(138, 180, 248)' : 'rgb(26, 115, 232)'
+    check(
+      'stack colours: Colour and icon saves a marker bookmark and the icon in the title',
+      f1.title === '📚 Docs' && f1.kids.includes('https://getstackboard.com/stack#c=blue') && f1.kids.length === 2,
+      JSON.stringify(f1),
+    )
+    check('stack colours: the header shows the colour, and the marker is no link', h1.color === 'blue' && h1.bg === blue && h1.links === 1, JSON.stringify(h1))
+
+    // Opening the stack as tabs makes a group in its colour.
+    await p3.evaluate((id) => document.querySelector(`#stack-${id} button[aria-label^="Open all"]`).click(), made.stack)
+    let group = null
+    for (let t = 0; t < 30 && !group; t++) {
+      await sleep(200)
+      group = await control.evaluate(async () => (await chrome.tabGroups.query({ title: '📚 Docs' }))[0] ?? null)
+    }
+    check('stack colours: opening the stack as tabs makes a group in its colour', group?.color === 'blue', JSON.stringify(group))
+    if (group) await control.evaluate(async (gid) => chrome.tabs.remove((await chrome.tabs.query({ groupId: gid })).map((t) => t.id)), group.id)
+    await p3.bringToFront()
+
+    // Without Pro the colour hides and the marker stays; the dialog becomes a try-on.
+    await control.evaluate(() => chrome.storage.sync.remove(['proTrial', 'proKey']))
+    await until(p3, (id) => !document.querySelector(`#stack-${id} h3 [data-stack-color]`), made.stack)
+    const h2 = await header(p3)
+    check('stack colours: without Pro the colour hides and the marker stays', h2.color === null && h2.title === '📚 Docs' && (await folder()).kids.includes('https://getstackboard.com/stack#c=blue'), JSON.stringify(h2))
+    await openStyle(p3)
+    await click(p3, '[data-stack-color-option="red"]')
+    await sleep(300)
+    const trying = await header(p3)
+    const tryLine = await p3.evaluate(() => document.querySelector('[data-stack-color-try]')?.textContent ?? '')
+    await p3.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Cancel').click())
+    await until(p3, () => !document.querySelector('[data-stack-style-dialog]'))
+    await sleep(300)
+    const after = await header(p3)
+    check(
+      'stack colours: a free user tries a colour on the stack, and Cancel puts it back',
+      trying.color === 'red' && tryLine.includes('Keep this colour') && after.color === null && (await folder()).kids.includes('https://getstackboard.com/stack#c=blue'),
+      JSON.stringify({ trying, tryLine, after }),
+    )
+    await p3.close()
+
+    // Put back what the blocks after this one expect.
+    await control.evaluate(async (w) => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      await chrome.storage.local.remove(['looks', 'appearance', 'proLicense'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (w.mirror === null) localStorage.removeItem('stackable:appearance')
+      else localStorage.setItem('stackable:appearance', w.mirror)
+      if (w.lastSpace === null) localStorage.removeItem('stackable:lastSpaceId')
+      else localStorage.setItem('stackable:lastSpaceId', w.lastSpace)
+    }, was)
+    await control.evaluate((id) => chrome.bookmarks.removeTree(id), made.space)
+    await sleep(400)
   }
 
   // ---------- 0.8.0: Teams company space ----------
@@ -1924,6 +2168,219 @@ try {
     await sleep(400)
     check('teams: with no policy the company group and line go away', await after.evaluate(() => !document.querySelector('[data-company-group]') && !document.querySelector('[data-announcement]')))
     await after.close()
+  }
+
+  // ---------- 0.9.0: Today strip, spaces by time, command bar (Pro) ----------
+  // With the trial on: the Today strip (switched on in Settings) shows the day's focus and the
+  // to-dos due today, ticks them in their lists and sends "+N more" to Today; a time rule opens
+  // a new tab on its space, never switching a tab already open; Ctrl+K opens the command bar,
+  // finds a space and runs Open Settings. Without Pro the strip hides and Ctrl+K goes to search.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const LIST = 'stripe2etest0001'
+    const was = await control.evaluate(async () => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'todayStrip', 'todayFocus', 'spaceSchedule']),
+      last: localStorage.getItem('stackable:lastSpaceId'),
+    }))
+    const day = await control.evaluate(() => {
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })
+    // Lists from earlier blocks keep their due days aside meanwhile, so the strip shows this list alone.
+    const otherDue = await control.evaluate(async () => {
+      const all = await chrome.storage.sync.get(null)
+      const due = Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith('todoDue:')))
+      await chrome.storage.sync.remove(Object.keys(due))
+      return due
+    })
+    // Two spaces; one holds a to-do list with four items due today and one due later.
+    const made = await control.evaluate(async ([list, today]) => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const strip = await chrome.bookmarks.create({ parentId: root.id, title: '\u{1F5D3}\u{FE0F} Strip test' })
+      const rule = await chrome.bookmarks.create({ parentId: root.id, title: '\u{1F9ED} Rule test' })
+      const stack = await chrome.bookmarks.create({ parentId: strip.id, title: 'Chores' })
+      await chrome.bookmarks.create({ parentId: stack.id, title: 'Stackboard to-do list', url: `https://getstackboard.com/todo#${list}` })
+      const it = (n, text) => ({ id: `i${n}`, text, done: false, at: Date.now() + n })
+      await chrome.storage.sync.remove(['proKey', 'todayStrip', 'todayFocus', 'spaceSchedule'])
+      await chrome.storage.sync.set({
+        [`todo:${list}`]: { v: 1, items: [it(1, 'Pay rent'), it(2, 'Call mum'), it(3, 'Water plants'), it(4, 'Book dentist'), it(5, 'Later thing')] },
+        [`todoDue:${list}`]: { i1: { d: today }, i2: { d: today }, i3: { d: today }, i4: { d: today }, i5: { d: '2099-01-01' } },
+        proTrial: { startedAt: Date.now() },
+      })
+      return { strip: strip.id, rule: rule.id }
+    }, [LIST, day])
+    const goTo = (page, name) => page.evaluate((n) => [...document.querySelectorAll('aside button')].find((b) => b.textContent.includes(n))?.click(), name)
+    const strip = (page) => page.evaluate(() => {
+      const el = document.querySelector('[data-today-strip]')
+      return el
+        ? {
+            focus: el.querySelector('[data-today-focus]')?.value ?? null,
+            items: [...el.querySelectorAll('[data-today-strip-item]')].map((r) => r.textContent.trim()),
+            more: el.querySelector('[data-today-more]')?.textContent ?? '',
+          }
+        : null
+    })
+
+    const page = await openNtp()
+    await page.bringToFront()
+    await goTo(page, 'Strip test')
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Strip test')
+    await sleep(500)
+    check('today strip: off until switched on', !(await strip(page)))
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    const toggled = await until(page, () => {
+      const on = document.querySelector('[data-today-strip-setting] [data-option="on"]')
+      on?.click()
+      return !!on
+    })
+    const stored = await control.evaluate(async () => (await chrome.storage.sync.get('todayStrip')).todayStrip)
+    check('today strip: Settings switches it on, synced', toggled && stored?.on === true, JSON.stringify(stored))
+    const keys = await page.evaluate(() => document.querySelector('[data-keys]')?.textContent ?? '')
+    check('command bar: Settings > Keys lists it as Pro', keys.includes('Command bar') && keys.includes('(Pro)'), keys.slice(0, 200))
+    await page.keyboard.press('Escape')
+    await until(page, () => !document.querySelector('[role=dialog]'))
+    await until(page, () => document.querySelectorAll('[data-today-strip-item]').length === 3)
+    const s1 = await strip(page)
+    check('today strip: three due to-dos, the fourth as +1 more, the later one left out', !!s1 && s1.items.join('|') === 'Pay rent|Call mum|Water plants' && s1.more === '+1 more', JSON.stringify(s1))
+    await page.screenshot({ path: path.join(SHOTS, '90-today-strip.png') })
+
+    await page.click('[data-today-focus]')
+    await page.keyboard.type('Ship the strip')
+    await page.keyboard.press('Enter')
+    let focus = null
+    for (let t = 0; t < 4000 && !focus; t += 150) {
+      focus = (await control.evaluate(async () => (await chrome.storage.sync.get('todayFocus')).todayFocus)) ?? null
+      if (!focus) await sleep(150)
+    }
+    check("today strip: the focus line saves for today's date", focus?.day === day && focus?.text === 'Ship the strip', JSON.stringify(focus))
+    const second = await openNtp()
+    await goTo(second, 'Strip test')
+    const kept = await until(second, () => document.querySelector('[data-today-focus]')?.value === 'Ship the strip')
+    check('today strip: the focus shows on the next new tab', kept)
+    await control.evaluate(() => chrome.storage.sync.set({ todayFocus: { day: '2000-01-01', text: 'Ship the strip' } }))
+    check("today strip: yesterday's focus is an empty line today", await until(second, () => document.querySelector('[data-today-focus]')?.value === ''))
+    await second.close()
+
+    await page.bringToFront()
+    await page.evaluate(() => document.querySelector('[data-today-more]').click())
+    check('today strip: +1 more opens the Today list', await until(page, () => !!document.querySelector('[data-today-view]')))
+    await goTo(page, 'Strip test')
+    await until(page, () => !!document.querySelector('[data-today-strip-toggle]'))
+    await page.evaluate(() => document.querySelector('[data-today-strip-toggle]').click())
+    let ticked = false
+    for (let t = 0; t < 5000 && !ticked; t += 150) {
+      ticked = await control.evaluate(async (list) => !!(await chrome.storage.sync.get(`todo:${list}`))[`todo:${list}`]?.items.find((i) => i.id === 'i1')?.done, LIST)
+      if (!ticked) await sleep(150)
+    }
+    const after = await until(page, () => [...document.querySelectorAll('[data-today-strip-item]')].map((r) => r.textContent.trim()).join('|') === 'Call mum|Water plants|Book dentist' && !document.querySelector('[data-today-more]'), undefined, 4000)
+    check('today strip: ticking marks it done in its list and the next one moves up', ticked && after, JSON.stringify(await strip(page)))
+
+    await control.evaluate(() => chrome.storage.sync.remove('proTrial'))
+    check('today strip: hidden without Pro, even when switched on', await until(page, () => !document.querySelector('[data-today-strip]')))
+    await page.close()
+
+    // Spaces by time: an all-day rule (same start and end) for Rule test, last space Strip test.
+    // Every page with Pro on keeps the localStorage copy the first frame reads; a page opened and
+    // closed first (prime) makes sure it's written before the tab being checked loads.
+    const prime = async () => {
+      const p = await openNtp()
+      await sleep(500)
+      await p.close()
+    }
+    await control.evaluate(async ([strip, rules]) => {
+      localStorage.setItem('stackable:lastSpaceId', strip)
+      await chrome.storage.sync.set({ proTrial: { startedAt: Date.now() }, spaceSchedule: { v: 1, rules } })
+    }, [made.strip, [{ space: 'Rule test', days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '00:00' }]])
+    await prime()
+    const ruled = await openNtp()
+    const h1 = () => ruled.evaluate(() => document.querySelector('main h1')?.textContent)
+    check('schedule: a new tab opens on the space its rule names', (await h1()) === 'Rule test', String(await h1()))
+    await control.evaluate(() => chrome.storage.sync.set({ spaceSchedule: { v: 1, rules: [{ space: 'Strip test', days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '00:00' }] } }))
+    await sleep(1200)
+    check('schedule: a tab already open never switches', (await h1()) === 'Rule test', String(await h1()))
+    await ruled.close()
+    await control.evaluate(async (rule) => {
+      localStorage.setItem('stackable:lastSpaceId', rule)
+      await chrome.storage.sync.set({ spaceSchedule: { v: 1, rules: [{ space: 'Gone space', days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '00:00' }] } })
+    }, made.rule)
+    await prime()
+    const gone = await openNtp()
+    check('schedule: a rule whose space is gone leaves the last space', (await gone.evaluate(() => document.querySelector('main h1')?.textContent)) === 'Rule test')
+    await gone.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    check('schedule: Settings says the space is gone', await until(gone, () => /no space called Gone space/.test(document.querySelector('[data-schedule-missing]')?.textContent ?? '')))
+    await gone.keyboard.press('Escape')
+    await gone.close()
+    await control.evaluate(async (strip) => {
+      localStorage.setItem('stackable:lastSpaceId', strip)
+      await chrome.storage.sync.set({ spaceSchedule: { v: 1, rules: [{ space: 'Rule test', days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '00:00' }] } })
+      await chrome.storage.sync.remove('proTrial')
+    }, made.strip)
+    await prime()
+    const freeRule = await openNtp()
+    check('schedule: without Pro the last space opens', (await freeRule.evaluate(() => document.querySelector('main h1')?.textContent)) === 'Strip test')
+    await freeRule.close()
+
+    // Command bar.
+    await control.evaluate(async () => {
+      await chrome.storage.sync.remove('spaceSchedule')
+      await chrome.storage.sync.set({ proTrial: { startedAt: Date.now() } })
+    })
+    await sleep(400)
+    const bar = await openNtp()
+    await bar.bringToFront()
+    const ctrlK = async (p) => {
+      await p.keyboard.down('Control')
+      await p.keyboard.press('KeyK')
+      await p.keyboard.up('Control')
+    }
+    await ctrlK(bar)
+    const opened = await until(bar, () => !!document.querySelector('[data-command-bar]') && document.activeElement?.hasAttribute('data-command-input'))
+    check('command bar: Ctrl+K opens it with the cursor in it', opened)
+    await bar.keyboard.type('rule test')
+    await sleep(300)
+    await bar.screenshot({ path: path.join(SHOTS, '91-command-bar.png') })
+    await until(bar, () => document.querySelector('[data-command-item][aria-selected="true"]')?.textContent.includes('Rule test'))
+    await bar.keyboard.press('Enter')
+    check('command bar: Enter on a space goes there and closes the bar', await until(bar, () => document.querySelector('main h1')?.textContent === 'Rule test' && !document.querySelector('[data-command-bar]')))
+    await ctrlK(bar)
+    await until(bar, () => !!document.querySelector('[data-command-input]'))
+    await bar.keyboard.type('settings')
+    await until(bar, () => document.querySelector('[data-command-item][aria-selected="true"]')?.textContent.includes('Open Settings'))
+    await bar.keyboard.press('Enter')
+    check('command bar: Open Settings runs from the bar', await until(bar, () => !!document.querySelector('[data-keys]') && !document.querySelector('[data-command-bar]')))
+    await bar.keyboard.press('Escape')
+    await until(bar, () => !document.querySelector('[role=dialog]'))
+    await ctrlK(bar)
+    await until(bar, () => !!document.querySelector('[data-command-bar]'))
+    await bar.keyboard.press('Escape')
+    check('command bar: Esc closes it', await until(bar, () => !document.querySelector('[data-command-bar]')))
+    await bar.close()
+
+    await control.evaluate(() => chrome.storage.sync.remove('proTrial'))
+    await sleep(400)
+    const free = await openNtp()
+    await free.bringToFront()
+    await ctrlK(free)
+    const toSearch = await until(free, () => document.activeElement?.getAttribute('aria-label') === 'Search all spaces')
+    check('command bar: without Pro, Ctrl+K goes to the search box', toSearch && !(await free.evaluate(() => !!document.querySelector('[data-command-bar]'))))
+    await free.close()
+
+    // Put back what the blocks after this one expect.
+    await control.evaluate(async ([w, list, ids, due]) => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'todayStrip', 'todayFocus', 'spaceSchedule', `todo:${list}`, `todoDue:${list}`])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      if (Object.keys(due).length) await chrome.storage.sync.set(due)
+      if (w.last === null) localStorage.removeItem('stackable:lastSpaceId')
+      else localStorage.setItem('stackable:lastSpaceId', w.last)
+      for (const id of ids) await chrome.bookmarks.removeTree(id)
+    }, [was, LIST, [made.strip, made.rule], otherDue])
+    await sleep(400)
   }
 
   // ---------- 0.8.0: share a stack as a link ----------
@@ -2124,6 +2581,317 @@ try {
     }
   }
 
+  // ---------- 0.9.0: suggested stack, AI pick, folder backup, free clean-up scan ----------
+  // The save popup offers one stack first, the one already holding links from the page's site, and
+  // Enter saves there. With a Pro key and "Let AI pick the stack" switched on in Settings, the
+  // (stubbed) server's pick wins, and a slow answer leaves the local match. Each daily snapshot also
+  // goes to a picked folder (an OPFS folder stands in for Google Drive), newest 30 of our files kept,
+  // nothing else touched. Without Pro, clean-up is a free scan with the trial in its footer.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const KEY = 'SB-FILE-0000-0000-0000'
+    const was = await control.evaluate(async () => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'aiFile']),
+      local: await chrome.storage.local.get(['proLicense', 'proCheckout', 'backupLast', 'aiFileReady']),
+    }))
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧪 File test' })
+      const recipes = await chrome.bookmarks.create({ parentId: space.id, title: 'Recipes' })
+      const docs = await chrome.bookmarks.create({ parentId: space.id, title: 'Docs' })
+      await chrome.bookmarks.create({ parentId: recipes.id, title: 'Soup', url: 'https://www.filetest-recipes.example/soup' })
+      await chrome.bookmarks.create({ parentId: docs.id, title: 'Plan', url: 'https://filetest-docs.example/plan' })
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'aiFile'])
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'aiFileReady'])
+      return { space: space.id, recipes: recipes.id, docs: docs.id }
+    })
+    const linksIn = (id) => control.evaluate(async (s) => (await chrome.bookmarks.getChildren(s)).filter((c) => c.url).map((c) => `${c.title}|${c.url}`), id)
+
+    // The popup, with a web page as the current tab and the AI pick endpoint stubbed (delay in ms).
+    const openPopup = async (tab, delay = 0) => {
+      const pop = await browser.newPage()
+      pop.on('pageerror', (e) => errors.push(`file popup: ${e.message}`))
+      await pop.evaluateOnNewDocument((tab, delay) => {
+        const real = chrome.tabs.query.bind(chrome.tabs)
+        const fake = [{ id: 990001, windowId: -1, index: 0, url: tab.url, title: tab.title, active: true, highlighted: true }]
+        Object.defineProperty(chrome.tabs, 'query', { configurable: true, writable: true, value: async (q) => (q && (q.active || q.highlighted) ? fake : real(q)) })
+        window.__fileCalls = []
+        const realFetch = window.fetch.bind(window)
+        window.fetch = async (input, init = {}) => {
+          const url = typeof input === 'string' ? input : input.url
+          if (url !== 'https://getstackboard.com/api/file') return realFetch(input, init)
+          const body = JSON.parse(init.body || '{}')
+          window.__fileCalls.push(body)
+          // Like the real fetch, a timed-out signal rejects at once.
+          await new Promise((resolve, reject) => {
+            const t = setTimeout(resolve, delay)
+            init.signal?.addEventListener('abort', () => {
+              clearTimeout(t)
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            })
+          })
+          return new Response(JSON.stringify({ ok: true, stack: body.stacks.indexOf('File test › Docs') }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+      }, tab, delay)
+      await pop.goto(NTP.replace('newtab.html', 'popup.html'), { waitUntil: 'load' })
+      await pop.bringToFront()
+      return pop
+    }
+    const suggested = (pop) =>
+      pop.evaluate(() => {
+        const b = document.querySelector('[data-suggested-stack]')
+        return b ? { id: b.dataset.suggestedStack, reason: b.dataset.suggestedReason, text: b.textContent.trim(), asking: (document.querySelector('[data-suggested]')?.textContent ?? '').includes('Asking AI') } : null
+      })
+
+    const page1 = { url: 'https://www.filetest-recipes.example/stew', title: 'Beef stew | Filetest' }
+    const p1 = await openPopup(page1)
+    await until(p1, () => !!document.querySelector('[data-suggested-stack]'))
+    const s1 = await suggested(p1)
+    check('save popup: the stack holding links from the same site comes first', s1?.id === made.recipes && s1.reason === 'site' && s1.text === 'File test › Recipes', JSON.stringify(s1))
+    check('save popup: with AI off nothing is sent', (await p1.evaluate(() => window.__fileCalls.length)) === 0)
+    await p1.focus('input[type=text]')
+    await p1.keyboard.press('Enter')
+    let saved1 = []
+    for (let t = 0; t < 5000 && !saved1.some((l) => l.includes('filetest-recipes.example/stew')); t += 200) {
+      saved1 = await linksIn(made.recipes)
+      await sleep(200)
+    }
+    check('save popup: Enter saves to the suggested stack', saved1.includes('Beef stew | Filetest|https://www.filetest-recipes.example/stew'), JSON.stringify(saved1))
+    await p1.close().catch(() => {})
+
+    // A Pro key (license API stubbed in every board tab), then the switch in Settings.
+    const stub = () => {
+      window.__fetchBeforeStub = window.__fetchBeforeStub || window.fetch
+      const real = window.__fetchBeforeStub.bind(window)
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+      window.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.startsWith('https://api.polar.sh/v1/customer-portal/license-keys/')) {
+          const op = url.split('/').pop()
+          if (op === 'activate') return json({ id: 'act-file' })
+          if (op === 'validate') return json({ benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', status: 'granted', expires_at: null, created_at: '2026-11-03T08:41:50Z' })
+          if (op === 'deactivate') return new Response(null, { status: 204 })
+        }
+        if (url === 'https://getstackboard.com/api/file' && (init.method || 'GET') === 'GET') return json({ ok: true, ready: true, max: 300 })
+        return real(input, init)
+      }
+    }
+    const boards = (await browser.pages()).filter((pg) => pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab'))
+    for (const pg of boards) await pg.evaluate(stub).catch(() => {})
+    const ntp = await browser.newPage()
+    await ntp.setViewport({ width: 1400, height: 900 })
+    ntp.on('pageerror', (e) => errors.push(`file settings: ${e.message}`))
+    await ntp.evaluateOnNewDocument(stub)
+    await control.evaluate((key) => chrome.storage.sync.set({ proKey: { key } }), KEY)
+    await ntp.goto(NTP, { waitUntil: 'load' })
+    await ntp.bringToFront()
+    await ntp.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+    await ntp.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    const toggle = await until(ntp, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro' && !!document.querySelector('[data-ai-file-toggle]'), null, 12000)
+    const offAtFirst = toggle && (await ntp.evaluate(() => !document.querySelector('[data-ai-file-toggle]').checked))
+    await ntp.evaluate(() => document.querySelector('[data-ai-file-toggle]')?.click())
+    const notice = await until(ntp, () => (document.querySelector('[data-ai-file-notice]')?.textContent ?? '').includes("Anthropic's AI"))
+    const stillOff = !(await control.evaluate(async () => (await chrome.storage.sync.get('aiFile')).aiFile?.on))
+    await ntp.evaluate(() => document.querySelector('[data-ai-file-on]')?.click())
+    let aiOn = false
+    for (let t = 0; t < 4000 && !aiOn; t += 200) {
+      aiOn = (await control.evaluate(async () => (await chrome.storage.sync.get('aiFile')).aiFile?.on)) === true
+      if (!aiOn) await sleep(200)
+    }
+    check('AI pick: off by default, and the notice comes before anything is switched on', toggle && offAtFirst && notice && stillOff, JSON.stringify({ toggle, offAtFirst, notice, stillOff }))
+    check('AI pick: Turn on saves the choice for the Chrome profile', aiOn)
+    await ntp.close()
+
+    // The popup reads this computer's activation straight from storage. Set it here, so another open
+    // test tab re-checking the fake key with the real Polar can't leave it marked unknown first.
+    await control.evaluate((key) => chrome.storage.local.set({ proLicense: { key, activationId: 'act-file', status: 'granted', checkedAt: Date.now(), okAt: Date.now() } }), KEY)
+    const p2 = await openPopup({ url: 'https://www.filetest-recipes.example/report', title: 'Quarterly report' })
+    await until(p2, () => document.querySelector('[data-suggested-stack]')?.dataset.suggestedReason === 'ai')
+    const s2 = await suggested(p2)
+    const calls = await p2.evaluate(() => window.__fileCalls)
+    const sent = calls[0] ?? {}
+    const lic = await control.evaluate(async () => { const l = (await chrome.storage.local.get('proLicense')).proLicense; return l ? `${l.status}/${l.activationId}` : null })
+    check('AI pick: the AI answer replaces the local match', s2?.id === made.docs && s2.reason === 'ai' && s2.text === 'File test › Docs', JSON.stringify({ s2, lic }))
+    check(
+      'AI pick: the request carries the page, the stack paths and the key, nothing else',
+      calls.length === 1 && sent.page?.url === 'https://www.filetest-recipes.example/report' && sent.page?.title === 'Quarterly report' &&
+        sent.stacks?.includes('File test › Recipes') && sent.license?.key === KEY && sent.license?.activationId === 'act-file' &&
+        JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(['license', 'page', 'stacks']),
+      JSON.stringify(sent).slice(0, 300),
+    )
+    await p2.evaluate(() => document.querySelector('[data-suggested-stack]').click())
+    let saved2 = []
+    for (let t = 0; t < 5000 && !saved2.length; t += 200) {
+      saved2 = (await linksIn(made.docs)).filter((l) => l.includes('/report'))
+      await sleep(200)
+    }
+    check('AI pick: a click saves to the picked stack', saved2.length === 1, JSON.stringify(saved2))
+    await p2.close().catch(() => {})
+
+    // The popup waits up to 4 s for a pick (aiFile.ts PICK_TIMEOUT_MS); this answer takes 6 s.
+    const p3 = await openPopup({ url: 'https://www.filetest-recipes.example/slow', title: 'Slow answer' }, 6000)
+    await sleep(4800)
+    const s3 = await suggested(p3)
+    check('AI pick: a slow answer leaves the local match', s3?.reason === 'site' && s3.id === made.recipes && !s3.asking, JSON.stringify(s3))
+    await p3.close().catch(() => {})
+
+    // Back to no key: every board tab takes Pro off (deactivate stubbed), then the real fetch returns.
+    await control.evaluate(() => chrome.storage.sync.remove(['proKey', 'proSub', 'aiFile']))
+    await sleep(1500)
+    await control.evaluate(() => chrome.storage.local.remove(['proLicense', 'aiFileReady']))
+
+    // ---- Back up to a folder, with the trial on ----
+    const today = await control.evaluate(() => {
+      const d = new Date()
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    })
+    await control.evaluate(async () => {
+      await chrome.storage.sync.set({ proTrial: { startedAt: Date.now() } })
+      await chrome.storage.local.remove('backupLast')
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle('e2e-backup', { create: true })
+      const write = async (name, text) => {
+        const f = await dir.getFileHandle(name, { create: true })
+        const w = await f.createWritable()
+        await w.write(text)
+        await w.close()
+      }
+      for (let d = 1; d <= 31; d++) await write(`stackboard-2026-01-${String(d).padStart(2, '0')}.json`, '{}')
+      await write('notes.txt', 'keep')
+      await write('stackboard-notes.json', 'keep')
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('stackboard-backup', 1)
+        req.onupgradeneeded = () => req.result.createObjectStore('folder')
+        req.onerror = () => reject(req.error)
+        req.onsuccess = () => {
+          const tx = req.result.transaction('folder', 'readwrite')
+          tx.objectStore('folder').put(dir, 'handle')
+          tx.oncomplete = () => {
+            req.result.close()
+            resolve()
+          }
+          tx.onerror = () => reject(tx.error)
+        }
+      })
+    })
+    const folder = () =>
+      control.evaluate(async () => {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('e2e-backup')
+        const names = []
+        for await (const n of dir.keys()) names.push(n)
+        return names.sort()
+      })
+    const readToday = (day) =>
+      control.evaluate(async (day) => {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('e2e-backup')
+        const f = await (await dir.getFileHandle(`stackboard-${day}.json`)).getFile()
+        const b = JSON.parse(await f.text())
+        return { version: b.version, spaces: Array.isArray(b.spaces) ? b.spaces.length : -1, at: b.exportedAt, hasFileTest: (b.spaces || []).some((s) => s.name === 'File test') }
+      }, day)
+    const bk = await openNtp()
+    await bk.bringToFront()
+    let names = []
+    for (let t = 0; t < 15000 && !names.includes(`stackboard-${today}.json`); t += 300) {
+      names = await folder()
+      await sleep(300)
+    }
+    const ours = names.filter((n) => /^stackboard-\d{4}-\d{2}-\d{2}\.json$/.test(n))
+    const first = names.includes(`stackboard-${today}.json`) ? await readToday(today) : null
+    check('folder backup: the daily snapshot also lands in the folder as an importable file', first?.version === 1 && first.spaces > 0 && first.hasFileTest, JSON.stringify(first))
+    check(
+      'folder backup: the newest 30 of our files stay, and nothing else in the folder is touched',
+      ours.length === 30 && !names.includes('stackboard-2026-01-01.json') && !names.includes('stackboard-2026-01-02.json') && names.includes('stackboard-2026-01-03.json') && names.includes('notes.txt') && names.includes('stackboard-notes.json'),
+      `${ours.length} ours: ${names.slice(0, 4).join(',')}…`,
+    )
+    await bk.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(bk, () => !!document.querySelector('[data-backup-name]'))
+    const panel = await bk.evaluate(() => ({ name: document.querySelector('[data-backup-name]')?.textContent, last: document.querySelector('[data-backup-last]')?.textContent }))
+    check('folder backup: Settings names the folder and the last backup', panel.name === 'e2e-backup' && (panel.last ?? '').includes('today'), JSON.stringify(panel))
+    await sleep(1100)
+    await bk.evaluate(() => document.querySelector('[data-backup-now]')?.click())
+    const toasted = await until(bk, () => (document.querySelector('.toast')?.textContent ?? '').includes('Backed up to'))
+    const again = await readToday(today)
+    check('folder backup: Back up now writes today\'s file again', toasted && again.at !== first?.at, JSON.stringify({ toasted, before: first?.at, after: again.at }))
+    await bk.evaluate(() => document.querySelector('[data-backup-stop]')?.click())
+    const stopped = await until(bk, () => !!document.querySelector('[data-backup-choose]'))
+    check('folder backup: Stop forgets the folder and keeps its files', stopped && (await folder()).includes(`stackboard-${today}.json`))
+    await bk.close()
+    await control.evaluate(async () => {
+      await (await navigator.storage.getDirectory()).removeEntry('e2e-backup', { recursive: true })
+      await chrome.storage.local.remove('backupLast')
+      await chrome.storage.sync.remove('proTrial')
+    })
+
+    // ---- Free scan, paid fix ----
+    const scan = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🧹 Scan test' })
+      const one = await chrome.bookmarks.create({ parentId: space.id, title: 'One' })
+      const two = await chrome.bookmarks.create({ parentId: space.id, title: 'Two' })
+      await chrome.bookmarks.create({ parentId: one.id, title: 'Scan A', url: 'https://scan-dup.example.com/p' })
+      await chrome.bookmarks.create({ parentId: two.id, title: 'Scan B', url: 'https://scan-dup.example.com/p' })
+      return { space: space.id }
+    })
+    const fs1 = await openNtp()
+    await fs1.bringToFront()
+    await fs1.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+    await until(fs1, () => !!document.querySelector('[data-cleanup-scan]'))
+    const entry = await fs1.evaluate(() => ({ scan: !!document.querySelector('[data-cleanup-scan]'), pro: !!document.querySelector('[data-cleanup-open]') }))
+    check('free scan: Settings offers the scan without Pro', entry.scan && !entry.pro, JSON.stringify(entry))
+    await fs1.evaluate(() => document.querySelector('[data-cleanup-scan]').click())
+    await until(fs1, () => [...document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')].some((r) => r.textContent.includes('Scan B')))
+    const free = await fs1.evaluate(() => ({
+      rows: [...document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')].filter((r) => /Scan [AB]/.test(r.textContent)).length,
+      boxes: document.querySelectorAll('[data-cleanup-row] input').length,
+      trial: !!document.querySelector('[data-cleanup-trial]'),
+      remove: !!document.querySelector('[data-cleanup-remove]'),
+      note: document.querySelector('[data-cleanup-free]')?.textContent ?? '',
+    }))
+    check('free scan: the duplicates show with nothing to tick, and the footer offers the trial', free.rows === 2 && free.boxes === 0 && free.trial && !free.remove && free.note.includes('14 days'), JSON.stringify(free))
+    await fs1.evaluate(() => [...document.querySelectorAll('[data-cleanup] [role=radio]')].find((b) => b.textContent.startsWith("Can't be reached"))?.click())
+    await until(fs1, () => !!document.querySelector('[data-cleanup-dead-pro]'))
+    check('free scan: checking for dead links stays Pro', await fs1.evaluate(() => !!document.querySelector('[data-cleanup-dead-pro]') && !document.querySelector('[data-cleanup-check]')))
+    await fs1.evaluate(() => document.querySelector('[data-cleanup-trial]').click())
+    await until(fs1, () => !!document.querySelector('[data-cleanup-remove]'))
+    await fs1.evaluate(() => [...document.querySelectorAll('[data-cleanup] [role=radio]')].find((b) => b.textContent.startsWith('Duplicates'))?.click())
+    await until(fs1, () => document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row] input').length > 0)
+    const ticked = await fs1.evaluate(() =>
+      [...document.querySelectorAll('[data-cleanup-section="dupes"] [data-cleanup-row]')]
+        .filter((r) => /Scan [AB]/.test(r.textContent))
+        .map((r) => `${r.textContent.includes('Scan A') ? 'A' : 'B'}:${r.querySelector('input')?.checked}`)
+        .sort()
+        .join(','),
+    )
+    check('free scan: starting the trial there turns on Remove, the extra copy ticked', ticked === 'A:false,B:true', ticked)
+    await fs1.close()
+
+    for (const pg of boards) await pg.evaluate(() => { if (window.__fetchBeforeStub) window.fetch = window.__fetchBeforeStub }).catch(() => {})
+    await control.evaluate(
+      async (m, w) => {
+        await chrome.bookmarks.removeTree(m.space)
+        await chrome.bookmarks.removeTree(m.scan)
+        await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'aiFile'])
+        await chrome.storage.local.remove(['proLicense', 'proCheckout', 'backupLast', 'aiFileReady'])
+        if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+        if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+        await new Promise((r) => {
+          const req = indexedDB.deleteDatabase('stackboard-backup')
+          req.onsuccess = req.onerror = req.onblocked = () => r()
+        })
+      },
+      { space: made.space, scan: scan.space },
+      was,
+    )
+    await sleep(400)
+  }
+
   // ---------- 0.8.0: Teams pack 2 ----------
   // Go links (asked through the service worker, since a test can't type in the address bar), a
   // start-here space for new people, the company's brand, and settings the company locks.
@@ -2289,6 +3057,231 @@ try {
     const cleared = await until(plain, () => document.documentElement.getAttribute('data-accent') === null && !document.querySelector('aside [data-brand]'))
     check('teams2: with the policy gone, the company colour and name go too', cleared)
     await plain.close()
+  }
+
+  // ---------- 0.9.0: the trial-end recap and the auto-archive line ----------
+  // The last two days of a trial, and the first tabs after it ends, bring one corner card with what
+  // Pro did on this computer (storage.local proStats) and Keep Pro. Free users get one line about
+  // auto-archive after "Stash and close" lands or a bankruptcy certificate closes, three times at
+  // most. The tab that opens decides, and the corner holds one card at a time.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const D = 24 * 60 * 60 * 1000
+    const LS = ['stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:rating', 'stackable:snapshotDay']
+    const was = await control.evaluate(async (ls) => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      local: await chrome.storage.local.get(['proStats', 'proCheckout', 'proLicense', 'whatsNew080']),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS)
+    // A quiet board: no key, no what's-new note pending, the rating ask already answered.
+    const setup = (s) => control.evaluate(async (s) => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'proStats'])
+      localStorage.setItem('stackable:whatsNew070', '-1')
+      localStorage.setItem('stackable:whatsNew080', '-1')
+      localStorage.setItem('stackable:rating', 'dismissed')
+      for (const [k, v] of Object.entries(s.ls ?? {})) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+      if (s.trialStartedAt) await chrome.storage.sync.set({ proTrial: { startedAt: s.trialStartedAt } })
+      if (s.stats) await chrome.storage.local.set({ proStats: s.stats })
+    }, s)
+    const card = (page) => page.evaluate(() => {
+      const c = document.querySelector('[data-trial-end]')
+      return c ? { kind: c.dataset.trialEnd, text: c.innerText.replace(/\s+/g, ' ').trim() } : null
+    })
+    const none = async (page, sel) => {
+      await sleep(1500)
+      return page.evaluate((s) => !document.querySelector(s), sel)
+    }
+
+    await setup({ trialStartedAt: Date.now() - 12.5 * D, stats: { archived: 214, snapshots: 12, todosDone: 9 }, ls: { 'stackable:trialEnding': null, 'stackable:trialEnded': null } })
+    const t1 = await openNtp()
+    const c1 = (await until(t1, () => !!document.querySelector('[data-trial-end]'))) ? await card(t1) : null
+    check(
+      'trial recap: the last two days bring one card with what Pro did and Keep Pro',
+      !!c1 && c1.kind === 'ending' && /Your Pro trial ends (today|tomorrow|in 2 days)/.test(c1.text) && c1.text.includes('Pro archived 214 tabs, kept 12 snapshots and checked off 9 to-dos.') && c1.text.includes('Keep Pro for $'),
+      JSON.stringify(c1),
+    )
+    await t1.close()
+    const t2 = await openNtp()
+    const second = await until(t2, () => !!document.querySelector('[data-trial-end]'))
+    await t2.close()
+    const t3 = await openNtp()
+    const third = await none(t3, '[data-trial-end]')
+    await t3.close()
+    check('trial recap: on two new tabs at most', second && third)
+
+    await setup({ trialStartedAt: Date.now() - 13 * D, ls: { 'stackable:trialEnding': '0' } })
+    const t4 = await openNtp()
+    await until(t4, () => !!document.querySelector('[data-trial-end]'))
+    check('trial recap: no stats line while Pro has nothing to show', await t4.evaluate(() => !!document.querySelector('[data-trial-end]') && !document.querySelector('[data-trial-end-stats]')))
+    await t4.evaluate(() => [...document.querySelectorAll('[data-trial-end] button')].find((b) => b.textContent.trim() === 'Not now')?.click())
+    const retired = await control.evaluate(() => localStorage.getItem('stackable:trialEnding'))
+    await t4.close()
+    const t5 = await openNtp()
+    check('trial recap: Not now retires it', retired === '-1' && (await none(t5, '[data-trial-end]')), String(retired))
+    await t5.close()
+
+    // Keep Pro opens the checkout (caught before it opens) and remembers it, like Get Pro in Settings.
+    await setup({ trialStartedAt: Date.now() - 13 * D, ls: { 'stackable:trialEnding': '0' } })
+    const kp = await browser.newPage()
+    await kp.setViewport({ width: 1400, height: 900 })
+    kp.on('pageerror', (e) => errors.push(`trial recap: ${e.message}`))
+    await kp.evaluateOnNewDocument(() => {
+      window.__opened = []
+      try {
+        const create = chrome.tabs.create.bind(chrome.tabs)
+        chrome.tabs.create = (o, ...rest) => (/polar\.sh/.test(o?.url ?? '') ? (window.__opened.push(o.url), Promise.resolve({ id: -1 })) : create(o, ...rest))
+      } catch {
+        // read-only binding: the real checkout tab opens and is closed below
+      }
+    })
+    await kp.goto(NTP, { waitUntil: 'load' })
+    await kp.bringToFront()
+    await until(kp, () => !!document.querySelector('[data-trial-keep]'))
+    await kp.evaluate(() => document.querySelector('[data-trial-keep]')?.click())
+    await sleep(800)
+    const opened = await kp.evaluate(() => window.__opened.slice())
+    const real = browser.targets().filter((t) => /polar\.sh/.test(t.url()))
+    for (const t of real) await (await t.page().catch(() => null))?.close().catch(() => {})
+    const kept = await control.evaluate(async () => ({ shows: localStorage.getItem('stackable:trialEnding'), checkout: (await chrome.storage.local.get('proCheckout')).proCheckout }))
+    check(
+      'trial recap: Keep Pro opens the checkout and retires the card',
+      (opened.some((u) => u.startsWith('https://buy.polar.sh/')) || real.length > 0) && kept.shows === '-1' && typeof kept.checkout?.at === 'number',
+      JSON.stringify({ opened, real: real.length, kept }),
+    )
+    await kp.close()
+
+    await setup({ trialStartedAt: Date.now() - 15 * D, stats: { snapshots: 14, cleaned: 23 }, ls: { 'stackable:trialEnded': null } })
+    const e1 = await openNtp()
+    const ce = (await until(e1, () => !!document.querySelector('[data-trial-end]'))) ? await card(e1) : null
+    check(
+      'trial recap: the first tabs after the trial ends say so, with what Pro did',
+      !!ce && ce.kind === 'ended' && ce.text.includes('Your Pro trial has ended') && ce.text.includes('Pro kept 14 snapshots and cleaned up 23 links.') && ce.text.includes('Everything you made is still here'),
+      JSON.stringify(ce),
+    )
+    await e1.close()
+    await setup({ trialStartedAt: Date.now() - 30 * D, ls: { 'stackable:trialEnded': null } })
+    const e2 = await openNtp()
+    check('trial recap: a trial that ended weeks ago stays quiet', await none(e2, '[data-trial-end]'))
+    await e2.close()
+
+    // An early user with the Pro note still pending and a trial in its last days: one card only.
+    await setup({ trialStartedAt: Date.now() - 13 * D, ls: { 'stackable:trialEnding': null, 'stackable:whatsNew070': '0' } })
+    await control.evaluate(() => chrome.storage.sync.set({ proEarly: { from: 'e2e', at: Date.now() }, proEarlyTodo: { keep: true, at: Date.now() } }))
+    const both = await openNtp()
+    await until(both, () => !!document.querySelector('[data-trial-end], [data-whats-new], [data-whats-new-080]'))
+    await sleep(1500)
+    const cards = await both.evaluate(() => document.querySelectorAll('[data-trial-end], [data-whats-new], [data-whats-new-080]').length)
+    check("corner: the trial recap and a what's-new note never share a tab", cards === 1, String(cards))
+    await both.close()
+
+    // The auto-archive line, played through the note "Stash and close" leaves for its new tab.
+    const spaceId = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      return (await chrome.bookmarks.getChildren(root.id)).find((c) => !c.url)?.id
+    })
+    const landing = async (bankruptcy) => {
+      const at = Date.now()
+      await control.evaluate((note) => chrome.storage.local.set({ stackboardOpenSpace: note }), { spaceId, saved: 3, at, ...(bankruptcy ? { bankruptcy: { tabs: 5, windows: 2, saved: 5, at } } : {}) })
+      return openNtp()
+    }
+    const line = (page) => page.evaluate(() => document.querySelector('[data-moment-line]')?.innerText.replace(/\s+/g, ' ').trim() ?? null)
+    await setup({ ls: { 'stackable:proMoments': null } })
+    const m1 = await landing(false)
+    const shown1 = await until(m1, () => !!document.querySelector('[data-moment-line]'))
+    const text1 = await line(m1)
+    check('auto-archive line: a free user hears it after Stash and close lands', shown1 && text1 === 'Auto-archive can do this while you work: idle tabs save themselves. Try Pro free for 14 days.', String(text1))
+    await m1.evaluate(() => document.querySelector('[data-moment-pro]')?.click())
+    check('auto-archive line: its link opens Settings at Stackboard Pro', await until(m1, () => !!document.querySelector('[data-pro]') && !document.querySelector('[data-moment-line]')))
+    await m1.close()
+
+    await setup({ trialStartedAt: Date.now() - 20 * D, ls: { 'stackable:proMoments': '1', 'stackable:trialEnded': '-1' } })
+    const m2 = await landing(true)
+    await until(m2, () => !!document.querySelector('[data-certificate]'))
+    await sleep(3000)
+    const during = await line(m2)
+    await m2.evaluate(() => document.querySelector('[data-certificate] button[aria-label="Close"]')?.click())
+    const shown2 = await until(m2, () => !!document.querySelector('[data-moment-line]'))
+    const text2 = await line(m2)
+    check("auto-archive line: waits for the certificate to close, and says it's part of Pro once the trial is used", during === null && shown2 && text2 === "Auto-archive does this while you work. It's part of Pro.", JSON.stringify({ during, text2 }))
+    await m2.close()
+    const m3 = await landing(false)
+    const third3 = await until(m3, () => !!document.querySelector('[data-moment-line]'))
+    await m3.close()
+    const m4 = await landing(false)
+    await sleep(3500)
+    const fourth = await line(m4)
+    await m4.close()
+    const moments = await control.evaluate(() => localStorage.getItem('stackable:proMoments'))
+    check('auto-archive line: three times at most', third3 && fourth === null && moments === '3', JSON.stringify({ third3, fourth, moments }))
+
+    await setup({ trialStartedAt: Date.now() - 2 * D, ls: { 'stackable:proMoments': null } })
+    const m5 = await landing(false)
+    await sleep(3500)
+    check('auto-archive line: never during the trial', (await line(m5)) === null)
+    await m5.close()
+
+    // What Pro did is counted where it happens: today's snapshot, taken on the trial, adds one.
+    // Board tabs left open by earlier blocks all react when the trial starts, and one that Chrome froze in
+    // the background mid-transaction holds the snapshot store for good (seen 4 Nov with 19 tabs open):
+    // close them first so this check sees its own tab.
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    await setup({ trialStartedAt: Date.now() - 2 * D, ls: { 'stackable:snapshotDay': null } })
+    await control.evaluate(async () => {
+      const d = new Date()
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      await new Promise((res, rej) => {
+        const r = indexedDB.open('stackboard-snapshots', 1)
+        r.onupgradeneeded = () => r.result.createObjectStore('days')
+        r.onsuccess = () => {
+          const db = r.result
+          const tx = db.transaction('days', 'readwrite')
+          tx.objectStore('days').delete(day)
+          tx.oncomplete = () => (db.close(), res())
+          tx.onerror = () => rej(tx.error)
+        }
+        r.onerror = () => rej(r.error)
+      })
+    })
+    const s1 = await openNtp()
+    await s1.bringToFront()
+    let stats = null
+    for (let t = 0; t < 12000 && !stats?.snapshots; t += 300) {
+      stats = await control.evaluate(async () => (await chrome.storage.local.get('proStats')).proStats ?? null)
+      if (!stats?.snapshots) await sleep(300)
+    }
+    // On a miss, say why: was today's snapshot taken (and when), is the day marker set, how many board tabs are open.
+    const why = stats?.snapshots === 1 ? null : await control.evaluate(async () => {
+      const d = new Date()
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const rec = await new Promise((res) => {
+        const r = indexedDB.open('stackboard-snapshots', 1)
+        r.onsuccess = () => { const q = r.result.transaction('days').objectStore('days').get(day); q.onsuccess = () => (res(q.result ? { at: q.result.at, links: q.result.counts?.links } : null), r.result.close()); q.onerror = () => res('read failed') }
+        r.onerror = () => res('open failed')
+      })
+      return { rec, now: Date.now(), marker: localStorage.getItem('stackable:snapshotDay'), trial: (await chrome.storage.sync.get('proTrial')).proTrial ?? null }
+    }).catch((e) => String(e))
+    const tabs = (await browser.pages()).filter((pg) => pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')).length
+    check("pro stats: today's snapshot is counted on this computer", stats?.snapshots === 1, JSON.stringify({ stats, why, tabs }))
+    await s1.close()
+
+    await control.evaluate(async (w) => {
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      await chrome.storage.local.remove(['proStats', 'proCheckout', 'proLicense', 'whatsNew080', 'stackboardOpenSpace'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was)
+    await sleep(400)
   }
 
   // ---------- 0.8.0: nested folders ----------
@@ -3074,6 +4067,106 @@ try {
     await sleep(400)
   }
 
+  // ---------- 0.9.0: help link in Settings ----------
+  // Settings > Help opens getstackboard.com/support with the version in the hash (never sent to the server).
+  {
+    const p = await openNtp()
+    await p.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await p.waitForSelector('[data-help-link]', { timeout: 8000 }).catch(() => null)
+    const known = new Set(browser.targets())
+    const opened = browser.waitForTarget((t) => !known.has(t) && t.url().startsWith('https://getstackboard.com/support'), { timeout: 10000 }).catch(() => null)
+    await p.evaluate(() => document.querySelector('[data-help-link]')?.click())
+    const t = await opened
+    const version = await p.evaluate(() => chrome.runtime.getManifest().version)
+    check('help: Settings opens the help page with the version in the hash', !!t && t.url() === `https://getstackboard.com/support#v=${version}`, t ? t.url() : 'no tab')
+    if (t) await (await t.page().catch(() => null))?.close().catch(() => {})
+    await p.close()
+  }
+
+  // ---------- 0.9.0: what's new ----------
+  // An update from 0.8.0 shows the 0.9.0 note: the free line, one Pro line with the 14-day trial for
+  // a free user, and See what's in Pro. An update from before 0.8.0 marks both notes; the 0.9.0 one
+  // takes the 0.8.0 one's place, carries its items and Try Packed, and the 0.8.0 note never follows.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const card = (page) =>
+      page.evaluate(() => {
+        const c = document.querySelector('[data-whats-new-090]')
+        return c ? { text: c.innerText, pro: c.querySelector('[data-whats-new-pro]')?.innerText ?? '', tryPacked: !!c.querySelector('[data-try-packed]') } : null
+      })
+    const was = await control.evaluate(async () => ({
+      appearance: (await chrome.storage.local.get('appearance')).appearance ?? null,
+      sync: await chrome.storage.sync.get(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey']),
+      local: await chrome.storage.local.get(['whatsNew080', 'whatsNew090']),
+      w070: localStorage.getItem('stackable:whatsNew070'),
+      w080: localStorage.getItem('stackable:whatsNew080'),
+      w090: localStorage.getItem('stackable:whatsNew090'),
+      firstSeen: localStorage.getItem('stackable:firstSeen'),
+    }))
+    await control.evaluate(async () => {
+      localStorage.setItem('stackable:firstSeen', String(Date.now()))
+      localStorage.setItem('stackable:whatsNew070', '-1')
+      localStorage.removeItem('stackable:whatsNew080')
+      localStorage.removeItem('stackable:whatsNew090')
+      await chrome.storage.local.remove(['whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      const a = (await chrome.storage.local.get('appearance')).appearance ?? {}
+      await chrome.storage.local.set({ appearance: { ...a, layout: 'rows' } })
+    })
+    await sleep(400)
+    await askWorker(control, { type: 'e2e-updated-from', previousVersion: '0.8.0', whatsNew090: true })
+    const p1 = await openNtp()
+    const c1 = (await until(p1, () => !!document.querySelector('[data-whats-new-090]'))) ? await card(p1) : null
+    check(
+      "what's new 0.9.0: an update from 0.8.0 shows the suggested stack and Pro with the 14-day trial",
+      !!c1 && c1.text.includes('saving a page suggests the right stack') && !c1.text.includes('folders inside stacks') && c1.pro.startsWith('Stackboard Pro adds a Today strip') && c1.pro.includes('Try it free for 14 days') && !c1.tryPacked,
+      JSON.stringify(c1),
+    )
+    await p1.evaluate(() => [...document.querySelectorAll('[data-whats-new-090] button')].find((b) => b.textContent.trim() === 'Got it')?.click())
+    await sleep(500)
+    check("what's new 0.9.0: Got it retires it", await p1.evaluate(() => !document.querySelector('[data-whats-new-090]') && localStorage.getItem('stackable:whatsNew090') === '-1'))
+    await p1.close()
+
+    // From before 0.8.0: both marks. The 0.9.0 note carries the 0.8.0 items; the 0.8.0 note never comes.
+    await control.evaluate(() => localStorage.removeItem('stackable:whatsNew090'))
+    await askWorker(control, { type: 'e2e-updated-from', previousVersion: '0.7.0', whatsNew: true, whatsNew090: true })
+    const p2 = await openNtp()
+    const c2 = (await until(p2, () => !!document.querySelector('[data-whats-new-090]'))) ? await card(p2) : null
+    const no080 = await p2.evaluate(() => !document.querySelector('[data-whats-new-080]'))
+    check(
+      "what's new 0.9.0: from before 0.8.0 it also names folders, Packed and sharing, with Try Packed",
+      !!c2 && c2.text.includes('folders inside stacks') && c2.text.includes('share a stack as a link') && c2.text.includes('saving a page suggests the right stack') && c2.tryPacked && no080,
+      JSON.stringify(c2),
+    )
+    await p2.evaluate(() => [...document.querySelectorAll('[data-whats-new-090] button')].find((b) => b.textContent.trim() === 'Got it')?.click())
+    await sleep(400)
+    await p2.close()
+    const p3 = await openNtp()
+    await sleep(1500)
+    check("what's new 0.9.0: the 0.8.0 note never follows it", await p3.evaluate(() => !document.querySelector('[data-whats-new-080]') && !document.querySelector('[data-whats-new-090]')))
+    await p3.close()
+
+    await control.evaluate(async (w) => {
+      await chrome.storage.local.remove(['whatsNew080', 'whatsNew090'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (w.appearance) await chrome.storage.local.set({ appearance: w.appearance })
+      else await chrome.storage.local.remove('appearance')
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of [['stackable:whatsNew070', w.w070], ['stackable:whatsNew080', w.w080], ['stackable:whatsNew090', w.w090], ['stackable:firstSeen', w.firstSeen]]) {
+        if (v === null) localStorage.removeItem(k)
+        else localStorage.setItem(k, v)
+      }
+    }, was)
+    await sleep(400)
+  }
+
   // ---------- 0.8.0: stack reorder past a loose link ----------
   // Chrome counts every child of a folder, while the board shows stacks only: a loose link sitting
   // straight in a space folder (easy to make in Chrome's bookmark manager) used to shift a dropped
@@ -3240,6 +4333,358 @@ try {
       await chrome.storage.sync.remove(['proTrial', 'proKey', 'proEarlyTodo'])
       if (Object.keys(w).length) await chrome.storage.sync.set(w)
     }, before070)
+  }
+
+  // ---------- School mode: the pro, ai and rating locks ----------
+  // For school or shared computers the policy sets lock.pro, lock.ai and lock.rating: the board
+  // builder's "School or shared computers" preset makes it, and here its Admin console export goes in
+  // through the unpacked-build override. pro: no prices, trial or upgrade prompts anywhere, a running
+  // trial counts for nothing, and a paid key already on this computer keeps its Pro card. ai: no Tidy
+  // button, no AI pick and no request to the AI server. rating: no rating card, whichever rule fires.
+  // The same board with no policy behaves as before. Polar and getstackboard.com/api are stubbed in
+  // every page this block opens, and record each call.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const KEY = 'SB-E2E-0000-SCHOOL'
+    const SYNC = ['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'aiFile']
+    const LOCAL = ['proLicense', 'proCheckout', 'proStats', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'whatsNew090', 'stackboardOpenSpace']
+    const LS = ['stackable:managedOverride', 'stackable:opens', 'stackable:firstSeen', 'stackable:rating', 'stackable:stashes', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:lastSpaceId', 'stackable:snapshotDay']
+    const was = await control.evaluate(async (s) => ({
+      sync: await chrome.storage.sync.get(s.sync),
+      local: await chrome.storage.local.get(s.local),
+      ls: Object.fromEntries(s.ls.map((k) => [k, localStorage.getItem(k)])),
+    }), { sync: SYNC, local: LOCAL, ls: LS })
+    // Board tabs left open by earlier blocks all react when a key or a trial arrives: close them first.
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    const stub = () => {
+      const real = window.fetch.bind(window)
+      const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+      window.__calls = []
+      window.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (!url.startsWith('https://getstackboard.com/api/') && !url.startsWith('https://api.polar.sh/')) return real(input, init)
+        window.__calls.push(`${(init.method || 'GET').toUpperCase()} ${url}`)
+        if (url.startsWith('https://api.polar.sh/')) return json({ benefit_id: 'f204b661-dc9b-4ce5-91f5-7cc6559d1617', status: 'granted', expires_at: null })
+        if ((init.method || 'GET').toUpperCase() === 'GET') return json({ ok: true, ready: true, max: 600 })
+        return json({ ok: true, stack: 0 })
+      }
+    }
+    const open = async () => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`school: ${e.message}`))
+      await p.evaluateOnNewDocument(stub)
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      return p
+    }
+    // The save popup with a web page as the current tab.
+    const popup = async (tab) => {
+      const pop = await browser.newPage()
+      pop.on('pageerror', (e) => errors.push(`school popup: ${e.message}`))
+      await pop.evaluateOnNewDocument(stub)
+      await pop.evaluateOnNewDocument((tab) => {
+        const real = chrome.tabs.query.bind(chrome.tabs)
+        const fake = [{ id: 990002, windowId: -1, index: 0, url: tab.url, title: tab.title, active: true, highlighted: true }]
+        Object.defineProperty(chrome.tabs, 'query', { configurable: true, writable: true, value: async (q) => (q && (q.active || q.highlighted) ? fake : real(q)) })
+      }, tab)
+      await pop.goto(NTP.replace('newtab.html', 'popup.html'), { waitUntil: 'load' })
+      await pop.bringToFront()
+      return pop
+    }
+    const settings = (p) => p.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    const ctrlK = async (p) => {
+      await p.keyboard.down('Control')
+      await p.keyboard.press('KeyK')
+      await p.keyboard.up('Control')
+    }
+    const setPolicy = (p) => control.evaluate((j) => (j ? localStorage.setItem('stackable:managedOverride', j) : localStorage.removeItem('stackable:managedOverride')), p ? JSON.stringify(p) : null)
+    // Any way to buy or try Pro, or a price.
+    const OFFERS = "Get Pro|free trial|Try it free|Try Pro|Keep Pro|Renew Pro|See what's in Pro|\\$\\d"
+
+    // 1. The builder's preset, exported for the Google Admin console, is the policy for the rest.
+    let policy = { lock: { pro: true, ai: true, rating: true } }
+    const SITE = process.env.STACKABLE_SITE || path.resolve(process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist'), '..', 'site')
+    if (!fs.existsSync(path.join(SITE, 'teams', 'builder', 'index.html'))) {
+      console.log(`SKIP  school builder: no site/teams/builder page under ${SITE} (set STACKABLE_SITE)`)
+    } else {
+      const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }
+      const bp = await browser.newPage()
+      bp.on('pageerror', (e) => errors.push(`school builder: ${e.message}`))
+      await bp.setRequestInterception(true)
+      bp.on('request', (req) => {
+        const u = new URL(req.url())
+        if (u.origin !== 'https://getstackboard.com') return req.continue()
+        let rel = decodeURIComponent(u.pathname.slice(1))
+        if (!path.extname(rel)) rel = path.join(rel, 'index.html')
+        const full = path.resolve(SITE, rel)
+        if (!full.startsWith(path.resolve(SITE)) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) return req.respond({ status: 404, body: 'not found' })
+        req.respond({ status: 200, contentType: TYPES[path.extname(full)] ?? 'application/octet-stream', body: fs.readFileSync(full) })
+      })
+      await bp.goto('https://getstackboard.com/teams/builder', { waitUntil: 'load' })
+      await bp.bringToFront()
+      const offered = await until(bp, () => ['pro', 'ai', 'rating'].every((k) => !!document.querySelector(`[data-lock="${k}"]`)) && !!document.querySelector('[data-preview]'))
+      check('school builder: the three new locks sit beside the others', offered)
+      await bp.evaluate(() => document.querySelector('[data-act="preset-school"]')?.click())
+      await until(bp, () => (document.querySelector('[data-preview]')?.textContent ?? '').includes('"rating"'))
+      const built = await bp.evaluate(() => ({
+        ticked: [...document.querySelectorAll('[data-lock]')].filter((b) => b.checked).map((b) => b.dataset.lock),
+        json: document.querySelector('[data-preview]')?.textContent ?? '',
+      }))
+      let exported = null
+      try {
+        exported = JSON.parse(built.json)
+      } catch {
+        // checked below
+      }
+      check(
+        'school builder: one click on School or shared computers ticks pro, ai and rating, and the export carries them',
+        JSON.stringify(built.ticked) === JSON.stringify(['pro', 'ai', 'rating']) && JSON.stringify(exported?.lock?.Value) === JSON.stringify({ pro: true, ai: true, rating: true }),
+        JSON.stringify({ ticked: built.ticked, lock: exported?.lock ?? built.json.slice(0, 120) }),
+      )
+      // The board reads the Admin console's {"Value": ...} form as it is.
+      if (exported?.lock) policy = exported
+      await bp.close()
+    }
+
+    // 2. A free user with a trial in its last days, early (the Pro note pending, no free to-do lists),
+    //    the 0.9.0 note due, and the rating rule met: 30 new tabs over 5 days.
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🏫 School test' })
+      const st = await chrome.bookmarks.create({ parentId: space.id, title: 'Class links' })
+      for (let i = 1; i <= 5; i++) await chrome.bookmarks.create({ parentId: st.id, title: `Class ${i}`, url: `https://class${i}.school-test.example/` })
+      return { space: space.id, stack: st.id }
+    })
+    await setPolicy(policy)
+    await control.evaluate(async (space) => {
+      const now = Date.now()
+      await chrome.storage.sync.remove(['proKey', 'proSub', 'aiFile'])
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'stackboardOpenSpace'])
+      await chrome.storage.sync.set({ proTrial: { startedAt: now - 12.5 * 86400000 }, proEarly: { from: 'e2e', at: now }, proEarlyTodo: { keep: false, at: now } })
+      await chrome.storage.local.set({ whatsNew090: { from: '0.8.0', at: now } })
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew090', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:rating']) localStorage.removeItem(k)
+      localStorage.setItem('stackable:whatsNew080', '-1')
+      localStorage.setItem('stackable:opens', '30')
+      localStorage.setItem('stackable:firstSeen', String(now - 5 * 86400000))
+      localStorage.setItem('stackable:lastSpaceId', space)
+    }, made.space)
+
+    const s1 = await open()
+    await until(s1, () => !!document.querySelector('[data-whats-new-090]'))
+    await sleep(1200) // the rating ask and the trial recap decide on load too
+    const board = await s1.evaluate((offers) => {
+      const re = new RegExp(offers, 'i')
+      return {
+        h1: document.querySelector('main h1')?.textContent,
+        rating: !!document.querySelector('[data-rating-prompt]'),
+        recap: !!document.querySelector('[data-trial-end]'),
+        proNote: !!document.querySelector('[data-whats-new]'),
+        note090: document.querySelector('[data-whats-new-090]')?.innerText ?? null,
+        note090Pro: !!document.querySelector('[data-whats-new-090] [data-whats-new-pro]'),
+        offers: [...document.querySelectorAll('button, a')].map((b) => b.textContent.trim()).filter((t) => re.test(t)),
+        text: re.test(document.body.innerText),
+      }
+    }, OFFERS)
+    check('school: the rating card stays away though its rule is met (30 tabs over 5 days)', board.h1 === 'School test' && !board.rating, JSON.stringify(board))
+    check("school: no Pro note and no trial recap; the 0.9.0 note comes without its Pro line", !board.proNote && !board.recap && !!board.note090 && !board.note090Pro && !/\bPro\b|trial/i.test(board.note090), JSON.stringify(board))
+    check('school: no Get Pro, trial or price anywhere on the board', !board.offers.length && !board.text, JSON.stringify(board.offers))
+    await s1.evaluate(() => document.activeElement?.blur())
+    await ctrlK(s1)
+    const toSearch = await until(s1, () => document.activeElement?.getAttribute('aria-label') === 'Search all spaces', null, 3000)
+    check('school: a running trial counts for nothing, so Ctrl+K goes to the search box', toSearch && !(await s1.evaluate(() => !!document.querySelector('[data-command-bar]'))))
+    await s1.evaluate(() => document.activeElement?.blur())
+
+    await settings(s1)
+    await until(s1, () => !!document.querySelector('[data-keys]'))
+    const st = await s1.evaluate((offers) => {
+      const re = new RegExp(offers, 'i')
+      const dialog = document.querySelector('[role=dialog]')
+      const managed = document.querySelector('[data-managed-setting="Stackboard Pro"]')
+      // Everything Settings says, the managed section's own heading aside.
+      const rest = (dialog?.innerText ?? '').replace(managed?.querySelector('h3')?.innerText ?? '\u0000', '')
+      return {
+        managed: managed?.innerText ?? null,
+        proSection: !!document.querySelector('[data-pro]'),
+        archive: !!document.querySelector('[data-archive-setting]'),
+        scan: !!document.querySelector('[data-cleanup-scan]'),
+        looks: !!document.querySelector('[data-pro-looks]'),
+        timeOfDay: !!document.querySelector('[data-appearance] [data-option="time"]'),
+        keys: document.querySelector('[data-keys]')?.innerText ?? '',
+        rate: [...(dialog?.querySelectorAll('button') ?? [])].some((b) => b.textContent.trim() === 'Rate it'),
+        words: rest.match(/[^.\n]*(\bPro\b|\btrials?\b|\$\d)[^.\n]*/gi) ?? [],
+        offers: [...(dialog?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()).filter((t) => re.test(t)),
+      }
+    }, OFFERS)
+    check('school: Settings shows the managed line in place of the Pro section', !!st.managed && st.managed.includes('Your company manages this setting.') && !st.proSection, JSON.stringify(st.managed))
+    check('school: with the trial running, no Pro feature or try-on shows', !st.archive && !st.looks && !st.timeOfDay, JSON.stringify(st))
+    check('school: the free clean-up scan stays, and so does Rate it', st.scan && st.rate, JSON.stringify(st))
+    check('school: nothing in Settings mentions Pro, a trial or a price, Keys included', !st.words.length && !st.offers.length && !st.keys.includes('(Pro)') && !st.keys.includes('Command bar'), JSON.stringify({ words: st.words, offers: st.offers, keys: st.keys }))
+
+    await s1.evaluate(() => document.querySelector('[data-cleanup-scan]')?.click())
+    await until(s1, () => !!document.querySelector('[data-cleanup]'))
+    const cl = await s1.evaluate(() => {
+      const dialog = document.querySelector('[role=dialog]')
+      return {
+        tabs: [...(dialog?.querySelectorAll('[data-option]') ?? [])].map((o) => o.dataset.option),
+        offer: !!dialog?.querySelector('[data-cleanup-free], [data-cleanup-trial], [data-cleanup-get-pro], [data-cleanup-dead-pro]'),
+        footer: [...(dialog?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()).filter(Boolean),
+        text: dialog?.innerText ?? '',
+      }
+    })
+    check('school: the clean-up scan runs with no dead-link tab and no offer', cl.tabs.join(',') === 'dupes,unused' && !cl.offer && !/\bPro\b|\btrial\b/i.test(cl.text), JSON.stringify({ ...cl, text: cl.text.slice(0, 160) }))
+    await s1.keyboard.press('Escape')
+    await until(s1, () => !document.querySelector('[role=dialog]'))
+
+    await s1.evaluate(() => [...document.querySelectorAll('main button')].find((b) => b.textContent.trim() === 'Add empty Stack')?.click())
+    await until(s1, () => !!document.querySelector('[role=dialog] input'))
+    const ns = await s1.evaluate(() => ({
+      title: document.querySelector('[role=dialog]')?.getAttribute('aria-label'),
+      todo: !!document.querySelector('[role=dialog] [data-option="todo"]'),
+      note: !!document.querySelector('[role=dialog] [data-todo-pro]'),
+    }))
+    check('school: New stack offers no To-do list to someone who would need Pro for it', ns.title === 'New stack' && !ns.todo && !ns.note, JSON.stringify(ns))
+    await s1.keyboard.press('Escape')
+    await until(s1, () => !document.querySelector('[role=dialog]'))
+
+    await s1.evaluate((id) => document.querySelector(`#stack-${id} button[aria-label="Stack options"]`)?.click(), made.stack)
+    await until(s1, () => !!document.querySelector('[data-stack-style]'))
+    const styleLabel = await s1.evaluate(() => document.querySelector('[data-stack-style]')?.textContent.trim())
+    await s1.evaluate(() => document.querySelector('[data-stack-style]')?.click())
+    await until(s1, () => !!document.querySelector('[data-stack-style-dialog]'))
+    const sd = await s1.evaluate(() => ({
+      title: document.querySelector('[role=dialog]')?.getAttribute('aria-label'),
+      colours: document.querySelectorAll('[data-stack-color-option]').length,
+      keep: !!document.querySelector('[data-stack-color-try]'),
+    }))
+    check("school: a stack's menu offers its icon alone, with no colour try-on", styleLabel === 'Icon' && sd.title === 'Icon' && sd.colours === 0 && !sd.keep, JSON.stringify({ styleLabel, ...sd }))
+    await s1.keyboard.press('Escape')
+    await s1.close()
+
+    // Stash and close lands on a new tab, the third stash: no auto-archive line, and no rating ask
+    // at the milestone or after the win either. The 0.9.0 note is answered, so the corner is free.
+    await control.evaluate((note) => {
+      localStorage.setItem('stackable:whatsNew090', '-1')
+      localStorage.setItem('stackable:stashes', '2')
+      return chrome.storage.local.set({ stackboardOpenSpace: note })
+    }, { spaceId: made.space, saved: 3, at: Date.now() })
+    const s2 = await open()
+    const toast = await until(s2, () => (document.querySelector('.toast')?.textContent ?? '').includes('Stashed'))
+    await sleep(3500) // the line waits 2.5 s after the stash lands
+    const landed = await s2.evaluate(() => ({ moment: !!document.querySelector('[data-moment-line]'), rating: !!document.querySelector('[data-rating-prompt]'), corner: !!document.querySelector('[data-whats-new], [data-whats-new-090], [data-trial-end]') }))
+    check('school: after Stash and close lands, no auto-archive line and no rating ask', toast && !landed.moment && !landed.rating && !landed.corner, JSON.stringify({ toast, ...landed }))
+    await s2.close()
+
+    // 3. A paid key already active on this computer, AI pick switched on, the same policy.
+    await control.evaluate(async (key) => {
+      const now = Date.now()
+      await chrome.storage.sync.remove('proTrial')
+      await chrome.storage.local.remove(['tidyReady', 'aiFileReady', 'stackboardOpenSpace'])
+      // The license first: a key that arrives without one makes open pages activate it.
+      await chrome.storage.local.set({ proLicense: { key, activationId: 'act-school', status: 'granted', checkedAt: now, okAt: now } })
+      await chrome.storage.sync.set({ proKey: { key }, aiFile: { on: true, at: now } })
+    }, KEY)
+    await sleep(400)
+    const s3 = await open()
+    await until(s3, () => !!document.querySelector('[data-pro-crown]'))
+    await sleep(1000)
+    const tidyLocked = await s3.evaluate(() => !!document.querySelector('[data-tidy-button]'))
+    await settings(s3)
+    await until(s3, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro')
+    await sleep(800)
+    const paid = await s3.evaluate(() => {
+      const pro = document.querySelector('[data-pro]')
+      return {
+        card: !!pro?.querySelector('[data-pro-card]'),
+        managed: !!document.querySelector('[data-managed-setting="Stackboard Pro"]'),
+        archive: !!document.querySelector('[data-archive-setting]'),
+        buttons: [...(pro?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()),
+        aiPick: !!document.querySelector('[data-ai-file-setting], [data-ai-file-toggle]'),
+        keys: document.querySelector('[data-keys]')?.innerText ?? '',
+      }
+    })
+    check('school: a paid key already on this computer keeps its Pro card and Pro features', paid.card && !paid.managed && paid.archive, JSON.stringify(paid))
+    check('school: the Pro card has no buy, trial or renew button', paid.buttons.length > 0 && !paid.buttons.some((t) => /Get Pro|trial|Renew|Keep Pro/i.test(t)), JSON.stringify(paid.buttons))
+    check('school: with Pro on, Keys lists the command bar without "(Pro)"', paid.keys.includes('Command bar') && !paid.keys.includes('(Pro)'), paid.keys)
+    await s3.keyboard.press('Escape')
+    await until(s3, () => !document.querySelector('[role=dialog]'))
+    await ctrlK(s3)
+    const barPaid = await until(s3, () => !!document.querySelector('[data-command-bar]'), null, 3000)
+    await s3.keyboard.press('Escape')
+    check('school: the command bar works for the paid key', barPaid)
+    // A space menu is the other place that asks the server about Tidy for a key.
+    await s3.evaluate(() => [...document.querySelectorAll('aside button[aria-label="Space options"]')].find((b) => b.parentElement?.parentElement?.textContent.includes('School test'))?.click())
+    await sleep(1200)
+    const calls3 = await s3.evaluate(() => window.__calls.slice())
+    check('school: under the ai lock a paid key gets no Tidy button and no AI pick switch', !tidyLocked && !paid.aiPick, JSON.stringify({ tidyLocked, aiPick: paid.aiPick }))
+    check('school: and nothing asks getstackboard.com/api/tidy or /api/file, from the board, Settings or a space menu', !calls3.some((c) => c.includes('getstackboard.com/api/')), JSON.stringify(calls3))
+    await s3.close()
+    const p1 = await popup({ url: 'https://class1.school-test.example/homework', title: 'Homework' })
+    await until(p1, () => !!document.querySelector('[data-suggested-stack]'))
+    await sleep(1200)
+    const pick1 = await p1.evaluate(() => ({ calls: window.__calls.slice(), reason: document.querySelector('[data-suggested-stack]')?.dataset.suggestedReason ?? null, asking: (document.querySelector('[data-suggested]')?.textContent ?? '').includes('Asking AI') }))
+    check('school: the save popup asks no AI, and offers its own match', pick1.calls.length === 0 && pick1.reason === 'site' && !pick1.asking, JSON.stringify(pick1))
+    await p1.close()
+
+    // 4. No policy, the same paid key: Tidy and AI pick come back, and Settings asks the server as before.
+    await setPolicy(null)
+    const s4 = await open()
+    await until(s4, () => !!document.querySelector('[data-pro-crown]'))
+    const tidyBack = await until(s4, () => !!document.querySelector('[data-tidy-button]'))
+    await settings(s4)
+    const askedTidy = await until(s4, () => window.__calls.some((c) => c.startsWith('GET https://getstackboard.com/api/tidy')))
+    const pickBack = await until(s4, () => !!document.querySelector('[data-ai-file-toggle]'))
+    check('school: with no policy the paid key has Tidy and the AI pick switch, and Settings asks the server', tidyBack && askedTidy && pickBack, JSON.stringify({ tidyBack, askedTidy, pickBack }))
+    await s4.close()
+    const p2 = await popup({ url: 'https://class1.school-test.example/homework', title: 'Homework' })
+    check('school: with no policy the save popup asks the AI again', await until(p2, () => window.__calls.some((c) => c.startsWith('POST https://getstackboard.com/api/file'))))
+    await p2.close()
+
+    // 5. No policy, no key: the rating card, the Pro offer with the trial, the Pro note and To-do list are back.
+    await control.evaluate(async () => {
+      // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'tidyReady', 'aiFileReady'])
+      await chrome.storage.sync.remove(['proKey', 'proSub', 'aiFile'])
+    })
+    await sleep(400)
+    const s5 = await open()
+    const ratingBack = await until(s5, () => !!document.querySelector('[data-rating-prompt]'), null, 5000)
+    const proNoteBack = await until(s5, () => !!document.querySelector('[data-whats-new]'), null, 5000)
+    check('school: with no policy the rating card and the Pro note come back on the same board', ratingBack && proNoteBack, JSON.stringify({ ratingBack, proNoteBack }))
+    await s5.evaluate(() => [...document.querySelectorAll('[data-rating-prompt] button')].find((b) => b.textContent.trim() === 'No thanks')?.click())
+    await settings(s5)
+    const offerBack = await until(s5, () => {
+      const p = document.querySelector('[data-pro]')
+      return p?.dataset.pro === 'free' && p.innerText.includes('Get Pro') && p.innerText.includes('Try it free for 14 days') && !document.querySelector('[data-managed-setting="Stackboard Pro"]')
+    })
+    check('school: with no policy Settings sells Pro with the trial again', offerBack)
+    await s5.keyboard.press('Escape')
+    await until(s5, () => !document.querySelector('[role=dialog]'))
+    await s5.evaluate(() => [...document.querySelectorAll('main button')].find((b) => b.textContent.trim() === 'Add empty Stack')?.click())
+    check('school: with no policy New stack offers To-do list again', await until(s5, () => !!document.querySelector('[role=dialog] [data-option="todo"]')))
+    await s5.keyboard.press('Escape')
+    await s5.close()
+
+    await control.evaluate(async (s) => {
+      // The license first, as above.
+      await chrome.storage.local.remove(s.local)
+      await chrome.storage.sync.remove(s.sync)
+      if (Object.keys(s.was.local).length) await chrome.storage.local.set(s.was.local)
+      if (Object.keys(s.was.sync).length) await chrome.storage.sync.set(s.was.sync)
+      for (const [k, v] of Object.entries(s.was.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+      await chrome.bookmarks.removeTree(s.space)
+    }, { was, sync: SYNC, local: LOCAL, space: made.space })
+    await sleep(400)
   }
 
   // ---------- 0.7.0: auto-archive (Pro) ----------

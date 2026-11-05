@@ -4,6 +4,7 @@ import { IS_EXTENSION } from '../lib/bookmarks'
 import { DEMO_TREE } from '../lib/demoTree'
 import { plural } from '../lib/importPlan'
 import { listSnapshots, restoreAll, restoreSpace } from '../lib/snapshots'
+import { BackupFolder } from './BackupFolder'
 import {
   SNAPSHOT_DAYS,
   countBackup,
@@ -51,6 +52,8 @@ export function SnapshotsPanel({ canTake = true }: { canTake?: boolean }) {
   const [busy, setBusy] = useState(false)
   // Teams T8: a company that switched off import and export also gets no snapshot downloads.
   const noExport = useStackableStore((s) => !!s.tree?.company?.lock.importExport)
+  // School mode: under the pro lock the snapshots taken before still restore, with no word about Pro.
+  const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
   const today = dayKey()
 
   useEffect(() => {
@@ -98,8 +101,13 @@ export function SnapshotsPanel({ canTake = true }: { canTake?: boolean }) {
       <p className="mb-2 text-xs leading-relaxed text-muted">
         {canTake
           ? `A copy of your board every day, kept for ${SNAPSHOT_DAYS} days on this computer. Restoring adds a dated copy, so nothing on your board now changes.`
-          : 'New snapshots are paused with Pro. The ones below stay on this computer, and restoring still works.'}
+          : lockPro
+            ? 'Copies of your board from earlier days. They stay on this computer, and restoring adds a dated copy.'
+            : 'New snapshots are paused with Pro. The ones below stay on this computer, and restoring still works.'}
       </p>
+
+      {/* A company that switched off import and export (Teams T8) gets no folder backups either. */}
+      {canTake && !noExport && <BackupFolder />}
 
       {snaps && snaps.length === 0 && (
         <p data-snapshots-empty className="text-xs text-muted">

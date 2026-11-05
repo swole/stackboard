@@ -6,11 +6,17 @@ import { loadReady, refreshTidyReady, useTidy } from '../lib/tidy'
 import { FOUNDING_ENDS, PORTAL_URL, checkoutPending, checkoutUrl, keepsTodoFree, proCard, type PauseReason } from '../lib/proPlan'
 import { openInNewTab } from '../lib/tabs'
 import { ArchiveSetting } from './ArchiveSetting'
+import { TodayStripSetting } from './TodayStripSetting'
+import { ScheduleSetting } from './ScheduleSetting'
 import { useTwoStep } from '../hooks/useTwoStep'
 import { SnapshotsPanel } from './SnapshotsPanel'
+import { AiFileSetting } from './AiFileSetting'
+import { CleanupScanEntry } from './CleanupUpsell'
 import { useStackableStore } from '../store/useStackableStore'
 
 // Settings > Stackboard Pro (0.7.0). The only place Pro is sold: no locked buttons on the board.
+// School mode: under the company's pro lock Settings shows its managed line in place of this, unless
+// a paid key is active here; then this shows the Pro card, which has no buy, trial or renew button.
 
 const PAUSED: Record<PauseReason, string> = {
   ended: 'Your Pro subscription has ended, so Pro features are paused. Everything you made is still here.',
@@ -56,13 +62,16 @@ export function ProSection() {
   const { activate, check, remove, startTrial, markCheckout } = usePro.getState()
   const [key, setKey] = useState('')
   const tidyReady = useTidy((s) => s.ready)
+  // School mode: with the company's ai lock, AI tidy is neither listed nor asked about.
+  const aiLocked = useStackableStore((s) => !!s.tree?.company?.lock.ai)
   const hasKey = state.kind === 'pro' && !!license?.activationId
   // What this computer last heard from the server (reading it sends nothing). With an active key,
   // opening Settings also asks the server, at most once a day.
   useEffect(() => {
+    if (aiLocked) return
     void loadReady()
     refreshTidyReady(hasKey)
-  }, [hasKey])
+  }, [hasKey, aiLocked])
   // Removing the key takes Pro off every computer on the Chrome profile, so it asks twice.
   const removing = useTwoStep(4000)
   const now = Date.now()
@@ -257,7 +266,7 @@ export function ProSection() {
             <p className="mb-2 text-xs text-fg">Your trial has ended, so Pro features are paused. Everything you made is still here.</p>
           ) : null}
           <ul className="mb-2 grid gap-1 text-xs text-fg">
-            {features(keepsTodo, tidyReady === true, state.kind === 'trial').map((f) => (
+            {features(keepsTodo, tidyReady === true && !aiLocked, state.kind === 'trial').map((f) => (
               <li key={f} className="flex items-start gap-1.5">
                 <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-text" />
                 {f}
@@ -290,6 +299,9 @@ export function ProSection() {
       {(state.kind === 'pro' || state.kind === 'trial') && (
         <>
           <ArchiveSetting />
+          <TodayStripSetting />
+          <ScheduleSetting />
+          <AiFileSetting />
           <div className="mt-4">
             <div className="mb-1 text-xs font-medium text-fg">Clean up</div>
             <p className="mb-2 text-xs text-muted">Find links saved twice, links you never open and links that no longer load.</p>
@@ -301,6 +313,8 @@ export function ProSection() {
           <p className="mt-3 text-xs text-muted">Pro looks (accent colour, fonts, tile size, wallpapers) are under Appearance.</p>
         </>
       )}
+      {/* 0.9.0: the clean-up scan is free; removing links is Pro. */}
+      {state.kind !== 'pro' && state.kind !== 'trial' && <CleanupScanEntry />}
       {/* Snapshots already taken stay reachable when Pro pauses: they are the person's own board. */}
       {state.kind !== 'pro' && state.kind !== 'trial' && <SnapshotsPanel canTake={false} />}
     </section>

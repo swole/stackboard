@@ -3,6 +3,7 @@ import { useStackableStore } from '../../store/useStackableStore'
 import { SpaceFormModal } from './SpaceFormModal'
 import { StackFormModal } from './StackFormModal'
 import { StackMoveModal } from './StackMoveModal'
+import { StackStyleModal } from './StackStyleModal'
 import { BookmarkFormModal } from './BookmarkFormModal'
 import { ConfirmDeleteModal } from './ConfirmDeleteModal'
 import { ImportModal } from './ImportModal'
@@ -48,6 +49,8 @@ export function ModalHost() {
           currentSpaceId={modal.currentSpaceId}
         />
       )
+    case 'stack-style':
+      return <StackStyleModal stackId={modal.id} title={modal.title} color={modal.color} />
     case 'bookmark-add':
       return <BookmarkFormModal mode="add" stackId={modal.stackId} />
     case 'bookmark-edit':

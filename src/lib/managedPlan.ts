@@ -9,7 +9,8 @@ import { planFolder, type FolderNode } from './importPlan'
 //    { companyName?, spaces?: [{ name, emoji?, stacks: [{ name, links: [{ title, url }] }] }],
 //      announcement?: { id?, text, url?, dismissible? }, showManagedBookmarks? }
 //    Teams pack 2 adds goLinks?: { name: url }, spaces[].onboarding?, brand?: { name?, accent? } and
-//    lock?: { appearance?, starterPacks?, importExport? }.
+//    lock?: { appearance?, starterPacks?, importExport? }. School mode adds lock.pro?, lock.ai? and
+//    lock.rating? (for school or shared computers: no Pro offers, no AI calls, no rating ask).
 //    The getstackboard.com board builder writes exactly this shape, so keep the two in step.
 // 2. Chrome's own ManagedBookmarks folder, shown as one more space unless showManagedBookmarks is false.
 // Admins give each team (an OU in Google Admin, a group in Intune) its own policy, so team spaces
@@ -67,7 +68,7 @@ export interface ManagedConfig {
   lock: CompanyLocks
 }
 
-export const NO_LOCKS: CompanyLocks = { appearance: false, starterPacks: false, importExport: false }
+export const NO_LOCKS: CompanyLocks = { appearance: false, starterPacks: false, importExport: false, pro: false, ai: false, rating: false }
 
 export const EMPTY_CONFIG: ManagedConfig = {
   companyName: null,
@@ -199,7 +200,14 @@ export function parseBrand(raw: unknown): CompanyBrand | null {
 
 export function parseLocks(raw: unknown): CompanyLocks {
   const l = obj(raw)
-  return { appearance: flag(l.appearance), starterPacks: flag(l.starterPacks), importExport: flag(l.importExport) }
+  return {
+    appearance: flag(l.appearance),
+    starterPacks: flag(l.starterPacks),
+    importExport: flag(l.importExport),
+    pro: flag(l.pro),
+    ai: flag(l.ai),
+    rating: flag(l.rating),
+  }
 }
 
 /** Whatever chrome.storage.managed (or the test override) holds, as a complete, safe config. */
@@ -241,7 +249,7 @@ export function parseManagedConfig(raw: unknown): ManagedConfig {
 }
 
 export function anyLock(l: CompanyLocks): boolean {
-  return l.appearance || l.starterPacks || l.importExport
+  return l.appearance || l.starterPacks || l.importExport || l.pro || l.ai || l.rating
 }
 
 /** True when the policy sets nothing Stackboard shows or applies. */

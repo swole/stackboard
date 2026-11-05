@@ -4,7 +4,7 @@ import { DEMO_TREE } from './demoTree'
 import { TODO_MARKER_TITLE, newTodoId, parseList, todoMarkerUrl } from './todoPlan'
 import { dueForBackup, dueFromBackup } from './duePlan'
 import { loadList, saveList } from './todos'
-import { backupStack, mapTree, writeBackupStack, type CreateApi } from './folderPlan'
+import { backupStack, mapTree, writeBackupStack, writeStackColor, type CreateApi } from './folderPlan'
 
 const ROOT_TITLE = 'Stackboard'
 // The folder was "Stackable" before 0.3.0; ensureRoot renames it in place.
@@ -380,7 +380,8 @@ export async function importBackup(backup: BookmarkBackup): Promise<void> {
       if (Array.isArray(stack.todo)) {
         // A new id each time, so importing the same backup twice makes two separate lists.
         const id = newTodoId()
-        await createTodoStack(spaceNode.id, stack.name, id)
+        const folderId = await createTodoStack(spaceNode.id, stack.name, id)
+        await writeStackColor(chrome.bookmarks as unknown as CreateApi, folderId, stack.color)
         const now = Date.now()
         const items = stack.todo.map((it, i) => ({ id: newTodoId(), text: String(it?.text ?? ''), done: it?.done === true, at: now + i, ...dueFromBackup(it) }))
         await saveList(id, parseList({ items }))

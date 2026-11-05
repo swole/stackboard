@@ -30,6 +30,7 @@ import {
   type CleanLink,
 } from '../../lib/cleanupPlan'
 import { BookmarkIcon } from '../BookmarkIcon'
+import { CleanupProFooter } from '../CleanupUpsell'
 import { Modal, Segmented, SecondaryButton } from './Modal'
 
 type Tab = 'dupes' | 'unused' | 'dead'
@@ -47,11 +48,17 @@ interface CheckState {
 /**
  * "Clean up your board" (Pro, 0.7.1): duplicates, links nobody opens, links that no longer load.
  * Nothing goes without a tick; removing takes one click and comes back with Undo.
+ * 0.9.0: without Pro it's a free scan: the same lists with no ticks, while the dead-link check and
+ * Remove stay Pro and the footer offers the trial. School mode (the company's pro lock): the scan
+ * alone, with no dead-link tab and no offer.
  */
 export function CleanupModal() {
   const close = useStackableStore((s) => s.closeModal)
   const tree = useStackableStore((s) => s.tree)
   const proOn = usePro((s) => s.ready && hasPro(s.state))
+  // School mode: under the company's pro lock the free scan leaves out the Pro-only dead-link list.
+  const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
+  const deadTab = proOn || !lockPro
   const [links, setLinks] = useState<CleanLink[] | null>(null)
   const [opens, setOpens] = useState<{ opens: Map<string, number>; since: number } | null>(null)
   const [tab, setTab] = useState<Tab>('dupes')
@@ -159,24 +166,26 @@ export function CleanupModal() {
       onClose={close}
       width="lg"
       footer={
-        <>
-          <span className="mr-auto text-xs text-muted">Removed links come back with Undo, or from a daily snapshot.</span>
-          <SecondaryButton onClick={close}>Close</SecondaryButton>
-          <button
-            type="button"
-            data-cleanup-remove
-            onClick={() => void onRemove()}
-            disabled={!picked.length || busy || !proOn}
-            className="rounded-md bg-danger-fill px-3 py-1.5 text-sm font-medium text-on-danger hover:bg-danger-fill-hover disabled:opacity-50"
-          >
-            {busy ? 'Removing…' : removeButtonLabel(picked.length)}
-          </button>
-        </>
+        !proOn ? (
+          <CleanupProFooter onClose={close} />
+        ) : (
+          <>
+            <span className="mr-auto text-xs text-muted">Removed links come back with Undo, or from a daily snapshot.</span>
+            <SecondaryButton onClick={close}>Close</SecondaryButton>
+            <button
+              type="button"
+              data-cleanup-remove
+              onClick={() => void onRemove()}
+              disabled={!picked.length || busy || !proOn}
+              className="rounded-md bg-danger-fill px-3 py-1.5 text-sm font-medium text-on-danger hover:bg-danger-fill-hover disabled:opacity-50"
+            >
+              {busy ? 'Removing…' : removeButtonLabel(picked.length)}
+            </button>
+          </>
+        )
       }
     >
-      {!proOn ? (
-        <p className="text-sm text-muted">Clean-up is part of Stackboard Pro. Start the free trial in Settings to use it.</p>
-      ) : !links || !opens ? (
+      {!links || !opens ? (
         <p className="text-sm text-muted">Reading your board…</p>
       ) : (
         <div data-cleanup className="flex flex-col gap-3">
@@ -187,18 +196,21 @@ export function CleanupModal() {
             options={[
               { value: 'dupes', label: `Duplicates${dupes.length ? ` (${dupes.length})` : ''}` },
               { value: 'unused', label: `Unused${unused.length ? ` (${unused.length})` : ''}` },
-              { value: 'dead', label: `Can't be reached${dead.length ? ` (${dead.length})` : ''}` },
+              ...(deadTab ? [{ value: 'dead' as const, label: `Can't be reached${dead.length ? ` (${dead.length})` : ''}` }] : []),
             ]}
           />
 
           {tab === 'dupes' && (
             <section data-cleanup-section="dupes">
-              <p className="mb-2 text-xs text-muted">{duplicatesSummary(dupes)} Every copy after the first is ticked.</p>
+              <p className="mb-2 text-xs text-muted">
+                {duplicatesSummary(dupes)}
+                {proOn ? ' Every copy after the first is ticked.' : ''}
+              </p>
               <div className="flex flex-col gap-2.5">
                 {dupes.map((g) => (
                   <div key={g.key} className="rounded-md border border-line bg-card p-1.5">
                     {g.links.map((l, i) => (
-                      <Row key={l.id} link={l} checked={selected.has(l.id)} onToggle={toggle} note={i === 0 ? 'First copy' : undefined} />
+                      <Row key={l.id} link={l} checked={selected.has(l.id)} onToggle={toggle} note={i === 0 ? 'First copy' : undefined} readOnly={!proOn} />
                     ))}
                   </div>
                 ))}
@@ -213,13 +225,21 @@ export function CleanupModal() {
               </p>
               <div className="flex flex-col gap-0.5">
                 {unused.map((l) => (
-                  <Row key={l.id} link={l} checked={selected.has(l.id)} onToggle={toggle} note={openedWords(lastOpened(l, opens.opens))} />
+                  <Row key={l.id} link={l} checked={selected.has(l.id)} onToggle={toggle} note={openedWords(lastOpened(l, opens.opens))} readOnly={!proOn} />
                 ))}
               </div>
             </section>
           )}
 
-          {tab === 'dead' && (
+          {tab === 'dead' && !proOn && !lockPro && (
+            <section data-cleanup-section="dead">
+              <p data-cleanup-dead-pro className="text-xs leading-relaxed text-muted">
+                Checking which links no longer load comes with Pro. It asks each site on your board for its home page, quietly from your browser.
+              </p>
+            </section>
+          )}
+
+          {tab === 'dead' && proOn && (
             <section data-cleanup-section="dead">
               <p className="mb-2 text-xs leading-relaxed text-muted">
                 This asks each site in your board for its home page, quietly from your browser, to see which ones no longer answer.
@@ -275,17 +295,17 @@ export function CleanupModal() {
   )
 }
 
-function Row(props: { link: CleanLink; checked: boolean; onToggle: (id: string) => void; note?: string; openable?: boolean }) {
-  const { link, checked, onToggle, note, openable } = props
+function Row(props: { link: CleanLink; checked: boolean; onToggle: (id: string) => void; note?: string; openable?: boolean; readOnly?: boolean }) {
+  const { link, checked, onToggle, note, openable, readOnly } = props
   const { emoji, text } = parseBookmarkTitle(link.title)
   const shown = displayTitle(text, link.url)
   return (
     <label
       data-cleanup-row={link.id}
-      className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-hover"
+      className={`flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-hover ${readOnly ? '' : 'cursor-pointer'}`}
       title={`${link.title}\n${link.url}`}
     >
-      <input type="checkbox" checked={checked} onChange={() => onToggle(link.id)} className="h-3.5 w-3.5 shrink-0 accent-accent" />
+      {!readOnly && <input type="checkbox" checked={checked} onChange={() => onToggle(link.id)} className="h-3.5 w-3.5 shrink-0 accent-accent" />}
       <BookmarkIcon emoji={emoji} title={shown} url={link.url} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-fg">{shown}</span>

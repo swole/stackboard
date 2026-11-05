@@ -2,6 +2,7 @@ import type { BackupFolder, Bookmark, BookmarkBackup, Folder, Space, Stack, Stac
 import { parseSpaceTitle } from './icon'
 import { batchFlags } from './fresh'
 import { todoIdFromUrl } from './todoPlan'
+import { STACK_MARKER_TITLE, isStackMarker, parseStackColor, stackColorIn, stackColorUrl } from './stackStylePlan'
 import { plural } from './importPlan'
 
 // Nested folders (0.8.0): a folder inside a stack folder shows inside the stack card as a foldable
@@ -28,9 +29,9 @@ export type Container = Stack | Folder
 const byIndex = (a: TreeNode, b: TreeNode) => (a.index ?? 0) - (b.index ?? 0)
 const isFolder = (n: TreeNode) => !n.url
 
-/** A folder's links in order, each with its index among all the folder's children. To-do markers aren't links. */
+/** A folder's links in order, each with its index among all the folder's children. To-do and colour markers aren't links. */
 function linksIn(node: TreeNode): Bookmark[] {
-  const sorted = (node.children ?? []).filter((c) => !!c.url && !todoIdFromUrl(c.url)).sort(byIndex)
+  const sorted = (node.children ?? []).filter((c) => !!c.url && !todoIdFromUrl(c.url) && !isStackMarker(c.url)).sort(byIndex)
   const batch = batchFlags(sorted.map((b) => b.dateAdded))
   return sorted.map((b, i) => ({
     id: b.id,
@@ -76,6 +77,8 @@ export function mapTree(root: TreeNode): StackableTree {
         .map((stackNode): Stack => {
           // A to-do stack is a folder holding a marker bookmark; its items live in storage.sync.
           const marker = (stackNode.children ?? []).find((c) => todoIdFromUrl(c.url))
+          // 0.9.0: a colour marker gives the stack its tab-group colour (stackStylePlan.ts).
+          const color = stackColorIn(stackNode.children)
           if (marker) {
             return {
               id: stackNode.id,
@@ -83,6 +86,7 @@ export function mapTree(root: TreeNode): StackableTree {
               parentSpaceId: spaceNode.id,
               bookmarks: [],
               todo: { id: todoIdFromUrl(marker.url)!, anchorId: marker.id },
+              ...(color ? { color } : {}),
               ...(typeof stackNode.index === 'number' ? { index: stackNode.index } : {}),
             }
           }
@@ -93,6 +97,7 @@ export function mapTree(root: TreeNode): StackableTree {
             parentSpaceId: spaceNode.id,
             bookmarks: linksIn(stackNode),
             ...(folders.length ? { folders } : {}),
+            ...(color ? { color } : {}),
             ...(typeof stackNode.index === 'number' ? { index: stackNode.index } : {}),
           }
         })
@@ -229,10 +234,10 @@ function backupFolders(folders: readonly Folder[] = []): BackupFolder[] {
   })
 }
 
-/** A link stack as a backup keeps it: its links, then its folders, nested. */
+/** A link stack as a backup keeps it: its links, then its folders, nested, and its colour (0.9.0). */
 export function backupStack(stack: Stack): BackupStack {
   const folders = backupFolders(stack.folders)
-  return { name: stack.title, bookmarks: stack.bookmarks.map(linkOf), ...(folders.length ? { folders } : {}) }
+  return { name: stack.title, bookmarks: stack.bookmarks.map(linkOf), ...(folders.length ? { folders } : {}), ...(stack.color ? { color: stack.color } : {}) }
 }
 
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
@@ -293,5 +298,12 @@ export async function writeBackupStack(
   const node = await api.create({ parentId: spaceId, title: stack.name })
   await writeLinks(api, node.id, readLinks(stack.bookmarks), onSkip)
   await writeFolders(api, node.id, stack.folders, onSkip)
+  await writeStackColor(api, node.id, stack.color)
   return node.id
+}
+
+/** A backed-up stack's colour (0.9.0) as its marker bookmark, last in the folder; nothing for a missing or unknown one. */
+export async function writeStackColor(api: CreateApi, stackId: string, color: unknown): Promise<void> {
+  const c = parseStackColor(color)
+  if (c) await api.create({ parentId: stackId, title: STACK_MARKER_TITLE, url: stackColorUrl(c) })
 }

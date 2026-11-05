@@ -1,8 +1,10 @@
 import { IS_EXTENSION, ensureRoot, restoreSnapshot, snapshotNode, type NodeSnapshot } from './bookmarks'
 import { DEMO_TREE } from './demoTree'
 import { todoIdFromUrl } from './todoPlan'
+import { isStackMarker } from './stackStylePlan'
 import { placesIn } from './folderPlan'
 import { PATH_SEPARATOR } from './importPlan'
+import { bumpStat } from './proStats'
 import {
   CHECK_CONCURRENCY,
   CHECK_TIMEOUT_MS,
@@ -134,7 +136,7 @@ export async function removeLinks(ids: string[]): Promise<{ removed: number; ski
   const before: { id: string; snap: NodeSnapshot }[] = []
   for (const id of ids) {
     const s = await snapshotNode(id).catch(() => null)
-    if (!s || !s.url || todoIdFromUrl(s.url)) continue
+    if (!s || !s.url || todoIdFromUrl(s.url) || isStackMarker(s.url)) continue
     before.push({ id, snap: s })
   }
   const snaps: NodeSnapshot[] = []
@@ -151,6 +153,7 @@ export async function removeLinks(ids: string[]): Promise<{ removed: number; ski
       skipped++ // gone meanwhile (another tab or computer): nothing to bring back
     }
   }
+  if (snaps.length) void bumpStat('cleaned', snaps.length) // 0.9.0: the trial-end recap
   const restore = async () => {
     // Lowest positions first in each stack or folder, so every link lands where it was.
     const order = [...snaps].sort((a, b) => (a.parentId === b.parentId ? a.index - b.index : a.parentId < b.parentId ? -1 : 1))

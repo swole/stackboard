@@ -5,7 +5,7 @@
 
 export type FontId = 'default' | 'rounded' | 'humanist' | 'geometric' | 'serif' | 'mono'
 export type TileSize = 'small' | 'medium' | 'large'
-export type WallpaperId = 'dots' | 'grid' | 'waves' | 'stripes' | 'rings' | 'paper' | 'aurora' | 'glow'
+export type WallpaperId = 'dots' | 'grid' | 'waves' | 'stripes' | 'rings' | 'paper' | 'aurora' | 'glow' | 'drift' | 'tide' | 'orbit'
 
 export interface Looks {
   /** '#rrggbb', or null for the palette's own accent. */
@@ -14,6 +14,8 @@ export interface Looks {
   tile: TileSize
   /** A pattern behind the board, or null for the free background (solid, gradient or picture). */
   wallpaper: WallpaperId | null
+  /** 0.9.0: the palette's light version by day and its dark one by night (appearance.ts timeScheme). Stored only when on. */
+  timeOfDay?: boolean
 }
 
 export const DEFAULT_LOOKS: Looks = { accent: null, font: 'default', tile: 'medium', wallpaper: null }
@@ -53,8 +55,11 @@ export const TILES: readonly { id: TileSize; name: string }[] = [
   { id: 'large', name: 'Large' },
 ]
 
-/** Drawn in styles/index.css from the palette's tokens, so each suits every palette. */
-export const WALLPAPERS: readonly { id: WallpaperId; name: string }[] = [
+/**
+ * Drawn in styles/index.css from the palette's tokens, so each suits every palette. The `moving`
+ * ones (0.9.0) drift on a slow loop and hold still under reduced motion.
+ */
+export const WALLPAPERS: readonly { id: WallpaperId; name: string; moving?: true }[] = [
   { id: 'dots', name: 'Dots' },
   { id: 'grid', name: 'Grid' },
   { id: 'waves', name: 'Waves' },
@@ -63,6 +68,9 @@ export const WALLPAPERS: readonly { id: WallpaperId; name: string }[] = [
   { id: 'paper', name: 'Paper' },
   { id: 'aurora', name: 'Aurora' },
   { id: 'glow', name: 'Glow' },
+  { id: 'drift', name: 'Drift', moving: true },
+  { id: 'tide', name: 'Tide', moving: true },
+  { id: 'orbit', name: 'Orbit', moving: true },
 ]
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -88,6 +96,7 @@ export function parseLooks(raw: unknown): Looks {
     font: pick(o.font, FONTS.map((f) => f.id), d.font),
     tile: pick(o.tile, TILES.map((t) => t.id), d.tile),
     wallpaper,
+    ...(o.timeOfDay === true ? { timeOfDay: true as const } : {}),
   }
 }
 
@@ -190,6 +199,8 @@ export interface LookMirror {
   fontStack: string
   tile: TileSize
   wallpaper: WallpaperId | null
+  /** 0.9.0: theme-boot.js picks light or dark by the clock. */
+  timeOfDay?: true
 }
 
 /**
@@ -206,5 +217,6 @@ export function lookMirror(l: Looks, pro: boolean, policyAccent: string | null =
     fontStack: fontStack(e.font),
     tile: e.tile,
     wallpaper: e.wallpaper,
+    ...(e.timeOfDay ? { timeOfDay: true as const } : {}),
   }
 }

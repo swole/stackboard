@@ -6,6 +6,7 @@ import { StackColumn } from './StackColumn'
 import { AddStackPlaceholder } from './AddStackPlaceholder'
 import { OpenTabsButton } from './OpenTabsButton'
 import { TidyButton } from './TidyButton'
+import { TodayStrip } from './TodayStrip'
 import { exportBackup } from '../lib/bookmarks'
 import { downloadJson } from '../lib/tabs'
 import { useStackableStore } from '../store/useStackableStore'
@@ -78,6 +79,7 @@ export function SpaceView({ space }: Props) {
           <OpenTabsButton space={space} />
         </div>
       </header>
+      <TodayStrip />
 
       {/* 0.5.0: stacks wrap into rows that use the whole width (they used to be one row of fixed
           260px columns that scrolled sideways and left the bottom of the screen empty).

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { StackableTree } from '../lib/types'
+import type { StackColor } from '../lib/stackStylePlan'
 import {
   deleteBookmark,
   deleteSpace,
@@ -13,6 +14,9 @@ import { prefs } from '../lib/prefs'
 import { readCompany, withCompany } from '../lib/company'
 import { setFolderOpen } from '../lib/folderPlan'
 import { appearanceSettled, setPolicyAccent } from './useAppearance'
+import { mirroredRules } from '../lib/spaceSchedule'
+import { scheduledSpace } from '../lib/schedulePlan'
+import { setProLock } from '../lib/pro'
 
 type ModalState =
   | { kind: 'none' }
@@ -24,6 +28,8 @@ type ModalState =
   | { kind: 'folder-add'; parentId: string }
   | { kind: 'folder-edit'; id: string; title: string }
   | { kind: 'stack-move'; id: string; title: string; currentSpaceId: string }
+  /** A stack's colour and icon (Pro colours, 0.9.0). */
+  | { kind: 'stack-style'; id: string; title: string; color: StackColor | null }
   | { kind: 'bookmark-add'; stackId: string }
   | { kind: 'bookmark-edit'; id: string; title: string; url: string; stackId: string }
   | { kind: 'confirm-delete'; targetKind: 'space' | 'stack' | 'bookmark'; id: string; name: string; childCount: number }
@@ -139,18 +145,25 @@ export const useStackableStore = create<StackableState>((set, get) => ({
       const tree = withCompany(own, company)
       // Teams T8: the company's accent shows for everyone while the policy sets it.
       setPolicyAccent(company?.config.brand?.accent ?? null)
+      // School mode: Pro follows the company's pro lock (no trial while it's on), before anything below reads it.
+      setProLock(!!company?.config.lock.pro)
       const has = (id: string | null) => !!id && tree.spaces.some((s) => s.id === id)
       const current = get().selectedSpaceId
       const remembered = prefs.lastSpaceId()
       // Teams T7: the first time this device shows company spaces, it opens on the onboarding space.
       const startHere = !!company?.startHereId && has(company.startHereId)
+      // Pro (0.9.0): a new tab opens on the space its time rules name; only the first load, so
+      // nothing switches under someone looking at the board. It doesn't become the remembered space.
+      const scheduled = current === null ? scheduledSpace(mirroredRules(), tree.spaces, new Date()) : null
       const next = startHere
         ? company!.startHereId
         : has(current)
           ? current
-          : has(remembered)
-            ? remembered
-            : (tree.spaces[0]?.id ?? null)
+          : scheduled
+            ? scheduled
+            : has(remembered)
+              ? remembered
+              : (tree.spaces[0]?.id ?? null)
       set({ tree, selectedSpaceId: next, loading: false, ...(startHere ? { companyChosen: true } : {}) })
     } catch (err) {
       console.error('Failed to load Stackboard tree', err)

@@ -3,7 +3,9 @@ import { buildSpaceTitle } from './icon'
 import { newTodoId, parseList } from './todoPlan'
 import { dueFromBackup } from './duePlan'
 import { saveList } from './todos'
-import { writeBackupStack, type CreateApi } from './folderPlan'
+import { writeBackupStack, writeStackColor, type CreateApi } from './folderPlan'
+import { bumpStat } from './proStats'
+import { backupToday } from './backupFolder'
 import {
   SNAPSHOT_KEEP_SHRUNK,
   countBackup,
@@ -77,10 +79,17 @@ let pending: Promise<boolean> | null = null
  * Takes today's snapshot if this computer hasn't yet. The first new tab of the day wins: today's
  * is never overwritten (two tabs racing both try `add`, and the second one's add fails). An empty
  * board is never saved. Returns true when a snapshot was saved. Call it only while Pro or the
- * trial is on.
+ * trial is on. 0.9.0: then today's backup file goes to the folder the person picked, if any.
  */
 export function maybeTakeDailySnapshot(now: Date = new Date()): Promise<boolean> {
   if (!IS_EXTENSION || typeof indexedDB === 'undefined') return Promise.resolve(false)
+  return snapshotOnce(now).then(async (took) => {
+    await backupToday({ now }).catch((err) => console.warn('Stackboard: folder backup failed', err))
+    return took
+  })
+}
+
+function snapshotOnce(now: Date): Promise<boolean> {
   const today = dayKey(now)
   if (readMarker() === today) return Promise.resolve(false)
   pending ??= takeSnapshot(today, now.getTime())
@@ -124,6 +133,7 @@ async function takeSnapshot(today: string, at: number): Promise<boolean> {
       return undefined
     })
   }
+  void bumpStat('snapshots') // 0.9.0: for the trial-end recap
   return true
 }
 
@@ -144,7 +154,8 @@ async function addSpaceCopy(rootId: string, space: BackupSpace, day: string): Pr
     if (Array.isArray(stack.todo)) {
       // A new list id, so the copy and any list still on the board never share items.
       const id = newTodoId()
-      await createTodoStack(spaceNode.id, stack.name, id)
+      const folderId = await createTodoStack(spaceNode.id, stack.name, id)
+      await writeStackColor(chrome.bookmarks as unknown as CreateApi, folderId, stack.color)
       const now = Date.now()
       const items = stack.todo.map((it, i) => ({ id: newTodoId(), text: String(it?.text ?? ''), done: it?.done === true, at: now + i, ...dueFromBackup(it) }))
       try {

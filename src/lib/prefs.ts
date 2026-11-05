@@ -13,6 +13,10 @@ const KEEP_HINT_SHOWN = 'stackable:keepHintShown'
 const STASHES = 'stackable:stashes'
 const WHATS_NEW = 'stackable:whatsNew070'
 const WHATS_NEW_080 = 'stackable:whatsNew080'
+const WHATS_NEW_090 = 'stackable:whatsNew090'
+const TRIAL_ENDING = 'stackable:trialEnding'
+const TRIAL_ENDED = 'stackable:trialEnded'
+const MOMENTS = 'stackable:proMoments'
 
 function read(key: string): string | null {
   try {
@@ -67,6 +71,14 @@ export const prefs = {
   /** The same for the 0.8.0 note (0.8.0). */
   whatsNew080Shows: (): number => Number(read(WHATS_NEW_080)) || 0,
   setWhatsNew080Shows: (n: number) => write(WHATS_NEW_080, String(n)),
+  whatsNew090Shows: (): number => Number(read(WHATS_NEW_090)) || 0,
+  setWhatsNew090Shows: (n: number) => write(WHATS_NEW_090, String(n)),
+  /** New tabs that showed the trial-end recap, ending and ended; -1 once answered (0.9.0). */
+  trialCardShows: (card: 'ending' | 'ended'): number => Number(read(card === 'ending' ? TRIAL_ENDING : TRIAL_ENDED)) || 0,
+  setTrialCardShows: (card: 'ending' | 'ended', n: number) => write(card === 'ending' ? TRIAL_ENDING : TRIAL_ENDED, String(n)),
+  /** How many times the auto-archive line showed after a stash or a bankruptcy (0.9.0). */
+  moments: (): number => Number(read(MOMENTS)) || 0,
+  setMoments: (n: number) => write(MOMENTS, String(n)),
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

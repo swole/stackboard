@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppearance } from '../store/useAppearance'
 import { useStackableStore } from '../store/useStackableStore'
 import { loadBgImage } from '../lib/bgImage'
+import { effectiveLooks } from '../lib/looks'
 
 /**
  * The background picture (0.5.0), behind everything at z-index -1. It never holds up the board:
@@ -10,8 +11,9 @@ import { loadBgImage } from '../lib/bgImage'
  * stay readable on a busy photo.
  */
 export function Backdrop() {
-  // A Pro wallpaper (0.7.0) covers the free background while it shows; the picture stays saved.
-  const kind = useAppearance((s) => (s.proOn && s.looks.wallpaper ? 'wallpaper' : s.appearance.bg.kind))
+  // A Pro wallpaper (0.7.0) covers the free background while it shows, a try-on in Settings
+  // included (0.9.0); the picture stays saved.
+  const kind = useAppearance((s) => ((s.trying ?? effectiveLooks(s.looks, s.proOn)).wallpaper ? 'wallpaper' : s.appearance.bg.kind))
   const rev = useAppearance((s) => s.appearance.bg.imageRev)
   const dim = useAppearance((s) => s.appearance.bg.dim)
   const blur = useAppearance((s) => s.appearance.bg.blur)

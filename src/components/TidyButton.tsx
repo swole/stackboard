@@ -24,6 +24,7 @@ import {
   type TidyRecord,
 } from '../lib/tidyPlan'
 import { useStackableStore } from '../store/useStackableStore'
+import { bumpStat } from '../lib/proStats'
 import { Modal, PrimaryButton, SecondaryButton, TextInput } from './modals/Modal'
 
 /** Links listed under each planned stack before "and N more". */
@@ -36,22 +37,27 @@ interface Run {
 
 /**
  * "Tidy" in the space header (Pro, 0.7.1). Shown only with an active Pro key (the server checks it;
- * the trial has none) once the server says it's switched on. The first run explains what is sent;
+ * the trial has none), unless the server last said it's switched off. The first run explains what is sent;
  * every run shows the new stacks before anything moves, and the toast's Undo puts it all back.
- * To-do stacks, other spaces and company spaces are never touched.
+ * To-do stacks, other spaces and company spaces are never touched. School mode: never under the
+ * company's ai lock.
  */
 export function TidyButton({ space }: { space: Space }) {
   const hasKey = usePro((s) => s.state.kind === 'pro' && !!s.license?.activationId)
+  const aiLocked = useStackableStore((s) => !!s.tree?.company?.lock.ai)
   const ready = useTidy((s) => s.ready)
+  const loaded = useTidy((s) => s.loaded)
   const [step, setStep] = useState<'idle' | 'notice' | 'asking' | 'preview'>('idle')
   const [run, setRun] = useState<Run | null>(null)
 
   // The last answer only: the server is asked when Settings or a space menu opens, never per new tab.
+  // No answer yet, or one over a day old, still shows the button (0.9.0): until then a new key had no
+  // Tidy until Settings opened, and it went again a day later. A run that finds it off hides it.
   useEffect(() => {
-    if (hasKey && IS_EXTENSION) void loadReady()
-  }, [hasKey])
+    if (hasKey && IS_EXTENSION && !aiLocked) void loadReady()
+  }, [hasKey, aiLocked])
 
-  if (!IS_EXTENSION || !hasKey || ready !== true || space.company) return null
+  if (!IS_EXTENSION || !hasKey || aiLocked || !loaded || ready === false || space.company) return null
   if (tidyBlock(tidyInput(space)) === 'few') return null
 
   const store = () => useStackableStore.getState()
@@ -104,6 +110,7 @@ export function TidyButton({ space }: { space: Space }) {
       return
     }
     await store().refresh()
+    void bumpStat('tidied') // 0.9.0: the trial-end recap
     const skipped = rec.skipped?.length ?? 0
     store().showToast({
       verb: 'Tidied',

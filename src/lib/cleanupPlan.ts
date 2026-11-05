@@ -1,6 +1,7 @@
 import { isImportableUrl, plural, PATH_SEPARATOR } from './importPlan'
 import { parseSpaceTitle } from './icon'
 import { todoIdFromUrl } from './todoPlan'
+import { isStackMarker } from './stackStylePlan'
 
 // "Clean up your board" (Pro, 0.7.1): which links are duplicates, which look unused, and how a
 // failed reachability check reads. Pure, so tests/unit.test.ts covers every rule; the bookmark
@@ -82,7 +83,7 @@ export function boardLinks(root: LinkNode): CleanLink[] {
     const { emoji, name } = parseSpaceTitle(space.title)
     const walk = (node: LinkNode, where: string) => {
       for (const b of kids(node, true)) {
-        if (todoIdFromUrl(b.url)) continue
+        if (todoIdFromUrl(b.url) || isStackMarker(b.url)) continue // markers aren't links
         out.push({
           id: b.id,
           url: b.url!,

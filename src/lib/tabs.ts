@@ -1,4 +1,5 @@
 import type { Bookmark } from './types'
+import type { StackColor } from './stackStylePlan'
 import { findOpenTab, switchToTab, type OpenTabIndex } from './openTabs'
 import { recordOpens } from './opens'
 
@@ -33,9 +34,10 @@ export async function openHere(url: string, openTabs: OpenTabIndex | null): Prom
 
 /**
  * Open every bookmark in the list as a new tab.
- * If the tabGroups permission is granted, group them under a single tab group titled `groupTitle`.
+ * If the tabGroups permission is granted, group them under a single tab group titled `groupTitle`,
+ * in the stack's colour when it has one (Pro, 0.9.0).
  */
-export async function openAllInTabs(bookmarks: Bookmark[], groupTitle?: string): Promise<void> {
+export async function openAllInTabs(bookmarks: Bookmark[], groupTitle?: string, color?: StackColor): Promise<void> {
   if (bookmarks.length === 0) return
   recordOpens(bookmarks.map((b) => b.url))
 
@@ -52,7 +54,7 @@ export async function openAllInTabs(bookmarks: Bookmark[], groupTitle?: string):
       if (tabIds.length > 0) {
         const groupId = await chrome.tabs.group({ tabIds })
         if (chrome.tabGroups?.update) {
-          await chrome.tabGroups.update(groupId, { title: groupTitle, collapsed: false })
+          await chrome.tabGroups.update(groupId, { title: groupTitle, collapsed: false, ...(color ? { color: color as chrome.tabGroups.ColorEnum } : {}) })
         }
       }
     } catch (err) {

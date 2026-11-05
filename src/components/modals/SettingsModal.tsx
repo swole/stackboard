@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Modal, PrimaryButton, SecondaryButton } from './Modal'
-import { Check, Download, FolderInput, Link2, Package, Star, Upload } from 'lucide-react'
-import { exportBackup, importBackup } from '../../lib/bookmarks'
+import { Check, Download, FolderInput, LifeBuoy, Link2, Package, Star, Upload } from 'lucide-react'
+import { IS_EXTENSION, exportBackup, importBackup } from '../../lib/bookmarks'
 import { downloadJson, openInNewTab, pickJsonFile } from '../../lib/tabs'
-import { REVIEWS_URL, SHARE_URL } from '../../lib/onboarding'
+import { REVIEWS_URL, SHARE_URL, helpUrl } from '../../lib/onboarding'
 import { prefs } from '../../lib/prefs'
+import { usePro } from '../../lib/pro'
+import { hasPro } from '../../lib/proPlan'
 import type { BookmarkBackup } from '../../lib/types'
 import { useStackableStore } from '../../store/useStackableStore'
 import { AppearanceSettings, LayoutSetting } from '../AppearanceSettings'
+import { CleanupScanEntry } from '../CleanupUpsell'
 import { ProSection } from '../ProSection'
+import { SnapshotsPanel } from '../SnapshotsPanel'
 
 export function SettingsModal() {
   const close = useStackableStore((s) => s.closeModal)
@@ -16,6 +20,8 @@ export function SettingsModal() {
   const refresh = useStackableStore((s) => s.refresh)
   // Teams T8: settings the company's policy has switched off.
   const lock = useStackableStore((s) => s.tree?.company?.lock)
+  // School mode: a paid key already active on this computer keeps its Pro card under the pro lock.
+  const paidHere = usePro((s) => s.state.kind === 'pro' && !!s.license?.activationId)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
@@ -84,7 +90,15 @@ export function SettingsModal() {
           <AppearanceSettings />
         )}
 
-        <ProSection />
+        {lock?.pro && !paidHere ? (
+          <Managed title="Stackboard Pro">
+            {/* What stays free sits here too: the clean-up scan, and snapshots taken before. */}
+            <CleanupScanEntry />
+            <SnapshotsPanel canTake={false} />
+          </Managed>
+        ) : (
+          <ProSection />
+        )}
 
         {lock?.importExport && lock.starterPacks ? (
           <Managed title="Add to your board" />
@@ -168,6 +182,22 @@ export function SettingsModal() {
           </div>
         </section>
 
+        <section>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Help</h3>
+          <p className="mb-2 text-xs text-muted">
+            Found a bug, or stuck on something? The help page has quick answers, and its email button fills in your version.
+          </p>
+          <SecondaryButton
+            data-help-link
+            onClick={() => void openInNewTab(helpUrl(IS_EXTENSION ? chrome.runtime.getManifest().version : undefined), true)}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <LifeBuoy className="h-3.5 w-3.5" />
+              Help and bug reports
+            </span>
+          </SecondaryButton>
+        </section>
+
         <section className="rounded-md border border-line bg-sunken px-3 py-2 text-xs text-muted">
           <div className="font-medium text-fg">Tip</div>
           You can also edit / inspect everything at <code>chrome://bookmarks</code>. Changes there appear in Stackboard on the next new tab.
@@ -179,12 +209,13 @@ export function SettingsModal() {
   )
 }
 
-/** A section the company's Chrome policy has taken over (Teams T8, 0.8.0). */
-function Managed({ title }: { title: string }) {
+/** A section the company's Chrome policy has taken over (Teams T8, 0.8.0); `children` is what stays the person's own. */
+function Managed({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <section data-managed-setting={title}>
       <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{title}</h3>
       <p className="text-xs text-muted">Your company manages this setting.</p>
+      {children}
     </section>
   )
 }
@@ -192,6 +223,9 @@ function Managed({ title }: { title: string }) {
 /** The board's keyboard shortcuts, plus the stash shortcut as Chrome has it set. */
 function KeysSection() {
   const [stash, setStash] = useState('')
+  // School mode: under the pro lock the command bar row shows only while Pro is on, without "(Pro)".
+  const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
+  const proOn = usePro((s) => s.ready && hasPro(s.state))
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.commands) return
     void chrome.commands
@@ -205,6 +239,10 @@ function KeysSection() {
     ['1-9', 'Jump to a space, in sidebar order'],
     ['Esc', 'Clear the search'],
   ]
+  // 0.9.0: the command bar is Pro; without Pro the same keys go to the search box.
+  const barKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K'
+  if (!lockPro) rows.push([barKey, 'Command bar: find a link, stack or space, or run an action (Pro)'])
+  else if (proOn) rows.push([barKey, 'Command bar: find a link, stack or space, or run an action'])
   if (stash) rows.push([stash, 'Stash this window, from any tab'])
   // Teams T6 (free for everyone): the omnibox keyword in manifest.config.ts.
   rows.push(['go', "Go links: type go and a space in the address bar, then a link's name"])

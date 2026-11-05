@@ -101,6 +101,22 @@ export function resolveScheme(mode: Mode, palette: PaletteId, prefersDark: boole
   return want
 }
 
+/**
+ * Time of day (Pro, 0.9.0): the light version from 07:00, the dark one from 19:00, by this
+ * computer's clock. public/theme-boot.js repeats these hours for the first frame.
+ */
+export const DAY_STARTS = 7
+export const DAY_ENDS = 19
+
+export function timeScheme(hour: number): Scheme {
+  return hour >= DAY_STARTS && hour < DAY_ENDS ? 'light' : 'dark'
+}
+
+/** The scheme on screen: with time of day on, the clock asks in place of the mode. */
+export function schemeNow(mode: Mode, palette: PaletteId, prefersDark: boolean, timeOfDay: boolean, hour: number): Scheme {
+  return resolveScheme(timeOfDay ? timeScheme(hour) : mode, palette, prefersDark)
+}
+
 /** The only scheme a palette has, or null when it has both. */
 export function onlyScheme(palette: PaletteId): Scheme | null {
   const info = paletteInfo(palette)

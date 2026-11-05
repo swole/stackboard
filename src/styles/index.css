@@ -287,6 +287,96 @@
   z-index: 0;
 }
 
+/* Moving wallpapers (Pro, 0.9.0): a soft gradient layer, larger than the window, drifts on a slow
+   loop behind the board. Only `transform` moves, so the compositor does the work and the page does
+   none; a hidden tab runs no animation, and reduced motion holds the layer still. */
+:root[data-bg="wallpaper"][data-wallpaper="drift"] body,
+:root[data-bg="wallpaper"][data-wallpaper="tide"] body,
+:root[data-bg="wallpaper"][data-wallpaper="orbit"] body,
+[data-wallpaper-preview="drift"],
+[data-wallpaper-preview="tide"],
+[data-wallpaper-preview="orbit"] {
+  background: var(--sb-canvas);
+}
+:root[data-bg="wallpaper"][data-wallpaper="drift"] body::before,
+:root[data-bg="wallpaper"][data-wallpaper="tide"] body::before,
+:root[data-bg="wallpaper"][data-wallpaper="orbit"] body::before,
+[data-wallpaper-preview="drift"]::before,
+[data-wallpaper-preview="tide"]::before,
+[data-wallpaper-preview="orbit"]::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  will-change: transform;
+}
+[data-wallpaper-preview="drift"]::before,
+[data-wallpaper-preview="tide"]::before,
+[data-wallpaper-preview="orbit"]::before {
+  position: absolute;
+  z-index: 0;
+}
+/* Drift: two soft clouds, one in the accent, wander across the board and back. */
+:root[data-bg="wallpaper"][data-wallpaper="drift"] body::before,
+[data-wallpaper-preview="drift"]::before {
+  background:
+    radial-gradient(34% 30% at 32% 36%, color-mix(in srgb, var(--sb-accent) 22%, transparent), transparent 72%),
+    radial-gradient(30% 28% at 68% 64%, color-mix(in srgb, var(--sb-tint-5-bg) 90%, transparent), transparent 72%),
+    radial-gradient(26% 24% at 20% 78%, color-mix(in srgb, var(--sb-tint-2-bg) 70%, transparent), transparent 70%);
+  animation: wp-drift 90s ease-in-out infinite alternate;
+}
+@keyframes wp-drift {
+  from {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(6%, 5%, 0) scale(1.08);
+  }
+}
+/* Tide: a wide band of colour rolls slowly from one side to the other and back. */
+:root[data-bg="wallpaper"][data-wallpaper="tide"] body::before,
+[data-wallpaper-preview="tide"]::before {
+  background: linear-gradient(
+    115deg,
+    transparent 22%,
+    color-mix(in srgb, var(--sb-tint-3-bg) 80%, transparent) 40%,
+    color-mix(in srgb, var(--sb-accent) 14%, transparent) 50%,
+    color-mix(in srgb, var(--sb-tint-6-bg) 80%, transparent) 60%,
+    transparent 78%
+  );
+  animation: wp-tide 120s ease-in-out infinite alternate;
+}
+@keyframes wp-tide {
+  from {
+    transform: translate3d(-14%, 0, 0);
+  }
+  to {
+    transform: translate3d(14%, 0, 0);
+  }
+}
+/* Orbit: three glows turn around the middle of the board, once every three minutes. */
+:root[data-bg="wallpaper"][data-wallpaper="orbit"] body::before,
+[data-wallpaper-preview="orbit"]::before {
+  background:
+    radial-gradient(24% 24% at 50% 22%, color-mix(in srgb, var(--sb-accent) 20%, transparent), transparent 72%),
+    radial-gradient(24% 24% at 76% 68%, color-mix(in srgb, var(--sb-tint-4-bg) 85%, transparent), transparent 72%),
+    radial-gradient(24% 24% at 24% 68%, color-mix(in srgb, var(--sb-tint-1-bg) 80%, transparent), transparent 72%);
+  animation: wp-orbit 180s linear infinite;
+}
+@keyframes wp-orbit {
+  to {
+    transform: rotate(1turn);
+  }
+}
+/* Reduced motion: !important, since the wallpaper rules above are more specific than this one. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-bg="wallpaper"] body::before,
+  [data-wallpaper-preview]::before {
+    animation: none !important;
+  }
+}
+
 /* A theme switch should land in one frame: the store sets this attribute while it swaps the
    palette, so hover fades and the like don't animate the change. */
 [data-theme-switching] *,

@@ -4,6 +4,7 @@ import { useStackableStore } from '../store/useStackableStore'
 import { REVIEWS_URL, installedAt, linkCount, shouldAskForRating, visit } from '../lib/onboarding'
 import { prefs } from '../lib/prefs'
 import { openInNewTab } from '../lib/tabs'
+import { useCorner } from '../lib/corner'
 
 /** Let the success toast land before the card slides in. */
 const WIN_DELAY_MS = 1800
@@ -17,6 +18,8 @@ function eligible(trigger: 'load' | 'win' | 'milestone'): boolean {
     answered: prefs.rating() !== null,
     links: linkCount(tree),
     trigger,
+    // School mode: the company's rating lock.
+    lockRating: !!tree?.company?.lock.rating,
   })
 }
 
@@ -60,6 +63,11 @@ export function RatingPrompt() {
     if (!milestones || show) return
     setShow(eligible('milestone'))
   }, [milestones, show])
+
+  // 0.9.0: corner cards (the auto-archive line) wait while the ask is on screen.
+  useEffect(() => {
+    useCorner.getState().setRatingOpen(show)
+  }, [show])
 
   useEffect(() => {
     if (!show) return

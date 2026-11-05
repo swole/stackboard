@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ExternalLink, FolderInput, FolderPlus, GripVertical, Link2, ListChecks, Lock, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, FolderInput, FolderPlus, GripVertical, Link2, ListChecks, Lock, MoreVertical, Palette, Pencil, Plus, Trash2 } from 'lucide-react'
 import { shareStack } from '../lib/share'
 import type { Stack } from '../lib/types'
 import { useStackableStore } from '../store/useStackableStore'
@@ -16,6 +16,9 @@ import { useTodoList } from '../hooks/useTodoList'
 import { clearDone, countOpen } from '../lib/todoPlan'
 import { plural } from '../lib/importPlan'
 import { allLinks, contentsLabel } from '../lib/folderPlan'
+import { chipColors } from '../lib/stackStylePlan'
+import { useStackPreview } from '../lib/stackStyle'
+import { useAppearance } from '../store/useAppearance'
 
 interface Props {
   stack: Stack
@@ -41,6 +44,15 @@ export function StackColumn({ stack }: Props) {
   // Teams T8: the import and export lock also covers sharing a stack as a link.
   const shareLocked = useStackableStore((s) => !!s.tree?.company?.lock.importExport)
   const { list, change } = useTodoList(todo?.id ?? null)
+  // Stack colours (Pro, 0.9.0) show while Pro or the trial is on; the "Colour and icon" dialog
+  // shows its pick on its stack while it's open, which is how a free user tries one.
+  const coloursOn = useAppearance((s) => s.proOn)
+  // School mode: under the company's pro lock there's no colour try-on, so the dialog is the icon alone.
+  const iconOnly = useStackableStore((s) => !!s.tree?.company?.lock.pro) && !coloursOn
+  const scheme = useAppearance((s) => s.scheme)
+  const preview = useStackPreview((p) => (p.id === stack.id ? p : null))
+  const color = preview ? preview.color : coloursOn ? (stack.color ?? null) : null
+  const chip = color ? chipColors(color, scheme) : null
   const open = countOpen(list)
   const done = list ? list.items.length - open : 0
 
@@ -80,7 +92,7 @@ export function StackColumn({ stack }: Props) {
       return
     }
     openAll.disarm()
-    await openAllInTabs(links, stack.title)
+    await openAllInTabs(links, stack.title, coloursOn ? stack.color : undefined)
   }
 
   // Share a stack (0.8.0, T4): the link carries the stack itself, so it works for anyone.
@@ -140,7 +152,17 @@ export function StackColumn({ stack }: Props) {
           className={`flex-1 truncate text-sm font-semibold text-fg select-none ${readOnly ? '' : 'cursor-text'}`}
           title={readOnly ? stack.title : 'Double-click to rename'}
         >
-          {stack.title}
+          {chip ? (
+            <span
+              data-stack-color={color ?? undefined}
+              className="inline-block max-w-full truncate rounded-md px-1.5 align-top"
+              style={{ backgroundColor: chip.bg, color: chip.fg }}
+            >
+              {stack.title}
+            </span>
+          ) : (
+            stack.title
+          )}
         </h3>
         {todo && open > 0 && (
           <span className="text-xs text-faint" aria-label={plural(open, 'to-do') + ' left'}>
@@ -176,7 +198,7 @@ export function StackColumn({ stack }: Props) {
           </button>
           {menuOpen && (
             <div
-              className="absolute right-0 top-7 z-30 w-36 overflow-hidden rounded-md border border-line bg-raised shadow-md"
+              className="absolute right-0 top-7 z-30 w-44 overflow-hidden rounded-md border border-line bg-raised shadow-md"
               onMouseLeave={() => setMenuOpen(false)}
             >
               <button
@@ -188,6 +210,17 @@ export function StackColumn({ stack }: Props) {
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Rename
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false)
+                  openModal({ kind: 'stack-style', id: stack.id, title: stack.title, color: stack.color ?? null })
+                }}
+                data-stack-style
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-hover"
+              >
+                <Palette className="h-3.5 w-3.5" />
+                {iconOnly ? 'Icon' : 'Colour and icon'}
               </button>
               <button
                 onClick={() => {

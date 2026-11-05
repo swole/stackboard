@@ -82,7 +82,10 @@
       "properties": {
         "appearance": { "title": "Lock appearance (palette, mode, background, looks)", "type": "boolean" },
         "starterPacks": { "title": "Hide starter packs", "type": "boolean" },
-        "importExport": { "title": "Hide copying bookmarks in, backups and snapshot downloads", "type": "boolean" }
+        "importExport": { "title": "Hide copying bookmarks in, backups and snapshot downloads", "type": "boolean" },
+        "pro": { "title": "Hide Stackboard Pro: no prices, trial or upgrade prompts", "type": "boolean" },
+        "ai": { "title": "Turn off AI tidy and AI pick", "type": "boolean" },
+        "rating": { "title": "Never ask people to rate Stackboard", "type": "boolean" }
       }
     }
   }

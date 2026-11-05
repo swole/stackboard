@@ -8,6 +8,12 @@ import type { StackableTree } from './types'
 export const STORE_URL = 'https://chromewebstore.google.com/detail/bgcedhchngcopaefchpkbhioagknnpma'
 export const REVIEWS_URL = `${STORE_URL}/reviews`
 export const SHARE_URL = `${STORE_URL}?utm_source=extension&utm_medium=share&utm_campaign=settings-share`
+/** Settings > Help (0.9.0). The version rides in the hash, which browsers never send to the server. */
+export const HELP_URL = 'https://getstackboard.com/support'
+
+export function helpUrl(version?: string): string {
+  return version && /^\d+(\.\d+){0,3}$/.test(version) ? `${HELP_URL}#v=${version}` : HELP_URL
+}
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -67,7 +73,8 @@ export function installedAt(firstSeen: number, rootDateAdded?: number): number {
 /**
  * Ask once, on a board with links in it, after 3 days of use: right after something went well
  * ('win', from 15 new tabs) or on a plain new tab ('load', from 25). A milestone ('milestone':
- * first saved certificate or third stash) asks after one day with no tab minimum.
+ * first saved certificate or third stash) asks after one day with no tab minimum. School mode: a
+ * company's rating lock (`lockRating`) means never.
  */
 export function shouldAskForRating(p: {
   opens: number
@@ -76,7 +83,9 @@ export function shouldAskForRating(p: {
   answered: boolean
   links: number
   trigger?: 'load' | 'win' | 'milestone'
+  lockRating?: boolean
 }): boolean {
+  if (p.lockRating) return false
   if (p.trigger === 'milestone') {
     return !p.answered && p.links > 0 && p.now - p.firstSeen >= RATING_MILESTONE_DAYS * DAY
   }

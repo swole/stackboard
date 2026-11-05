@@ -1,3 +1,5 @@
+import type { StackColor } from './stackStylePlan'
+
 export interface Bookmark {
   id: string
   title: string
@@ -38,6 +40,8 @@ export interface Stack {
   folders?: Folder[]
   /** Set on a to-do stack (0.6.0): `id` keys its items in chrome.storage.sync, `anchorId` is the marker bookmark. */
   todo?: { id: string; anchorId: string }
+  /** Its tab-group colour (Pro, 0.9.0), from a marker bookmark in the folder (stackStylePlan.ts); shown only with Pro. */
+  color?: StackColor
   /** From the company's Chrome policy (Teams, 0.8.0). */
   readOnly?: boolean
   /** Its position among every child of its space folder, loose links included: what chrome.bookmarks.move counts (0.8.0). */
@@ -65,6 +69,15 @@ export interface CompanyLocks {
   appearance: boolean
   starterPacks: boolean
   importExport: boolean
+  /**
+   * School mode: no prices, trial or upgrade prompts. A paid key already active on this computer
+   * keeps working; without one, Pro stays off (a trial doesn't count here).
+   */
+  pro: boolean
+  /** School mode: no AI tidy or AI pick, and the server is never asked whether they're on. */
+  ai: boolean
+  /** School mode: the rating card never shows. The Rate it button in Settings stays. */
+  rating: boolean
 }
 
 /** The company's name for the sidebar header and its accent colour (Teams T8, 0.8.0). */
@@ -120,6 +133,8 @@ export interface BookmarkBackup {
        *  optional due day ('YYYY-MM-DD') and repeat ('daily', 'weekdays', 'weekly', 'monthly'), which
        *  older versions ignore. */
       todo?: Array<{ text: string; done: boolean; due?: string; repeat?: string; monthDay?: number }>
+      /** A tab-group colour (0.9.0); older versions ignore it. */
+      color?: string
     }>
   }>
 }

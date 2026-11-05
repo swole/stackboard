@@ -12,9 +12,10 @@ export const MAX_JSON = 256 * 1024
 /** Control characters and the invisible or direction-flipping ones that can disguise a title. */
 const HIDDEN = [[0x00, 0x1f], [0x7f, 0x9f], [0x200b, 0x200f], [0x2028, 0x202e], [0x2066, 0x2069]]
 
-/** A to-do stack's marker bookmark (getstackboard.com/todo#<id>) keys a private list: never shown or passed on. */
+/** A to-do stack's marker bookmark (getstackboard.com/todo#<id>) keys a private list, and a stack's colour
+ *  marker (getstackboard.com/stack#c=…, 0.9.0) is no link: neither is shown or passed on. */
 export function isTodoMarker(u) {
-  return /^(www\.)?getstackboard\.com$/i.test(u.hostname) && u.pathname.replace(/\/+$/, '') === '/todo'
+  return /^(www\.)?getstackboard\.com$/i.test(u.hostname) && ['/todo', '/stack'].includes(u.pathname.replace(/\/+$/, ''))
 }
 
 export function isShareableUrl(url) {
