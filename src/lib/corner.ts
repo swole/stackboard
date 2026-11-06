@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { claimable, type CornerCard } from './nudgePlan'
 
-// The bottom-right corner of a new tab (0.9.0): the what's-new notes, the trial-end recap and the
-// moment-of-need line take turns, one card at a time, and all of them wait while the rating ask
-// is on screen. Per page; nothing is stored.
+// The bottom-right corner of a new tab (0.9.0): the what's-new notes, the trial-end recap, the
+// reverse-trial card (0.9.2) and the moment-of-need line take turns, one card at a time, and all
+// of them wait while the rating ask is on screen. The order is in nudgePlan.ts (CornerCard).
+// Per page; nothing is stored.
 
 export type MomentKind = 'stash' | 'bankruptcy'
 

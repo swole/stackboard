@@ -5,18 +5,18 @@ import { IS_EXTENSION } from '../lib/bookmarks'
 import { useCorner } from '../lib/corner'
 import { pickTrialCard, trialCardTitle, type TrialCard } from '../lib/nudgePlan'
 import { prefs } from '../lib/prefs'
-import { usePro } from '../lib/pro'
-import { checkoutPending, checkoutUrl, priceLabel } from '../lib/proPlan'
+import { openCheckout, usePro } from '../lib/pro'
+import { LIFETIME_PRICE, checkoutPending, priceLabel } from '../lib/proPlan'
 import { loadStats } from '../lib/proStats'
 import { statsLine } from '../lib/statsPlan'
-import { openInNewTab } from '../lib/tabs'
 import { CornerCard, PRIMARY, QUIET } from './CornerCard'
 
 /**
  * The trial-end recap (0.9.0): in the trial's last two days and on the first tabs after it ends,
  * one corner card with what Pro did on this computer and Keep Pro. Decided once, when this tab
  * loads, so a trial starting or ending in another tab never wakes a tab that's already open. On at
- * most two new tabs each, retired when answered.
+ * most two new tabs each, retired when answered. The same for a trial that started by itself on
+ * install (0.9.2), and Pro for life sits beside Keep Pro.
  */
 export function TrialEndCard() {
   const loaded = useStackableStore((s) => !!s.tree)
@@ -53,8 +53,11 @@ export function TrialEndCard() {
   }
   const keep = () => {
     answer()
-    usePro.getState().markCheckout()
-    void openInNewTab(checkoutUrl(early, Date.now()), true)
+    openCheckout('trial-end')
+  }
+  const once = () => {
+    answer()
+    openCheckout('trial-end-lifetime', { lifetime: true })
   }
 
   return (
@@ -69,11 +72,15 @@ export function TrialEndCard() {
         </p>
       )}
       {card.kind === 'ended' && <p className="mt-1.5 leading-relaxed text-muted">Pro features are paused. Everything you made is still here.</p>}
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
         <button onClick={keep} className={PRIMARY} data-trial-keep>
           Keep Pro for {priceLabel(early, Date.now())}
         </button>
-        <button onClick={answer} className={QUIET}>
+        <button onClick={once} className="text-xs text-muted underline underline-offset-2 hover:text-fg" data-trial-lifetime>
+          or {LIFETIME_PRICE} once
+        </button>
+        {/* System fonts differ in width: when the row is full, Not now drops to the right of the next line. */}
+        <button onClick={answer} className={`${QUIET} ml-auto`}>
           Not now
         </button>
       </div>

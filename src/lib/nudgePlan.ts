@@ -10,9 +10,14 @@ import { TRIAL_DAYS, type ProState } from './proPlan'
 //   Never for a paid key, and not while a checkout this computer opened is still pending.
 // - The moment line shows to free users right after "Stash and close" lands and after a tab
 //   bankruptcy certificate closes, on the first MOMENT_SHOWS occasions only.
-// - School mode: neither ever shows while the company's pro lock is on (`lockPro`).
+// - The reverse-trial card (0.9.2) tells a new install that Pro is on for its first 14 days, once
+//   they've settled in: from the board's third new tab and 20 hours after install, while at least
+//   3 days are left, on two new tabs at most, retired when answered. Never on the welcome screen
+//   or while a checkout this computer opened is pending.
+// - School mode: none of them ever shows while the company's pro lock is on (`lockPro`).
 
-const DAY = 24 * 60 * 60 * 1000
+const HOUR = 60 * 60 * 1000
+const DAY = 24 * HOUR
 
 export function trialEndsAt(startedAt: number): number {
   return startedAt + TRIAL_DAYS * DAY
@@ -79,7 +84,56 @@ export function momentLine(p: { state: ProState; shown: number; lockPro?: boolea
     : { text: 'Auto-archive can do this while you work: idle tabs save themselves.', link: 'Try Pro free for 14 days.' }
 }
 
-export type CornerCard = 'whatsNew' | 'trialEnd' | 'moment'
+export const REVERSE_CARD_SHOWS = 2
+/** The card waits for this many new tabs on this computer, the one it shows on included. */
+export const REVERSE_CARD_OPENS = 3
+/** ...and this long after install: the trial's start, or this computer's first new tab if that came later. */
+export const REVERSE_CARD_WAIT_MS = 20 * HOUR
+/** It stops once the trial has fewer days left than this; the trial-end recap takes over at 2. */
+export const REVERSE_CARD_DAYS = 3
+/** It decides this long after the board and Pro are ready, so the cards that decide on load go first. */
+export const REVERSE_CARD_DELAY_MS = 1500
+
+/** The reverse-trial card (0.9.2): only for a trial that started by itself on install. */
+export function showReverseCard(p: {
+  state: ProState
+  /** sync proTrial.auto */
+  trialAuto: boolean
+  trialStartedAt: number | null
+  /** This computer's first new tab. */
+  firstSeen: number
+  /** New tabs on this computer, this one included. */
+  opens: number
+  shows: number
+  now: number
+  /** The empty-board welcome screen is up. */
+  welcoming: boolean
+  checkoutPending: boolean
+  lockPro?: boolean
+}): boolean {
+  if (!p.trialAuto || !p.trialStartedAt || p.welcoming || p.checkoutPending || p.lockPro) return false
+  if (p.state.kind !== 'trial' || p.state.daysLeft < REVERSE_CARD_DAYS || p.opens < REVERSE_CARD_OPENS) return false
+  if (p.now - Math.max(p.trialStartedAt, p.firstSeen) < REVERSE_CARD_WAIT_MS) return false
+  return p.shows >= 0 && p.shows < REVERSE_CARD_SHOWS
+}
+
+/** "Pro is on, free until 20 Nov" */
+export function reverseCardTitle(trialStartedAt: number): string {
+  return `Pro is on, free until ${new Date(trialEndsAt(trialStartedAt)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+}
+
+/** `mac`: the command bar is ⌘K there, as in Settings > Keys. */
+export function reverseCardLine(mac: boolean): string {
+  return `Try ${mac ? '⌘K' : 'Ctrl+K'} to jump anywhere, a to-do list, or a colour on a stack. Everything you make stays when the trial ends.`
+}
+
+/**
+ * When two are due on one tab, they go in this order: the what's-new notes and the trial recap
+ * claim the corner as the board loads; the reverse-trial card decides REVERSE_CARD_DELAY_MS later,
+ * so it steps aside for them, and skips a tab where the rating ask is up; the moment line waits for
+ * a stash or a bankruptcy.
+ */
+export type CornerCard = 'whatsNew' | 'trialEnd' | 'reverseTrial' | 'moment'
 
 /** The bottom-right corner holds one card at a time; the holder can claim it again. */
 export function claimable(holder: CornerCard | null, card: CornerCard): boolean {

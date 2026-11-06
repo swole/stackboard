@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { Check, Crown, KeyRound, Sparkles } from 'lucide-react'
 import { PrimaryButton, SecondaryButton, TextInput } from './modals/Modal'
-import { usePro } from '../lib/pro'
+import { openCheckout, usePro } from '../lib/pro'
 import { loadReady, refreshTidyReady, useTidy } from '../lib/tidy'
-import { FOUNDING_ENDS, PORTAL_URL, checkoutPending, checkoutUrl, keepsTodoFree, proCard, type PauseReason } from '../lib/proPlan'
+import { FOUNDING_ENDS, LIFETIME_PRICE, PORTAL_URL, checkoutPending, keepsTodoFree, proCard, type PauseReason } from '../lib/proPlan'
 import { openInNewTab } from '../lib/tabs'
 import { ArchiveSetting } from './ArchiveSetting'
 import { TodayStripSetting } from './TodayStripSetting'
@@ -59,7 +59,9 @@ export function ProSection() {
   const note = usePro((s) => s.note)
   const sub = usePro((s) => s.sub)
   const checkoutAt = usePro((s) => s.checkoutAt)
-  const { activate, check, remove, startTrial, markCheckout } = usePro.getState()
+  const checkoutLifetime = usePro((s) => s.checkoutLifetime)
+  const trialAuto = usePro((s) => s.trialAuto)
+  const { activate, check, remove, startTrial } = usePro.getState()
   const [key, setKey] = useState('')
   const tidyReady = useTidy((s) => s.ready)
   // School mode: with the company's ai lock, AI tidy is neither listed nor asked about.
@@ -75,11 +77,22 @@ export function ProSection() {
   // Removing the key takes Pro off every computer on the Chrome profile, so it asks twice.
   const removing = useTwoStep(4000)
   const now = Date.now()
-  const buy = () => {
-    markCheckout()
-    void openInNewTab(checkoutUrl(early, now), true)
-  }
+  const buy = () => openCheckout('settings')
   const portal = () => void openInNewTab(PORTAL_URL, true)
+  // 0.9.2: Pro for life, one quiet line under the buy buttons (never in the finishing steps).
+  const lifetimeLine = (
+    <p className="mt-1.5 text-[11px] text-muted" data-pro-lifetime>
+      Prefer to pay once?{' '}
+      <button
+        type="button"
+        onClick={() => openCheckout('settings-lifetime', { lifetime: true })}
+        className="font-medium text-fg underline underline-offset-2 hover:text-accent-text"
+      >
+        Get Pro for life
+      </button>{' '}
+      for {LIFETIME_PRICE}.
+    </p>
+  )
   // Pro switching on while Settings is open (a key pasted here, or one that arrived from another
   // tab or computer) gets a thank-you on the card and a toast.
   const [welcome, setWelcome] = useState(false)
@@ -181,9 +194,11 @@ export function ProSection() {
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-muted" data-pro-plan>
-                  {card.plan}
-                </div>
+                {card.plan && (
+                  <div className="text-xs text-muted" data-pro-plan>
+                    {card.plan}
+                  </div>
+                )}
               </div>
             </div>
             {welcome && (
@@ -200,10 +215,14 @@ export function ProSection() {
               ))}
             </dl>
             <div className="mt-3 flex flex-wrap gap-2">
-              <SecondaryButton onClick={portal}>Manage subscription</SecondaryButton>
+              <SecondaryButton onClick={portal}>{sub?.lifetime ? 'Manage purchase' : 'Manage subscription'}</SecondaryButton>
               {removeButton}
             </div>
-            <p className="mt-1.5 text-[11px] text-faint">Invoices, your card and cancelling are in Polar's customer portal.</p>
+            <p className="mt-1.5 text-[11px] text-faint">
+              {sub?.lifetime
+                ? "Your receipt and the computers on your key are in Polar's customer portal."
+                : "Invoices, your card and cancelling are in Polar's customer portal."}
+            </p>
           </div>
         )
       })()}
@@ -232,6 +251,7 @@ export function ProSection() {
                 no Remove here, it would take Pro off all of them. */}
             {state.reason !== 'device-limit' && state.reason !== 'removed' && removeButton}
           </div>
+          {state.reason === 'ended' && lifetimeLine}
         </>
       )}
 
@@ -248,19 +268,34 @@ export function ProSection() {
             <button type="button" onClick={portal} className="underline underline-offset-2 hover:text-fg">
               Find my key
             </button>
-            <button type="button" onClick={buy} className="underline underline-offset-2 hover:text-fg">
+            <button
+              type="button"
+              onClick={() => openCheckout('settings-pending', { lifetime: checkoutLifetime })}
+              className="underline underline-offset-2 hover:text-fg"
+            >
               Back to checkout
             </button>
           </div>
+          {/* Someone who opened the checkout to look, then came back, can still try it first. */}
+          {state.kind === 'free' && !state.trialUsed && (
+            <p className="mt-2 text-xs text-fg" data-pro-pending-trial>
+              Not ready to pay?{' '}
+              <button type="button" onClick={() => void startTrial()} className="font-semibold text-accent-text underline underline-offset-2">
+                Try it free for 14 days
+              </button>
+              , no card needed.
+            </p>
+          )}
         </div>
       )}
 
       {(state.kind === 'free' || state.kind === 'trial') && !pending && (
         <>
           {state.kind === 'trial' ? (
-            <p className="mb-2 text-xs text-fg">
-              Pro trial: {state.daysLeft} day{state.daysLeft === 1 ? '' : 's'} left. When it ends, Pro features pause and
-              everything you made stays.
+            <p className="mb-2 text-xs text-fg" data-pro-trial-line={trialAuto ? 'auto' : 'opt-in'}>
+              {trialAuto ? 'Your free Pro trial started when you added Stackboard: ' : 'Pro trial: '}
+              {state.daysLeft} day{state.daysLeft === 1 ? '' : 's'} left. When it ends, Pro features pause and everything you
+              made stays.
             </p>
           ) : state.trialUsed ? (
             <p className="mb-2 text-xs text-fg">Your trial has ended, so Pro features are paused. Everything you made is still here.</p>
@@ -274,17 +309,24 @@ export function ProSection() {
             ))}
           </ul>
           <p className="mb-2 text-xs text-muted">{priceNote(early, keepsTodo, now)}</p>
+          {/* Never tried: the trial leads, as on every other Pro button (0.9.1). After the trial, Get Pro leads. */}
           <div className="flex flex-wrap gap-2">
-            <PrimaryButton onClick={buy}>Get Pro</PrimaryButton>
-            {state.kind === 'free' && !state.trialUsed && (
-              <SecondaryButton onClick={() => void startTrial()} data-pro-trial>
-                Try it free for 14 days
-              </SecondaryButton>
+            {state.kind === 'free' && !state.trialUsed ? (
+              <>
+                <PrimaryButton onClick={() => void startTrial()} data-pro-trial>
+                  Try it free for 14 days
+                </PrimaryButton>
+                <SecondaryButton onClick={buy}>Get Pro</SecondaryButton>
+              </>
+            ) : (
+              <PrimaryButton onClick={buy}>Get Pro</PrimaryButton>
             )}
           </div>
+          {/* Never tried only: a trial that started by itself on install must never hear this. */}
           {state.kind === 'free' && !state.trialUsed && (
             <p className="mt-1.5 text-[11px] text-faint">No card needed for the trial, and it never starts by itself.</p>
           )}
+          {lifetimeLine}
         </>
       )}
 

@@ -130,6 +130,7 @@ import {
   decideEarlyTodo,
   keepsTodoFree,
   readEarlyTodo,
+  checkoutPlan,
   checkoutUrl,
   cleanKey,
   compareVersions,
@@ -702,6 +703,17 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
 
   eq('pro: early users always get the early link', [checkoutUrl(true, now), checkoutUrl(true, FOUNDING_ENDS + DAY)], [CHECKOUT.early, CHECKOUT.early])
   eq('pro: founding link until 31 Dec, regular after', [checkoutUrl(false, FOUNDING_ENDS), checkoutUrl(false, FOUNDING_ENDS + 1)], [CHECKOUT.founding, CHECKOUT.regular])
+  {
+    // 0.9.1: buy buttons label the link with the button, the plan and the version, nothing else.
+    const u = new URL(checkoutUrl(false, now, { surface: 'trial-end', plan: 'trial', version: '0.9.1' }))
+    eq('pro: a labelled checkout link keeps its checkout and carries four labels', [u.origin + u.pathname, [...u.searchParams.keys()].sort().join(',')], [CHECKOUT.founding, 'utm_campaign,utm_content,utm_medium,utm_source'])
+    eq('pro: the labels say button, plan and version', [u.searchParams.get('utm_source'), u.searchParams.get('utm_medium'), u.searchParams.get('utm_content'), u.searchParams.get('utm_campaign')], ['extension', 'trial-end', 'trial', 'v0.9.1'])
+    const dev = new URL(checkoutUrl(true, now, { surface: 'settings', plan: 'free', version: 'not a version', dev: true }))
+    eq('pro: an unpacked build is labelled dev, and a bad version is left out', [dev.origin + dev.pathname, dev.searchParams.get('utm_source'), dev.searchParams.has('utm_campaign')], [CHECKOUT.early, 'extension-dev', false])
+    eq('pro: the plan label follows the Pro state', [checkoutPlan({ kind: 'free', trialUsed: false }), checkoutPlan({ kind: 'free', trialUsed: true }), checkoutPlan({ kind: 'trial', daysLeft: 3 }), checkoutPlan({ kind: 'paused', reason: 'ended' })], ['free', 'trial-ended', 'trial', 'paused'])
+    // 0.9.2: a trial that started by itself on install says so; a paused key and a never-tried board read as before.
+    eq('pro: an auto trial reads auto-trial, and auto-trial-ended once over', [checkoutPlan({ kind: 'trial', daysLeft: 9 }, true), checkoutPlan({ kind: 'free', trialUsed: true }, true), checkoutPlan({ kind: 'paused', reason: 'ended' }, true), checkoutPlan({ kind: 'free', trialUsed: false }, true)], ['auto-trial', 'auto-trial-ended', 'paused', 'free'])
+  }
   eq('pro: price labels', [priceLabel(true, FOUNDING_ENDS + DAY), priceLabel(false, now), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$2.99 a year', '$4.99 a year'])
 
   eq('pro: cleanKey trims spaces, quotes and line breaks', cleanKey(' "SB-1A2B3C4D-AAAA-BBBB"\n'), 'SB-1A2B3C4D-AAAA-BBBB')
@@ -2378,7 +2390,7 @@ import { whatsNew090 } from '../src/lib/whatsNewPlan'
     { label: 'Checked', value: 'today, with Polar' },
   ])
   eq('pro card: a cancelled plan says when it ends', proCard({ license, sub: { ...sub, cancelAtPeriodEnd: true }, now }).rows[0], { label: 'Ends', value: '3 Nov 2027 (cancelled)' })
-  eq('pro card: a pasted key with nothing else shows only the key', proCard({ license: { key: 'SB-1A2B-9F2C' }, sub: null, now }), { plan: 'Yearly plan', rows: [{ label: 'Key', value: 'SB-...-9F2C' }] })
+  eq('pro card: a pasted key with nothing else shows only the key', proCard({ license: { key: 'SB-1A2B-9F2C' }, sub: null, now }), { plan: '', rows: [{ label: 'Key', value: 'SB-...-9F2C' }] })
   eq('pro card: a free plan shows no price', proCard({ license, sub: { ...sub, amount: 0 }, now }).plan, 'Yearly plan')
 
   const polarSub = { amount: 299, currency: 'usd', recurring_interval: 'year', current_period_end: '2027-11-03T08:41:49Z', cancel_at_period_end: false, started_at: '2026-11-03T08:41:49Z', status: 'active' }
@@ -2466,6 +2478,92 @@ import managedSchema from '../public/managed_schema.json'
   const r = { opens: 40, firstSeen: t0 - 10 * DAY, now: t0, answered: false, links: 5 }
   eq('school rating: no rating card on a new tab, after a win or at a milestone', [shouldAskForRating({ ...r, lockRating: true }), shouldAskForRating({ ...r, trigger: 'win', lockRating: true }), shouldAskForRating({ ...r, trigger: 'milestone', lockRating: true })], [false, false, false])
   eq('school rating: the same board is asked without the lock', [shouldAskForRating(r), shouldAskForRating({ ...r, trigger: 'win' }), shouldAskForRating({ ...r, trigger: 'milestone' }), shouldAskForRating({ ...r, lockRating: false })], [true, true, true, true])
+}
+
+// ---------- 0.9.2: Pro for life, and the reverse trial for new installs ----------
+import { LIFETIME_PRICE, REVERSE_TRIAL, lifetimeCheckoutUrl, olderTrialWins, readTrial, reverseTrialOnInstall } from '../src/lib/proPlan'
+import { REVERSE_CARD_DAYS, REVERSE_CARD_OPENS, REVERSE_CARD_SHOWS, REVERSE_CARD_WAIT_MS, reverseCardLine, reverseCardTitle, showReverseCard } from '../src/lib/nudgePlan'
+{
+  const DAY = 86_400_000
+  const HOUR = 3_600_000
+  const now = Date.UTC(2026, 10, 6, 9, 0)
+
+  // Pro for life: its own checkout, labelled like the yearly one.
+  eq('lifetime: the checkout link and the price', [lifetimeCheckoutUrl(), LIFETIME_PRICE], [CHECKOUT.lifetime, '$19'])
+  const life = new URL(lifetimeCheckoutUrl({ surface: 'settings-lifetime', plan: 'auto-trial', version: '0.9.2' }))
+  eq('lifetime: a labelled link keeps its checkout and carries four labels', [life.origin + life.pathname, [...life.searchParams.keys()].sort().join(',')], [CHECKOUT.lifetime, 'utm_campaign,utm_content,utm_medium,utm_source'])
+  eq('lifetime: the labels say button, plan and version', [life.searchParams.get('utm_source'), life.searchParams.get('utm_medium'), life.searchParams.get('utm_content'), life.searchParams.get('utm_campaign')], ['extension', 'settings-lifetime', 'auto-trial', 'v0.9.2'])
+  const lifeDev = new URL(lifetimeCheckoutUrl({ surface: 'trial-end-lifetime', plan: 'trial-ended', dev: true }))
+  eq('lifetime: an unpacked build is labelled dev, and no version means no campaign', [lifeDev.searchParams.get('utm_source'), lifeDev.searchParams.get('utm_medium'), lifeDev.searchParams.get('utm_content'), lifeDev.searchParams.has('utm_campaign')], ['extension-dev', 'trial-end-lifetime', 'trial-ended', false])
+  eq('lifetime: the yearly links stay as they were', [checkoutUrl(true, now), checkoutUrl(false, now), checkoutUrl(false, FOUNDING_ENDS + 1)], [CHECKOUT.early, CHECKOUT.founding, CHECKOUT.regular])
+
+  // The thanks page sends { lifetime: true, amount, currency, started_at } for a Pro for life order.
+  eq('lifetime: the hand-off plan reads as Pro for life', readSub({ lifetime: true, amount: 1900, currency: 'usd', started_at: '2026-11-06T08:00:00Z' }, now), { at: now, amount: 1900, currency: 'usd', lifetime: true, startedAt: Date.parse('2026-11-06T08:00:00Z') })
+  eq('lifetime: it counts with nothing else, and period fields are dropped', [readSub({ lifetime: true }, now), readSub({ lifetime: true, recurring_interval: 'year', current_period_end: '2027-11-06T08:00:00Z' }, now)], [{ at: now, lifetime: true }, { at: now, lifetime: true }])
+  eq('lifetime: only lifetime: true counts', [readSub({ lifetime: 'yes' }, now), readSub({ lifetime: 1 }, now)], [null, null])
+
+  const license = { key: 'SB-1A2B-9F2C', activationId: 'a', status: 'granted' as const, checkedAt: now, okAt: now, email: 'buyer@example.com', since: Date.UTC(2026, 10, 6, 8, 0) }
+  const card = proCard({ license, sub: { amount: 1900, currency: 'usd', lifetime: true, startedAt: Date.UTC(2026, 10, 6, 8, 0), at: now }, now })
+  eq('lifetime: the Pro card says Pro for life, paid once', card.plan, 'Pro for life, $19 paid once')
+  eq('lifetime: no renewal row, the rest as for a yearly key', card.rows, [
+    { label: 'Pro since', value: '6 Nov 2026' },
+    { label: 'Email', value: 'buyer@example.com' },
+    { label: 'Key', value: 'SB-...-9F2C' },
+    { label: 'Checked', value: 'today, with Polar' },
+  ])
+  eq('lifetime: no price from Polar means none on the card; cents stay when there are some', [proCard({ license, sub: { lifetime: true, at: now }, now }).plan, proCard({ license, sub: { lifetime: true, amount: 1950, currency: 'usd', at: now }, now }).plan], ['Pro for life', 'Pro for life, $19.50 paid once'])
+  eq('lifetime: a round amount drops the cents only when asked', [money(1900, 'usd', true), money(1900), money(299, 'usd', true), money(100, 'zz', true)], ['$19', '$19.00', '$2.99', '1 ZZ'])
+
+  // The reverse trial, decided by the service worker on install only.
+  eq('reverse trial: the switch is on', REVERSE_TRIAL, true)
+  eq('reverse trial: a fresh install with nothing synced starts it', reverseTrialOnInstall({ lockPro: false, trial: undefined, key: undefined }), true)
+  eq('reverse trial: never under the pro lock, or with a trial or a key already synced', [
+    reverseTrialOnInstall({ lockPro: true, trial: undefined, key: undefined }),
+    reverseTrialOnInstall({ lockPro: false, trial: { startedAt: now - 30 * DAY }, key: undefined }),
+    reverseTrialOnInstall({ lockPro: false, trial: undefined, key: { key: 'SB-1' } }),
+  ], [false, false, false])
+  eq('reverse trial: readTrial keeps the start and the auto mark', [readTrial({ startedAt: now, auto: true }), readTrial({ startedAt: now }), readTrial({ startedAt: now, auto: 'yes' }), readTrial({ startedAt: -1 }), readTrial(null)], [{ startedAt: now, auto: true }, { startedAt: now, auto: false }, { startedAt: now, auto: false }, null, null])
+  eq('reverse trial: an auto trial newer than the one it replaced gives way', [
+    olderTrialWins({ startedAt: now - 20 * DAY }, { startedAt: now, auto: true }),
+    olderTrialWins({ startedAt: now - 20 * DAY, auto: true }, { startedAt: now, auto: true }),
+  ], [true, true])
+  eq('reverse trial: every other change stands', [
+    olderTrialWins(undefined, { startedAt: now, auto: true }),
+    olderTrialWins({ startedAt: now, auto: true }, undefined),
+    olderTrialWins({ startedAt: now - DAY }, { startedAt: now }),
+    olderTrialWins({ startedAt: now, auto: true }, { startedAt: now - 2 * DAY, auto: true }),
+  ], [false, false, false, false])
+
+  // The reverse-trial card.
+  const start = now - 2 * DAY
+  const base = { state: { kind: 'trial', daysLeft: 12 } as const, trialAuto: true, trialStartedAt: start, firstSeen: start, opens: 5, shows: 0, now, welcoming: false, checkoutPending: false }
+  eq('reverse card: an auto trial two days in, on the fifth new tab', showReverseCard(base), true)
+  eq('reverse card: from the third new tab', [1, 2, REVERSE_CARD_OPENS].map((opens) => showReverseCard({ ...base, opens })), [false, false, true])
+  eq("reverse card: 20 hours after install, counted from this computer's first tab when that came later", [
+    showReverseCard({ ...base, trialStartedAt: now - 19 * HOUR, firstSeen: now - 19 * HOUR, state: { kind: 'trial', daysLeft: 14 } }),
+    showReverseCard({ ...base, trialStartedAt: now - REVERSE_CARD_WAIT_MS, firstSeen: now - REVERSE_CARD_WAIT_MS, state: { kind: 'trial', daysLeft: 14 } }),
+    showReverseCard({ ...base, firstSeen: now - HOUR }),
+  ], [false, true, false])
+  eq('reverse card: while at least 3 days are left', [showReverseCard({ ...base, state: { kind: 'trial', daysLeft: REVERSE_CARD_DAYS } }), showReverseCard({ ...base, state: { kind: 'trial', daysLeft: 2 } })], [true, false])
+  eq('reverse card: two tabs at most, retired when answered', [showReverseCard({ ...base, shows: 1 }), showReverseCard({ ...base, shows: REVERSE_CARD_SHOWS }), showReverseCard({ ...base, shows: -1 })], [true, false, false])
+  eq('reverse card: never for an opt-in trial, a key, a trial that ended, the welcome screen, a pending checkout or the pro lock', [
+    showReverseCard({ ...base, trialAuto: false }),
+    showReverseCard({ ...base, state: { kind: 'pro' } }),
+    showReverseCard({ ...base, state: { kind: 'free', trialUsed: true } }),
+    showReverseCard({ ...base, welcoming: true }),
+    showReverseCard({ ...base, checkoutPending: true }),
+    showReverseCard({ ...base, lockPro: true }),
+    showReverseCard({ ...base, trialStartedAt: null }),
+  ], [false, false, false, false, false, false, false])
+  eq('reverse card: the title names the last free day', reverseCardTitle(new Date(2026, 10, 6, 10, 0).getTime()), 'Pro is on, free until 20 Nov')
+  eq('reverse card: the line, with the command bar key for the platform', [reverseCardLine(false), reverseCardLine(true)], [
+    'Try Ctrl+K to jump anywhere, a to-do list, or a colour on a stack. Everything you make stays when the trial ends.',
+    'Try ⌘K to jump anywhere, a to-do list, or a colour on a stack. Everything you make stays when the trial ends.',
+  ])
+  eq('corner: the reverse-trial card takes its turn like the others', [claimable(null, 'reverseTrial'), claimable('whatsNew', 'reverseTrial'), claimable('reverseTrial', 'trialEnd'), claimable('reverseTrial', 'reverseTrial')], [true, false, false, true])
+  // The trial-end recap reads the state and the start only, so a trial that started by itself gets it too.
+  const ending = { trialStartedAt: now - 13 * DAY, now, endingShows: 0, endedShows: 0, checkoutPending: false }
+  eq('reverse trial: the recap comes at its end too', [pickTrialCard({ ...ending, state: { kind: 'trial', daysLeft: 1 } }), pickTrialCard({ ...ending, trialStartedAt: now - 15 * DAY, state: { kind: 'free', trialUsed: true } })], ['ending', 'ended'])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

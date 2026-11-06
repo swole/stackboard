@@ -87,7 +87,7 @@ async function readPolicy(): Promise<unknown> {
   return policyRead
 }
 
-async function readManaged(): Promise<unknown> {
+async function readManaged(waitMs = POLICY_WAIT_MS): Promise<unknown> {
   if (!chrome.storage?.managed) return null
   // no policy, or managed storage unavailable: Chrome treats both as empty
   const got: Promise<unknown> = chrome.storage.managed.get(null).then((v) => v ?? null, () => null)
@@ -96,7 +96,7 @@ async function readManaged(): Promise<unknown> {
   const first = await Promise.race([
     got,
     new Promise<typeof late>((resolve) => {
-      timer = setTimeout(() => resolve(late), POLICY_WAIT_MS)
+      timer = setTimeout(() => resolve(late), waitMs)
     }),
   ])
   clearTimeout(timer)
@@ -178,10 +178,17 @@ export async function readCompany(now = Date.now()): Promise<CompanyBoard> {
 
 /**
  * Just the policy's locks, for code that runs without the board's tree: the save popup, the calls
- * to the AI server, and Pro before the board has loaded (school mode). Never throws.
+ * to the AI server, and Pro before the board has loaded (school mode). Never throws. `waitMs`
+ * (0.9.2): wait that long for managed storage, for a decision nothing on screen is waiting for (the
+ * service worker's reverse trial on install). Chrome for Testing takes about 2 s to answer, past
+ * POLICY_WAIT_MS.
  */
-export async function readLocks(): Promise<CompanyLocks> {
+export async function readLocks(opts: { waitMs?: number } = {}): Promise<CompanyLocks> {
   try {
+    if (opts.waitMs && IS_EXTENSION) {
+      const override = await readOverride()
+      return parseManagedConfig(override ? json(override) : await readManaged(opts.waitMs)).lock
+    }
     return parseManagedConfig(await readPolicy()).lock
   } catch {
     return NO_LOCKS

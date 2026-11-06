@@ -4,9 +4,8 @@ import { Modal, PrimaryButton, SecondaryButton, TextInput, Label, Segmented } fr
 import { createFolder, createStack, createTodoStack, renameStack } from '../../lib/bookmarks'
 import { locate } from '../../lib/folderPlan'
 import { useStackableStore } from '../../store/useStackableStore'
-import { usePro } from '../../lib/pro'
-import { canMakeTodo, checkoutUrl, keepsTodoFree, offersTodo } from '../../lib/proPlan'
-import { openInNewTab } from '../../lib/tabs'
+import { openCheckout, usePro } from '../../lib/pro'
+import { canMakeTodo, keepsTodoFree, offersTodo } from '../../lib/proPlan'
 
 interface Props {
   mode: 'add' | 'edit'
@@ -32,7 +31,6 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '', fold
   // a list when 0.8.0 arrived. Lists that exist keep working.
   const proReady = usePro((s) => s.ready)
   const proState = usePro((s) => s.state)
-  const early = usePro((s) => s.early)
   const keepsTodo = usePro((s) => keepsTodoFree(s))
   const trialUsed = usePro((s) => !!s.trialStartedAt)
   const startTrial = usePro((s) => s.startTrial)
@@ -118,7 +116,7 @@ export function StackFormModal({ mode, spaceId, stackId, initialTitle = '', fold
                   Start free trial
                 </PrimaryButton>
               )}
-              <SecondaryButton type="button" onClick={() => void openInNewTab(checkoutUrl(early, Date.now()), true)}>
+              <SecondaryButton type="button" onClick={() => openCheckout('todo')}>
                 Get Pro
               </SecondaryButton>
             </div>

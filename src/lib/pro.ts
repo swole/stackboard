@@ -2,17 +2,24 @@ import { create } from 'zustand'
 import { IS_EXTENSION } from './bookmarks'
 import { readLocks } from './company'
 import { installedAt, visit } from './onboarding'
+import { openInNewTab } from './tabs'
 import {
   LICENSE_API,
   PRO_ORG_ID,
+  checkoutPlan,
+  checkoutUrl,
   cleanKey,
   decideEarlyTodo,
   isEarlyUser,
+  lifetimeCheckoutUrl,
   needsCheck,
+  olderTrialWins,
   proState,
   readActivation,
   readEarlyTodo,
+  readTrial,
   readValidation,
+  type CheckoutSurface,
   type License,
   type ProState,
   type ProSub,
@@ -27,16 +34,23 @@ import {
 
 const KEY = 'proKey' // sync: { key }
 const LICENSE = 'proLicense' // local: License
-const TRIAL = 'proTrial' // sync: { startedAt }
+/** sync: { startedAt, auto? }. `auto` (0.9.2): the trial started by itself on install (background.ts). */
+const TRIAL = 'proTrial'
 /** sync: ProSub. The plan behind the key, when Polar described it at purchase (0.8.0). */
 export const SUB_KEY = 'proSub'
-/** local: { at }. This computer opened the checkout; Settings shows the finishing steps for a day. */
+/**
+ * local: { at, lifetime? }. This computer opened the checkout; Settings shows the finishing steps for
+ * a day. `lifetime` (0.9.2): it was the Pro for life checkout, so Back to checkout opens that one again.
+ */
 const CHECKOUT_KEY = 'proCheckout'
 /** sync: { from, at }. background.ts sets it when an update arrives from a version before Pro. */
 export const EARLY_KEY = 'proEarly'
 /** sync: { keep, at }. 0.8.0: whether an early user keeps making to-do lists free (they already had one). */
 export const EARLY_TODO_KEY = 'proEarlyTodo'
-/** localStorage, outside the extension only (vite preview): 'free' | 'trial' | 'pro' | 'pro-early' | 'early' | 'early-todo' | 'checkout'. */
+/**
+ * localStorage, outside the extension only (vite preview): 'free' | 'trial' | 'auto-trial' | 'pro' |
+ * 'pro-early' | 'pro-lifetime' | 'early' | 'early-todo' | 'checkout'.
+ */
 const PREVIEW = 'stackable:proPreview'
 
 const TIMEOUT_MS = 10_000
@@ -49,16 +63,20 @@ interface ProStore {
   earlyTodo: boolean | null
   license: License | null
   trialStartedAt: number | null
+  /** 0.9.2: the trial (running or over) started by itself on install: the reverse trial. */
+  trialAuto: boolean
   state: ProState
   busy: boolean
   /** The last problem with a key, in words for Settings. */
   note: string | null
   /** When this computer last opened the checkout (cleared once Pro is on). */
   checkoutAt: number | null
+  /** 0.9.2: that checkout was Pro for life. */
+  checkoutLifetime: boolean
   /** The plan behind the key, when Polar described it. */
   sub: ProSub | null
   /** Opening the checkout: remembered so Settings can show what to do next. */
-  markCheckout: () => void
+  markCheckout: (lifetime?: boolean) => void
   activate: (raw: string) => Promise<boolean>
   /** Asks Polar about the key; `force` asks even when the last answer is recent. */
   check: (force?: boolean) => Promise<void>
@@ -173,16 +191,18 @@ export const usePro = create<ProStore>((set, get) => ({
   earlyTodo: null,
   license: null,
   trialStartedAt: null,
+  trialAuto: false,
   state: { kind: 'free', trialUsed: false },
   busy: false,
   note: null,
   checkoutAt: null,
+  checkoutLifetime: false,
   sub: null,
 
-  markCheckout: () => {
+  markCheckout: (lifetime = false) => {
     const at = Date.now()
-    set({ checkoutAt: at })
-    if (IS_EXTENSION) void chrome.storage.local.set({ [CHECKOUT_KEY]: { at } }).catch(() => {})
+    set({ checkoutAt: at, checkoutLifetime: lifetime })
+    if (IS_EXTENSION) void chrome.storage.local.set({ [CHECKOUT_KEY]: lifetime ? { at, lifetime } : { at } }).catch(() => {})
   },
 
   activate: async (raw) => {
@@ -296,7 +316,7 @@ export const usePro = create<ProStore>((set, get) => ({
     // The trial syncs, so starting one under the pro lock would also use it up on every other computer.
     if (!IS_EXTENSION || get().trialStartedAt || lockPro) return
     const startedAt = Date.now()
-    set({ trialStartedAt: startedAt, state: derive(get().license, startedAt) })
+    set({ trialStartedAt: startedAt, trialAuto: false, state: derive(get().license, startedAt) })
     await chrome.storage.sync.set({ [TRIAL]: { startedAt } })
   },
 
@@ -322,14 +342,14 @@ export const usePro = create<ProStore>((set, get) => ({
   },
 }))
 
-function readTrial(v: unknown): number | null {
-  const at = (v as { startedAt?: unknown } | undefined)?.startedAt
-  return typeof at === 'number' && at > 0 ? at : null
-}
-
 function readAt(v: unknown): number | null {
   const at = (v as { at?: unknown } | undefined)?.at
   return typeof at === 'number' && at > 0 ? at : null
+}
+
+/** The checkout marker says Pro for life (0.9.2). */
+function readLifetime(v: unknown): boolean {
+  return readAt(v) !== null && (v as { lifetime?: unknown }).lifetime === true
 }
 
 /** A plan saved by this or another computer; anything malformed counts as none. */
@@ -359,15 +379,20 @@ function preview(): void {
     // blocked storage: plain free
   }
   const now = Date.now()
-  const pro = p === 'pro' || p === 'pro-early'
+  const pro = p === 'pro' || p === 'pro-early' || p === 'pro-lifetime'
   const license: License | null = pro
     ? { key: 'SB-PREVIEW-0000', status: 'granted', checkedAt: now, okAt: now, email: 'you@example.com', since: now - 3 * 86_400_000 }
     : null
-  const sub: ProSub | null = pro ? { amount: 299, currency: 'usd', interval: 'year', periodEnd: now + 362 * 86_400_000, at: now } : null
-  const trialStartedAt = p === 'trial' ? now - 5 * 86_400_000 : null
+  const sub: ProSub | null = !pro
+    ? null
+    : p === 'pro-lifetime'
+      ? { amount: 1900, currency: 'usd', lifetime: true, startedAt: now - 3 * 86_400_000, at: now }
+      : { amount: 299, currency: 'usd', interval: 'year', periodEnd: now + 362 * 86_400_000, at: now }
+  const trialAuto = p === 'auto-trial'
+  const trialStartedAt = p === 'trial' || trialAuto ? now - 5 * 86_400_000 : null
   const checkoutAt = p === 'checkout' ? now - 60_000 : null
   const early = p === 'early' || p === 'early-todo' || p === 'pro-early'
-  usePro.setState({ ready: true, early, earlyTodo: early ? p === 'early-todo' : null, license, sub, checkoutAt, trialStartedAt, state: derive(license, trialStartedAt) })
+  usePro.setState({ ready: true, early, earlyTodo: early ? p === 'early-todo' : null, license, sub, checkoutAt, trialStartedAt, trialAuto, state: derive(license, trialStartedAt) })
 }
 
 /** School mode: the board calls this with the pro lock each time it reads the policy. */
@@ -378,7 +403,28 @@ export function setProLock(on: boolean): void {
   usePro.setState({ state: derive(s.license, s.trialStartedAt) })
 }
 
+/**
+ * Every buy button (0.9.1): remembers the checkout for Settings' finishing steps and opens it,
+ * labelled with the button, the plan and the version (checkoutUrl). An unpacked build has no
+ * update_url in its manifest, so test and development checkouts carry a dev label. `lifetime`
+ * (0.9.2) opens the Pro for life checkout instead of the yearly one.
+ */
+export function openCheckout(surface: CheckoutSurface, opts: { lifetime?: boolean } = {}): void {
+  const s = usePro.getState()
+  const lifetime = !!opts.lifetime
+  s.markCheckout(lifetime)
+  const manifest = IS_EXTENSION ? chrome.runtime.getManifest() : null
+  const from = { surface, plan: checkoutPlan(s.state, s.trialAuto), version: manifest?.version, dev: !manifest?.update_url }
+  void openInNewTab(lifetime ? lifetimeCheckoutUrl(from) : checkoutUrl(s.early, Date.now(), from), true)
+}
+
 let started = false
+/**
+ * Trial changes this tab has seen (0.9.2). The service worker starts the reverse trial while the
+ * first tab after install is loading; a change that lands while that tab's first read is out wins
+ * over the read.
+ */
+let trialChanges = 0
 
 /** Call once per new tab: reads the stored state, follows other tabs and computers, checks the key when due. */
 export function initPro(): void {
@@ -387,6 +433,7 @@ export function initPro(): void {
   if (!IS_EXTENSION) return preview()
   void (async () => {
     try {
+      const seen = trialChanges
       // The lock comes with the stored state, so a trial never shows as Pro under it, even for a moment.
       const [sync, local, locks] = await Promise.all([
         chrome.storage.sync.get([KEY, TRIAL, EARLY_KEY, EARLY_TODO_KEY, SUB_KEY]),
@@ -397,16 +444,22 @@ export function initPro(): void {
       const held = local[LICENSE] as License | undefined
       // A key kept on this computer only (sync storage was full when it was added) still counts.
       const license = forKey(readKey(sync[KEY]) ?? (held?.localOnly ? held.key : null), held)
-      const trialStartedAt = readTrial(sync[TRIAL])
+      // A trial change that landed during the read is newer than what the read found.
+      const current = usePro.getState()
+      const fresh = trialChanges === seen
+      const trial = readTrial(sync[TRIAL])
+      const trialStartedAt = fresh ? trial?.startedAt ?? null : current.trialStartedAt
       usePro.setState({
         ready: true,
-        early: usePro.getState().early || !!sync[EARLY_KEY],
+        early: current.early || !!sync[EARLY_KEY],
         earlyTodo: readEarlyTodo(sync[EARLY_TODO_KEY]),
         license,
         trialStartedAt,
+        trialAuto: fresh ? !!trial?.auto : current.trialAuto,
         state: derive(license, trialStartedAt),
         sub: readStoredSub(sync[SUB_KEY]),
         checkoutAt: readAt(local[CHECKOUT_KEY]),
+        checkoutLifetime: readLifetime(local[CHECKOUT_KEY]),
       })
       if (needsCheck(license, Date.now())) setTimeout(() => void usePro.getState().check(), 3000)
     } catch {
@@ -416,7 +469,10 @@ export function initPro(): void {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     const s = usePro.getState()
-    if (area === 'local' && CHECKOUT_KEY in changes) usePro.setState({ checkoutAt: readAt(changes[CHECKOUT_KEY].newValue) })
+    if (area === 'local' && CHECKOUT_KEY in changes) {
+      const v = changes[CHECKOUT_KEY].newValue
+      usePro.setState({ checkoutAt: readAt(v), checkoutLifetime: readLifetime(v) })
+    }
     if (area === 'local' && LICENSE in changes) {
       // Another tab on this computer checked the key.
       const l = changes[LICENSE].newValue as License | undefined
@@ -428,8 +484,15 @@ export function initPro(): void {
     if (EARLY_TODO_KEY in changes) usePro.setState({ earlyTodo: readEarlyTodo(changes[EARLY_TODO_KEY].newValue) })
     if (SUB_KEY in changes) usePro.setState({ sub: readStoredSub(changes[SUB_KEY].newValue) })
     if (TRIAL in changes) {
-      const trialStartedAt = readTrial(changes[TRIAL].newValue)
-      usePro.setState({ trialStartedAt, state: derive(usePro.getState().license, trialStartedAt) })
+      trialChanges++
+      const { oldValue, newValue } = changes[TRIAL]
+      // 0.9.2: a trial that started by itself on a computer sync hadn't reached yet gives way to the
+      // older one it overwrote. This tab keeps the older one; writing it back tells the rest.
+      const restore = olderTrialWins(oldValue, newValue)
+      if (restore) void chrome.storage.sync.set({ [TRIAL]: oldValue }).catch(() => {})
+      const trial = readTrial(restore ? oldValue : newValue)
+      const trialStartedAt = trial?.startedAt ?? null
+      usePro.setState({ trialStartedAt, trialAuto: !!trial?.auto, state: derive(usePro.getState().license, trialStartedAt) })
     }
     if (KEY in changes) {
       const key = readKey(changes[KEY].newValue)

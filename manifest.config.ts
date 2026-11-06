@@ -10,7 +10,7 @@ export default defineManifest({
   default_locale: 'en',
   name: '__MSG_extName__',
   short_name: '__MSG_extShortName__',
-  version: '0.9.0',
+  version: '0.9.2',
   description: '__MSG_extDescription__',
   chrome_url_overrides: {
     newtab: 'newtab.html',

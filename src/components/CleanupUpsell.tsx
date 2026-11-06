@@ -1,6 +1,4 @@
-import { usePro } from '../lib/pro'
-import { checkoutUrl } from '../lib/proPlan'
-import { openInNewTab } from '../lib/tabs'
+import { openCheckout, usePro } from '../lib/pro'
 import { useStackableStore } from '../store/useStackableStore'
 import { PrimaryButton, SecondaryButton } from './modals/Modal'
 
@@ -29,12 +27,8 @@ export function CleanupScanEntry() {
 /** The clean-up dialog's footer without Pro: the trial while it's unused, then Get Pro. School mode: Close only. */
 export function CleanupProFooter({ onClose }: { onClose: () => void }) {
   const trialUsed = usePro((s) => !!s.trialStartedAt)
-  const early = usePro((s) => s.early)
   const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
-  const buy = () => {
-    usePro.getState().markCheckout()
-    void openInNewTab(checkoutUrl(early, Date.now()), true)
-  }
+  const buy = () => openCheckout('cleanup')
   if (lockPro) return <SecondaryButton onClick={onClose}>Close</SecondaryButton>
   return (
     <>

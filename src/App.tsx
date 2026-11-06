@@ -38,6 +38,7 @@ import { archivedNote } from './lib/archivePlan'
 import { maybeTakeDailySnapshot } from './lib/snapshots'
 import { WhatsNew } from './components/WhatsNew'
 import { TrialEndCard } from './components/TrialEndCard'
+import { ReverseTrialCard } from './components/ReverseTrialCard'
 import { MomentLine } from './components/MomentLine'
 import { useCorner } from './lib/corner'
 import { CommandBar } from './components/CommandBar'
@@ -387,6 +388,7 @@ export default function App() {
         <RatingPrompt />
         <WhatsNew />
         <TrialEndCard />
+        <ReverseTrialCard welcoming={welcoming} />
         <MomentLine />
         <CommandBar />
         <ShareAddCard />

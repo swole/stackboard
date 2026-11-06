@@ -1,6 +1,4 @@
-import { usePro } from '../lib/pro'
-import { checkoutUrl } from '../lib/proPlan'
-import { openInNewTab } from '../lib/tabs'
+import { openCheckout, usePro } from '../lib/pro'
 import { useStackableStore } from '../store/useStackableStore'
 
 /**
@@ -9,17 +7,13 @@ import { useStackableStore } from '../store/useStackableStore'
  * company's pro lock (school mode), where there are no try-ons to keep.
  */
 export function KeepWithPro({ text, onTrial, ...rest }: { text: string; onTrial?: () => void | Promise<void>; [data: `data-${string}`]: string }) {
-  const early = usePro((s) => s.early)
   const trialUsed = usePro((s) => !!s.trialStartedAt)
   const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
   const startTrial = async () => {
     await usePro.getState().startTrial()
     await onTrial?.()
   }
-  const buy = () => {
-    usePro.getState().markCheckout()
-    void openInNewTab(checkoutUrl(early, Date.now()), true)
-  }
+  const buy = () => openCheckout('keep-look')
   if (lockPro) return null
   return (
     <p {...rest} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-relaxed text-fg">

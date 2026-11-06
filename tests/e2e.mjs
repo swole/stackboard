@@ -17,6 +17,8 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url))
 // 0.8.0 adds `search` (go links fall back to the default search engine); Chrome shows no install
 // warning for it, which the go-link block checks with getPermissionWarningsByManifest.
 const PERMISSIONS = ['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups', 'search']
+// 0.9.2: the Pro for life checkout (CHECKOUT.lifetime in src/lib/proPlan.ts).
+const LIFETIME_CHECKOUT = 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W'
 const CHROME = process.env.STACKABLE_TEST_CHROME
 if (!CHROME) throw new Error('Set STACKABLE_TEST_CHROME to a Chrome for Testing chrome.exe')
 let EXT = process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist')
@@ -120,6 +122,65 @@ try {
   // a background page gets no animation frames, so puppeteer's waits would never poll.
   await control.bringToFront()
   await control.waitForFunction(() => document.body.innerText.includes('Welcome to Stackboard'), { timeout: 10000 })
+
+  // ---------- 0.9.2: the reverse trial on install ----------
+  // Every run installs fresh, so the service worker starts the Pro trial by itself, a moment after
+  // install (it waits for the company policy first). Check it here, on the empty board, then take it
+  // away: the blocks below expect a free board unless they set a trial themselves.
+  {
+    const until = async (page, fn, arg, ms = 6000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    await until(control, async () => !!(await chrome.storage.sync.get('proTrial')).proTrial, null, 15000)
+    const got = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
+    check('reverse trial: a fresh install starts the Pro trial by itself, marked auto', got?.auto === true && typeof got.startedAt === 'number' && Math.abs(Date.now() - got.startedAt) < 5 * 60000, JSON.stringify(got))
+    await control.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    const inSettings = await until(control, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial')
+    const said = await control.evaluate(() => document.querySelector('[data-pro]')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
+    check(
+      'reverse trial: Settings says the trial started on install, and nothing says it never starts by itself',
+      inSettings && said.includes('Your free Pro trial started when you added Stackboard: 14 days left. When it ends, Pro features pause and everything you made stays.') && !/by itself/i.test(said),
+      said.slice(0, 220),
+    )
+    await control.keyboard.press('Escape')
+    await until(control, () => !document.querySelector('[role=dialog]'))
+
+    // Due by every other rule (two days in, the fifth new tab), the reverse-trial card still stays
+    // off the welcome screen of an empty board.
+    const ls = await control.evaluate(() => Object.fromEntries(['stackable:opens', 'stackable:firstSeen', 'stackable:reverseTrial'].map((k) => [k, localStorage.getItem(k)])))
+    await control.evaluate(async () => {
+      const at = Date.now() - 2 * 86400000
+      await chrome.storage.sync.remove('proTrial')
+      await chrome.storage.sync.set({ proTrial: { startedAt: at, auto: true } })
+      localStorage.setItem('stackable:opens', '4')
+      localStorage.setItem('stackable:firstSeen', String(at))
+      localStorage.removeItem('stackable:reverseTrial')
+    })
+    const known = new Set(browser.targets())
+    const opening = browser.waitForTarget((t) => !known.has(t) && t.type() === 'page' && (t.url() === NTP || t.url().startsWith('chrome://newtab')), { timeout: 10000 })
+    await control.evaluate(() => chrome.tabs.create({ active: true }))
+    const welcome = await (await opening).page()
+    welcome.on('pageerror', (e) => errors.push(`reverse trial welcome: ${e.message}`))
+    await welcome.waitForFunction(() => document.body.innerText.includes('Welcome to Stackboard'), { timeout: 10000 })
+    await sleep(3000) // the card decides 1.5 s after the board loads
+    const onWelcome = await welcome.evaluate(() => ({ card: !!document.querySelector('[data-reverse-trial]'), shows: localStorage.getItem('stackable:reverseTrial'), opens: localStorage.getItem('stackable:opens') }))
+    check('reverse card: never on the welcome screen of an empty board', !onWelcome.card && onWelcome.shows === null && onWelcome.opens === '5', JSON.stringify(onWelcome))
+    await welcome.close()
+    await control.bringToFront()
+    await control.evaluate(async (ls) => {
+      await chrome.storage.sync.remove('proTrial')
+      for (const [k, v] of Object.entries(ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, ls)
+    // An update never starts it: the worker's update step, as the suite plays it, leaves sync alone.
+    const replay = await askWorker(control, { type: 'e2e-updated-from', previousVersion: '0.9.1' })
+    await sleep(500)
+    const afterUpdate = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
+    check('reverse trial: the update step starts no trial', replay?.ok === true && afterUpdate === null, JSON.stringify({ replay, afterUpdate }))
+  }
 
   await control.evaluate(async () => {
     const kids = await chrome.bookmarks.getChildren('2')
@@ -991,6 +1052,9 @@ try {
     const trial = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial' && document.querySelector('[data-pro]').innerText.includes('14 days left'))
     const synced = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial)
     check('pro: the trial starts on a click and syncs', trial && typeof synced?.startedAt === 'number', JSON.stringify(synced))
+    // 0.9.2: a trial started with a click carries no auto mark, and Settings keeps its own line.
+    const optInLine = await page.evaluate(() => document.querySelector('[data-pro-trial-line]')?.dataset.proTrialLine ?? null)
+    check('pro: a trial started with a click has no auto mark', !!synced && !('auto' in synced) && optInLine === 'opt-in', JSON.stringify({ synced, optInLine }))
     check('pro: with the trial on, Settings shows auto-archive', await until(page, () => !!document.querySelector('[data-archive-setting]')))
 
     const other = await openNtp()
@@ -1050,14 +1114,53 @@ try {
     await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
     check('pro card: a free board says where a bought key is', await page.evaluate(() => !!document.querySelector('[data-pro-find-key]')))
 
+    // 0.9.2: one quiet line under the buttons sells Pro for life, through its own checkout with the
+    // same labels; the finishing steps follow, and Back to checkout returns to that checkout.
+    const lastCheckout = async () => {
+      const opened = await page.evaluate(() => window.__opened.splice(0))
+      const tabs = browser.targets().filter((t) => /polar\.sh/.test(t.url())).map((t) => t.url())
+      for (const t of browser.targets()) if (/polar\.sh/.test(t.url())) await (await t.page().catch(() => null))?.close().catch(() => {})
+      await page.bringToFront()
+      return [...opened, ...tabs].map((u) => new URL(u)).filter((u) => /(^|\.)polar\.sh$/.test(u.hostname)).pop() ?? null
+    }
+    const lifeLine = await page.evaluate(() => document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null)
+    check("lifetime: a free board's Settings offers Pro for life in one line", lifeLine === 'Prefer to pay once? Get Pro for life for $19.', String(lifeLine))
+    await page.evaluate(() => [...document.querySelectorAll('[data-pro-lifetime] button')].find((b) => b.textContent.trim() === 'Get Pro for life')?.click())
+    const lifeSteps = await until(page, () => !!document.querySelector('[data-pro-pending]'))
+    const life = await lastCheckout()
+    const lifeMark = await control.evaluate(async () => (await chrome.storage.local.get('proCheckout')).proCheckout ?? null)
+    check(
+      'lifetime: Get Pro for life opens the lifetime checkout with the labels, and the finishing steps',
+      lifeSteps && !!life && life.origin + life.pathname === LIFETIME_CHECKOUT && life.searchParams.get('utm_source') === 'extension-dev' && life.searchParams.get('utm_medium') === 'settings-lifetime' && /^(free|trial-ended)$/.test(life.searchParams.get('utm_content') ?? '') && /^v\d/.test(life.searchParams.get('utm_campaign') ?? '') && lifeMark?.lifetime === true,
+      JSON.stringify({ life: life?.href, lifeMark }),
+    )
+    check('lifetime: the finishing steps carry no lifetime line', await page.evaluate(() => !document.querySelector('[data-pro-lifetime]')))
+    await page.evaluate(() => [...document.querySelectorAll('[data-pro-pending] button')].find((b) => b.textContent.trim() === 'Back to checkout')?.click())
+    await sleep(600)
+    const back = await lastCheckout()
+    check('lifetime: Back to checkout opens the lifetime checkout again', !!back && back.origin + back.pathname === LIFETIME_CHECKOUT && back.searchParams.get('utm_medium') === 'settings-pending', String(back?.href))
+    // Start over: no checkout pending, so Settings sells Pro again.
+    await control.evaluate(() => chrome.storage.local.remove('proCheckout'))
+    await until(page, () => !document.querySelector('[data-pro-pending]') && !!document.querySelector('[data-pro-lifetime]'))
+    await page.evaluate(() => window.__opened.splice(0))
+
     // Get Pro opens the checkout and turns Settings to the steps that finish the purchase.
     await page.evaluate(() => [...document.querySelectorAll('[data-pro] button')].find((b) => b.textContent.trim() === 'Get Pro').click())
     const steps = await until(page, () => !!document.querySelector('[data-pro-pending]'))
     const opened = await page.evaluate(() => window.__opened.slice())
+    const polarTabs = browser.targets().filter((t) => /polar\.sh/.test(t.url())).map((t) => t.url())
     for (const t of browser.targets()) if (/polar\.sh/.test(t.url())) await (await t.page().catch(() => null))?.close().catch(() => {})
     await page.bringToFront()
     const marked = await control.evaluate(async () => (await chrome.storage.local.get('proCheckout')).proCheckout)
     check('pro card: Get Pro opens the checkout and shows the finishing steps', steps && typeof marked?.at === 'number', JSON.stringify({ opened, marked }))
+    // 0.9.1: the link says which button and plan sent them; an unpacked build is labelled dev.
+    const tagged = [...opened, ...polarTabs].map((u) => new URL(u)).find((u) => /(^|\.)polar\.sh$/.test(u.hostname))
+    check(
+      'pro card: the checkout link names the button, the plan and the version (dev label on an unpacked build)',
+      !!tagged && tagged.searchParams.get('utm_source') === 'extension-dev' && tagged.searchParams.get('utm_medium') === 'settings' && /^(free|trial-ended)$/.test(tagged.searchParams.get('utm_content') ?? '') && /^v\d/.test(tagged.searchParams.get('utm_campaign') ?? ''),
+      JSON.stringify({ opened, polarTabs }),
+    )
+    check('pro card: after a look at the checkout, the finishing steps still offer the trial', await page.evaluate(() => !!document.querySelector('[data-pro-pending-trial]')))
 
     // A good key: crown card with the details, a thank-you, a toast and the crown in the sidebar.
     await page.evaluate(() => document.querySelector('[data-pro] input[aria-label="License key"]').focus())
@@ -1065,7 +1168,7 @@ try {
     await page.evaluate(() => document.querySelector('[data-pro-key] button[type=submit]').click())
     const on = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro' && !!document.querySelector('[data-pro-card]'))
     const card = await page.evaluate(() => document.querySelector('[data-pro-card]')?.innerText ?? '')
-    check('pro card: a good key shows the crown card and its details', on && /active/i.test(card) && card.includes('buyer@example.com') && card.includes('3 Nov 2026') && card.includes('SB-...-9F2C') && card.includes('Yearly plan'), card.replace(/\s+/g, ' ').slice(0, 220))
+    check('pro card: a good key shows the crown card and its details', on && /active/i.test(card) && card.includes('buyer@example.com') && card.includes('3 Nov 2026') && card.includes('SB-...-9F2C') && !card.includes('Yearly plan'), card.replace(/\s+/g, ' ').slice(0, 220))
     check('pro card: a thank-you on the card and a toast', await until(page, () => !!document.querySelector('[data-pro-welcome]') && document.body.innerText.includes('Switched on')))
     check('pro card: a crown beside the name in the sidebar', await page.evaluate(() => !!document.querySelector('[data-pro-crown]')))
     const after = await control.evaluate(async () => ({
@@ -1120,7 +1223,7 @@ try {
             const url = typeof input === 'string' ? input : input.url
             if (url.startsWith('https://api.polar.sh/v1/customer-portal/')) {
               window.__portalCalls.push([url.replace('https://api.polar.sh/v1/customer-portal', ''), (init.headers || {}).Authorization || ''])
-              const body = url.includes('/license-keys/') ? portal.keys : url.includes('/subscriptions/') ? portal.subs : { items: [] }
+              const body = url.includes('/license-keys/') ? portal.keys : url.includes('/subscriptions/') ? portal.subs : url.includes('/orders/') ? portal.orders ?? { items: [] } : { items: [] }
               return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
             }
             return real(input, init)
@@ -1199,6 +1302,57 @@ try {
       await page2.close()
       const still = await control.evaluate(async () => (await chrome.storage.sync.get('proKey')).proKey?.key)
       check('pro hand-off: a junk key is refused and other site pages are ignored', JSON.stringify(replies) === JSON.stringify([{ ok: false }]) && still === KEY, JSON.stringify({ replies, fromShare, still }))
+
+      // 0.9.2: Pro for life is a one-time purchase with no subscription, so the page reads the paid
+      // order (passing over a refunded one and a yearly one) and hands over a lifetime plan. The
+      // next new tab's card says Pro for life, with no renewal row.
+      await control.evaluate(async () => {
+        // The license first, so no open page tries to free a computer for the old key.
+        await chrome.storage.local.remove(['proLicense', 'proCheckout'])
+        await chrome.storage.sync.remove(['proKey', 'proSub'])
+      })
+      await sleep(400)
+      const LIFE = '8fc36071-441d-4550-b9f4-5bc55b5d2b85'
+      const lifePortal = {
+        keys: portal.keys,
+        subs: { items: [] },
+        orders: { items: [
+          { id: 'o-year', status: 'paid', net_amount: 299, total_amount: 299, currency: 'usd', created_at: '2026-11-06T09:30:00Z', product_id: 'yearly', product: { name: 'Stackboard Pro', is_recurring: true } },
+          { id: 'o-refund', status: 'refunded', net_amount: 1900, total_amount: 1900, currency: 'usd', created_at: '2026-11-06T09:00:00Z', product_id: LIFE, product: { name: 'Stackboard Pro Lifetime', is_recurring: false } },
+          { id: 'o-life', status: 'paid', net_amount: 1900, total_amount: 2071, currency: 'usd', created_at: '2026-11-06T08:41:50Z', product_id: LIFE, product: { name: 'Stackboard Pro Lifetime', is_recurring: false } },
+        ] },
+      }
+      const lifeThanks = await openSite('https://getstackboard.com/pro/thanks?customer_session_token=polar_cst_life', lifePortal)
+      const lifeHanded = await until(lifeThanks, () => document.getElementById('handoff')?.classList.contains('on'))
+      const lifeCalls = await lifeThanks.evaluate(() => window.__portalCalls.map(([u]) => u.split('?')[0]))
+      await lifeThanks.close()
+      const lifeSaved = await control.evaluate(async () => chrome.storage.sync.get(['proKey', 'proSub']))
+      const ls = lifeSaved.proSub ?? {}
+      check(
+        'pro hand-off: a Pro for life purchase hands over a lifetime plan from its paid order',
+        lifeHanded && lifeSaved.proKey?.key === KEY && ls.lifetime === true && ls.amount === 1900 && ls.currency === 'usd' && ls.startedAt === Date.parse('2026-11-06T08:41:50Z') && !('interval' in ls) && !('periodEnd' in ls) && lifeCalls.includes('/orders/'),
+        JSON.stringify({ lifeSaved, lifeCalls }),
+      )
+      const lifeNtp = await browser.newPage()
+      await lifeNtp.setViewport({ width: 1400, height: 900 })
+      lifeNtp.on('pageerror', (e) => errors.push(`pro hand-off lifetime ntp: ${e.message}`))
+      await lifeNtp.evaluateOnNewDocument(stub)
+      await lifeNtp.goto(NTP, { waitUntil: 'load' })
+      await lifeNtp.bringToFront()
+      await lifeNtp.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      await lifeNtp.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
+      const lifeOn = await until(lifeNtp, () => document.querySelector('[data-pro]')?.dataset.pro === 'pro' && !!document.querySelector('[data-pro-card]'))
+      const lifeCard = await lifeNtp.evaluate(() => ({
+        plan: document.querySelector('[data-pro-plan]')?.textContent.trim() ?? null,
+        rows: [...document.querySelectorAll('[data-pro-details] dt')].map((d) => d.textContent.trim()),
+        buttons: [...document.querySelectorAll('[data-pro-card] button')].map((b) => b.textContent.trim()),
+      }))
+      check(
+        'pro hand-off: the lifetime card says Pro for life, $19 paid once, with no renewal and a purchase to manage',
+        lifeOn && lifeCard.plan === 'Pro for life, $19 paid once' && !lifeCard.rows.includes('Renews') && !lifeCard.rows.includes('Ends') && lifeCard.rows.includes('Pro since') && lifeCard.buttons.includes('Manage purchase'),
+        JSON.stringify(lifeCard),
+      )
+      await lifeNtp.close()
       await control.evaluate(() => Promise.all([chrome.storage.sync.remove(['proKey', 'proSub']), chrome.storage.local.remove(['proLicense', 'proCheckout'])]))
       for (const pg of boards) await pg.evaluate(() => { if (window.__fetchBeforeStub) window.fetch = window.__fetchBeforeStub }).catch(() => {})
     }
@@ -3284,6 +3438,236 @@ try {
     await sleep(400)
   }
 
+  // ---------- 0.9.2: the reverse-trial card, and the recap for a trial that started by itself ----------
+  // A new install's trial (sync proTrial.auto) gets one corner card once they've settled in: from the
+  // board's third new tab and 20 hours after install, while 3 or more days are left. It says until when
+  // Pro is free, and See what's in Pro opens Settings at Stackboard Pro; two new tabs at most, retired
+  // when answered. Install time, the tab count and the show count are played through storage. At the
+  // trial's end the usual recap comes, with Pro for life beside Keep Pro.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const D = 24 * 60 * 60 * 1000
+    const H = 60 * 60 * 1000
+    const LS = ['stackable:opens', 'stackable:firstSeen', 'stackable:reverseTrial', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:rating', 'stackable:managedOverride']
+    const was = await control.evaluate(async (ls) => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      local: await chrome.storage.local.get(['proCheckout', 'proLicense', 'whatsNew080', 'whatsNew090']),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS)
+    // A quiet board on a trial that started on install at `installedAt` (auto unless `auto: false`): no
+    // key, no note pending, the rating ask answered, and `opens` new tabs so far.
+    const setup = (s) => control.evaluate(async (s) => {
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']) localStorage.setItem(k, '-1')
+      localStorage.setItem('stackable:rating', 'dismissed')
+      localStorage.setItem('stackable:opens', String(s.opens))
+      localStorage.setItem('stackable:firstSeen', String(s.installedAt))
+      for (const [k, v] of Object.entries(s.ls ?? {})) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+      await chrome.storage.sync.set({ proTrial: s.auto === false ? { startedAt: s.installedAt } : { startedAt: s.installedAt, auto: true } })
+    }, s)
+    const fresh = { 'stackable:reverseTrial': null }
+    const card = (page) => page.evaluate(() => {
+      const c = document.querySelector('[data-reverse-trial]')
+      return c ? { title: c.querySelector('h3')?.textContent.trim() ?? '', text: c.innerText.replace(/\s+/g, ' ').trim() } : null
+    })
+    const shown = (page) => until(page, () => !!document.querySelector('[data-reverse-trial]'))
+    // The card decides 1.5 s after the board and Pro are ready; openNtp has waited 0.6 s of that.
+    const none = async (page) => {
+      await sleep(3000)
+      return page.evaluate(() => !document.querySelector('[data-reverse-trial]'))
+    }
+    // A new tab that catches the checkout tab before it opens, as in the Pro card block.
+    const catching = async () => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`reverse trial: ${e.message}`))
+      await p.evaluateOnNewDocument(() => {
+        window.__opened = []
+        try {
+          const create = chrome.tabs.create.bind(chrome.tabs)
+          chrome.tabs.create = (o, ...rest) => (/polar\.sh/.test(o?.url ?? '') ? (window.__opened.push(o.url), Promise.resolve({ id: -1 })) : create(o, ...rest))
+        } catch {
+          // read-only binding: the real checkout tab opens and is closed below
+        }
+      })
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      return p
+    }
+    const lastCheckout = async (p) => {
+      const opened = await p.evaluate(() => window.__opened.splice(0))
+      const tabs = browser.targets().filter((t) => /polar\.sh/.test(t.url())).map((t) => t.url())
+      for (const t of browser.targets()) if (/polar\.sh/.test(t.url())) await (await t.page().catch(() => null))?.close().catch(() => {})
+      await p.bringToFront()
+      return [...opened, ...tabs].map((u) => new URL(u)).filter((u) => /(^|\.)polar\.sh$/.test(u.hostname)).pop() ?? null
+    }
+
+    // 1. Two days in, on the tenth new tab: the card and its words, then See what's in Pro.
+    const at1 = Date.now() - 2 * D
+    await setup({ installedAt: at1, opens: 9, ls: fresh })
+    const r1 = await openNtp()
+    const c1 = (await shown(r1)) ? await card(r1) : null
+    const title1 = await r1.evaluate((end) => `Pro is on, free until ${new Date(end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, at1 + 14 * D)
+    check(
+      "reverse card: Pro is on, free until the trial's last day, with what to try and See what's in Pro",
+      !!c1 && c1.title === title1 && c1.text.includes('Try Ctrl+K to jump anywhere, a to-do list, or a colour on a stack. Everything you make stays when the trial ends.') && c1.text.includes("See what's in Pro"),
+      JSON.stringify({ c1, title1 }),
+    )
+    await r1.screenshot({ path: path.join(SHOTS, '092-reverse-card.png') })
+    await r1.evaluate(() => document.querySelector('[data-reverse-trial-look]')?.click())
+    const looked = await until(r1, () => !!document.querySelector('[data-pro]') && !document.querySelector('[data-reverse-trial]'))
+    await sleep(300)
+    const st1 = await r1.evaluate(() => {
+      const pro = document.querySelector('[data-pro]')
+      return {
+        pro: pro?.dataset.pro ?? null,
+        kind: document.querySelector('[data-pro-trial-line]')?.dataset.proTrialLine ?? null,
+        line: document.querySelector('[data-pro-trial-line]')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+        lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+        byItself: /by itself/i.test(pro?.innerText ?? ''),
+        shows: localStorage.getItem('stackable:reverseTrial'),
+      }
+    })
+    check("reverse card: See what's in Pro opens Settings at Stackboard Pro and retires the card", looked && st1.pro === 'trial' && st1.shows === '-1', JSON.stringify(st1))
+    check(
+      'reverse card: Settings names the trial that started on install, its days left and Pro for life, and never says it never starts by itself',
+      st1.kind === 'auto' && st1.line === 'Your free Pro trial started when you added Stackboard: 12 days left. When it ends, Pro features pause and everything you made stays.' && st1.lifetime === 'Prefer to pay once? Get Pro for life for $19.' && !st1.byItself,
+      JSON.stringify(st1),
+    )
+    await r1.close()
+    const r2 = await openNtp()
+    check('reverse card: once answered it stays away', await none(r2))
+    await r2.close()
+
+    // 2. Left alone it shows on two new tabs, then no more; its close button retires it as well.
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, ls: fresh })
+    const twice = []
+    for (let i = 0; i < 3; i++) {
+      const p = await openNtp()
+      twice.push(i < 2 ? await shown(p) : await none(p))
+      await p.close()
+    }
+    check('reverse card: on two new tabs at most', twice.every(Boolean), JSON.stringify(twice))
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, ls: fresh })
+    const r3 = await openNtp()
+    await shown(r3)
+    await r3.evaluate(() => document.querySelector('[data-reverse-trial] button[aria-label="Dismiss"]')?.click())
+    const closed = await r3.evaluate(() => ({ gone: !document.querySelector('[data-reverse-trial]'), shows: localStorage.getItem('stackable:reverseTrial') }))
+    check('reverse card: its close button retires it too', closed.gone && closed.shows === '-1', JSON.stringify(closed))
+    await r3.close()
+
+    // 3. Not on the board's first or second new tab; from the third.
+    await setup({ installedAt: Date.now() - 2 * D, opens: 0, ls: fresh })
+    const third = []
+    for (let i = 0; i < 3; i++) {
+      const p = await openNtp()
+      third.push(i < 2 ? await none(p) : await shown(p))
+      await p.close()
+    }
+    const opens = await control.evaluate(() => localStorage.getItem('stackable:opens'))
+    check('reverse card: not on the first or second new tab, then on the third', third.every(Boolean) && opens === '3', JSON.stringify({ third, opens }))
+
+    // 4. Not in the first 20 hours, not for a trial started with a click, not under the pro lock.
+    await setup({ installedAt: Date.now() - 10 * H, opens: 9, ls: fresh })
+    const r4 = await openNtp()
+    const soon = await none(r4)
+    await r4.close()
+    check('reverse card: not in the first 20 hours after install', soon)
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, auto: false, ls: fresh })
+    const r5 = await openNtp()
+    const clicked = await none(r5)
+    await r5.close()
+    check('reverse card: not for a trial started with a click', clicked)
+    await control.evaluate(() => localStorage.setItem('stackable:managedOverride', JSON.stringify({ lock: { pro: true } })))
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, ls: fresh })
+    const r6 = await openNtp()
+    const lockedQuiet = await none(r6)
+    const lockedText = await r6.evaluate(() => document.body.innerText)
+    await r6.close()
+    await control.evaluate(() => localStorage.removeItem('stackable:managedOverride'))
+    check('reverse card: never under the company pro lock (school mode)', lockedQuiet && !/Pro is on|free until/i.test(lockedText), lockedText.replace(/\s+/g, ' ').slice(0, 120))
+
+    // 5. Its last two days bring the recap instead, with Pro for life beside Keep Pro; that link opens
+    //    the lifetime checkout labelled auto-trial and retires the recap.
+    await setup({ installedAt: Date.now() - 12.5 * D, opens: 9, ls: { ...fresh, 'stackable:trialEnding': null, 'stackable:trialEnded': null } })
+    const k1 = await catching()
+    const recap = await until(k1, () => document.querySelector('[data-trial-end]')?.dataset.trialEnd === 'ending')
+    await sleep(2000)
+    const rc = await k1.evaluate(() => ({ text: document.querySelector('[data-trial-end]')?.innerText.replace(/\s+/g, ' ').trim() ?? '', reverse: !!document.querySelector('[data-reverse-trial]') }))
+    await k1.screenshot({ path: path.join(SHOTS, '092-recap-lifetime.png') })
+    check(
+      'reverse trial: its last two days bring the recap with Pro for life beside Keep Pro, and no reverse card',
+      recap && /Your Pro trial ends (today|tomorrow|in 2 days)/.test(rc.text) && /Keep Pro for \$\d\.\d\d a year ?or \$19 once ?Not now/.test(rc.text) && !rc.reverse,
+      JSON.stringify(rc),
+    )
+    await k1.evaluate(() => document.querySelector('[data-trial-lifetime]')?.click())
+    await sleep(800)
+    const once = await lastCheckout(k1)
+    const kept = await control.evaluate(async () => ({ shows: localStorage.getItem('stackable:trialEnding'), checkout: (await chrome.storage.local.get('proCheckout')).proCheckout ?? null }))
+    check(
+      'reverse trial: or $19 once opens the lifetime checkout, labelled trial-end-lifetime and auto-trial, and retires the recap',
+      !!once && once.origin + once.pathname === LIFETIME_CHECKOUT && once.searchParams.get('utm_medium') === 'trial-end-lifetime' && once.searchParams.get('utm_content') === 'auto-trial' && kept.shows === '-1' && kept.checkout?.lifetime === true,
+      JSON.stringify({ once: once?.href, kept }),
+    )
+    await k1.close()
+
+    // 6. After it ends: the recap says so, and Settings sells Pro with Pro for life, its checkout
+    //    labelled auto-trial-ended.
+    await setup({ installedAt: Date.now() - 15 * D, opens: 9, ls: { ...fresh, 'stackable:trialEnded': null } })
+    const k2 = await catching()
+    const ended = await until(k2, () => document.querySelector('[data-trial-end]')?.dataset.trialEnd === 'ended')
+    const endedText = await k2.evaluate(() => document.querySelector('[data-trial-end]')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
+    check('reverse trial: once it ends the recap says so, with Pro for life', ended && endedText.includes('Your Pro trial has ended') && endedText.includes('or $19 once'), endedText)
+    await k2.evaluate(() => [...document.querySelectorAll('[data-trial-end] button')].find((b) => b.textContent.trim() === 'Not now')?.click())
+    await k2.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(k2, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
+    const st2 = await k2.evaluate(() => ({
+      text: document.querySelector('[data-pro]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+      lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+    }))
+    await k2.evaluate(() => [...document.querySelectorAll('[data-pro-lifetime] button')].find((b) => b.textContent.trim() === 'Get Pro for life')?.click())
+    await sleep(800)
+    const ended2 = await lastCheckout(k2)
+    check(
+      'reverse trial: after it, Settings says the trial ended and offers Pro for life, labelled auto-trial-ended, and never says it never starts by itself',
+      st2.text.includes('Your trial has ended, so Pro features are paused.') && st2.lifetime === 'Prefer to pay once? Get Pro for life for $19.' && !/by itself/i.test(st2.text) && !!ended2 && ended2.origin + ended2.pathname === LIFETIME_CHECKOUT && ended2.searchParams.get('utm_medium') === 'settings-lifetime' && ended2.searchParams.get('utm_content') === 'auto-trial-ended',
+      JSON.stringify({ st2, ended2: ended2?.href }),
+    )
+    await k2.close()
+
+    // 7. A key whose plan has ended (Renew Pro) gets the same line under its buttons.
+    await control.evaluate(async () => {
+      await chrome.storage.sync.remove('proTrial')
+      await chrome.storage.local.set({ proLicense: { key: 'SB-E2E0-0000-0000-E2ED', activationId: 'act-ended', status: 'revoked', checkedAt: Date.now() } })
+      await chrome.storage.sync.set({ proKey: { key: 'SB-E2E0-0000-0000-E2ED' } })
+    })
+    await sleep(400)
+    const k3 = await openNtp()
+    await k3.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    const renew = await until(k3, () => document.querySelector('[data-pro-reason]')?.dataset.proReason === 'ended')
+    const st3 = await k3.evaluate(() => ({ buttons: [...document.querySelectorAll('[data-pro] button')].map((b) => b.textContent.trim()), lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null }))
+    check('lifetime: a key whose plan has ended offers Renew Pro, with Pro for life under it', renew && st3.buttons.includes('Renew Pro') && st3.lifetime === 'Prefer to pay once? Get Pro for life for $19.', JSON.stringify(st3))
+    await k3.close()
+
+    await control.evaluate(async (w) => {
+      // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was)
+    await sleep(400)
+  }
+
   // ---------- 0.8.0: nested folders ----------
   // A folder inside a stack folder shows in the stack card as a folded section; deeper folders
   // nest inside it. Open folders are remembered on this device. Search, open-all, share (as one
@@ -4409,8 +4793,8 @@ try {
       await p.keyboard.up('Control')
     }
     const setPolicy = (p) => control.evaluate((j) => (j ? localStorage.setItem('stackable:managedOverride', j) : localStorage.removeItem('stackable:managedOverride')), p ? JSON.stringify(p) : null)
-    // Any way to buy or try Pro, or a price.
-    const OFFERS = "Get Pro|free trial|Try it free|Try Pro|Keep Pro|Renew Pro|See what's in Pro|\\$\\d"
+    // Any way to buy or try Pro, or a price; 0.9.2 adds Pro for life and the reverse-trial card.
+    const OFFERS = "Get Pro|free trial|Try it free|Try Pro|Keep Pro|Renew Pro|See what's in Pro|Pro for life|pay once|\\$19 once|Pro is on|free until|\\$\\d"
 
     // 1. The builder's preset, exported for the Google Admin console, is the policy for the rest.
     let policy = { lock: { pro: true, ai: true, rating: true } }

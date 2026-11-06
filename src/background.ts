@@ -1,10 +1,10 @@
 import { archiveIdleTabs, declareBankruptcy, stashWindow } from './lib/stash'
 import { uninstallUrl } from './lib/uninstall'
-import { PRO_VERSION, compareVersions } from './lib/proPlan'
+import { PRO_VERSION, REVERSE_TRIAL, compareVersions, reverseTrialOnInstall } from './lib/proPlan'
 import { onShareMessage } from './lib/shareWorker'
 import { onProMessage } from './lib/proHandoff'
 import { readTree } from './lib/bookmarks'
-import { readCompany, watchCompany } from './lib/company'
+import { readCompany, readLocks, watchCompany } from './lib/company'
 import { goEntries, goSuggestions, looksLikeUrl, rankGo, searchDisposition, type GoEntry } from './lib/goLinks'
 import { forgetTab, noteActivated, startTabSeen } from './lib/tabSeen'
 import { PACKED_VERSION, rowsForOldBoard } from './lib/appearance'
@@ -57,9 +57,32 @@ async function markWhatsNew090(previousVersion: string): Promise<void> {
   await chrome.storage.local.set({ [WHATS_NEW_090_KEY]: { from: previousVersion, at: Date.now() } })
 }
 
+// Keep in sync with TRIAL and KEY in src/lib/pro.ts.
+const TRIAL_KEY = 'proTrial'
+const PRO_KEY = 'proKey'
+/** How long the install step waits for the company policy before it counts as none. */
+const INSTALL_POLICY_WAIT_MS = 10_000
+
+/**
+ * 10. (0.9.2) The reverse trial: a fresh install starts the 14-day Pro trial by itself, marked auto,
+ *     unless the company locks Pro or sync already holds a trial or a key (reverseTrialOnInstall).
+ *     Nothing waits for it, so it can wait for the policy itself (readLocks reads the test override
+ *     from storage.local here) and read sync after that, which also gives Chrome sync a moment to
+ *     bring over a trial or a key from this profile's other computers. Open tabs pick the trial up
+ *     as it lands (pro.ts).
+ */
+async function startReverseTrial(): Promise<void> {
+  if (!REVERSE_TRIAL) return
+  const locks = await readLocks({ waitMs: INSTALL_POLICY_WAIT_MS })
+  const synced = await chrome.storage.sync.get([TRIAL_KEY, PRO_KEY])
+  if (!reverseTrialOnInstall({ lockPro: locks.pro, trial: synced[TRIAL_KEY], key: synced[PRO_KEY] })) return
+  await chrome.storage.sync.set({ [TRIAL_KEY]: { startedAt: Date.now(), auto: true } })
+}
+
 chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
   // 4. (0.7.0) An update from a version before Pro marks an early user: to-do lists stay free
   //    and Pro costs the early price. The mark syncs, so their other computers know too.
+  //    An update never starts the trial (0.9.2): the reverse trial is for new installs only.
   if (reason === chrome.runtime.OnInstalledReason.UPDATE) {
     if (previousVersion && compareVersions(previousVersion, PRO_VERSION) < 0) {
       void chrome.storage.sync.set({ [EARLY_KEY]: { from: previousVersion, at: Date.now() } }).catch(() => {})
@@ -71,6 +94,7 @@ chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
   }
   if (reason !== chrome.runtime.OnInstalledReason.INSTALL) return
   void chrome.storage.local.set({ [FRESH_KEY]: Date.now() }).then(() => chrome.tabs.create({}))
+  void startReverseTrial().catch(() => {})
 })
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {

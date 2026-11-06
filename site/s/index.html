@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A shared stack of links | Stackboard</title>
+<meta name="description" content="A stack of links someone shared with Stackboard. The links travel inside the address, so nothing is stored on a server." />
+<meta name="robots" content="noindex" />
+<meta name="referrer" content="no-referrer" />
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+<link rel="icon" href="/assets/icon-48.png" type="image/png" />
+<link rel="apple-touch-icon" href="/assets/icon-180.png" />
+<meta name="theme-color" content="#fbf3e8" />
+<link rel="preload" href="/assets/fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/assets/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Stackboard" />
+<meta property="og:title" content="A shared stack of links" />
+<meta property="og:description" content="Someone shared a stack of links with you. Open them, or add the stack to your Stackboard." />
+<meta property="og:image" content="https://getstackboard.com/assets/og.jpg" />
+<link rel="stylesheet" href="/s/share.css" />
+</head>
+<body>
+<div class="wrap">
+<nav class="top">
+  <a class="logo" href="/"><img src="/assets/icon.svg" alt="" width="28" height="28" />Stackboard</a>
+</nav>
+
+<main id="stack" aria-live="polite">
+  <p class="eyebrow">A shared stack</p>
+  <h1 id="title">Opening the stack…</h1>
+  <p id="count" class="count"></p>
+
+  <div class="actions" id="actions" hidden>
+    <button class="btn" id="add" type="button" hidden>Add to Stackboard</button>
+    <button class="btn ghost" id="open" type="button">Open all</button>
+    <a class="btn ghost" id="get" href="https://chromewebstore.google.com/detail/bgcedhchngcopaefchpkbhioagknnpma?utm_source=share&amp;utm_medium=stack-link&amp;utm_campaign=share">Get Stackboard</a>
+  </div>
+  <p id="status" class="status" role="status"></p>
+
+  <ol id="links" class="links"></ol>
+
+  <p class="fine" id="fine" hidden>The links travel inside this page&rsquo;s address, after the <code>#</code>, which browsers never send to a server. Stackboard doesn&rsquo;t store them. Check where a link goes before you open it.</p>
+</main>
+
+<section class="about">
+  <h2>What&rsquo;s Stackboard?</h2>
+  <p>A free Chrome extension that puts your bookmarks on your new tab as spaces and stacks. Stacks like this one can be shared as a link from any stack&rsquo;s menu.</p>
+  <p><a href="/">See how it works</a></p>
+</section>
+
+<footer>
+  <span>Stackboard, a free Chrome extension</span>
+  <a href="/privacy">Privacy</a>
+</footer>
+</div>
+<script type="module" src="/s/share.js"></script>
+<script src="/assets/ref.js" defer></script>
+</body>
+</html>

@@ -7,8 +7,10 @@
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
 //   "everything you use today stays free". Lists that exist keep working for everyone.
 // - Lists that already exist keep working for everyone; Pro only gates making a new one.
-// - Early users get $2.99 a year whenever they buy; new buyers get it until 31 Dec 2026.
-// - The trial is 14 days, opt-in, no card, and never starts by itself.
+// - Early users get $2.99 a year whenever they buy; new buyers get it until 31 Dec 2026. Pro for
+//   life is $19 once, for anyone (0.9.2).
+// - The trial is 14 days with no card. Since 0.9.2 a new install starts it by itself (the reverse
+//   trial, REVERSE_TRIAL); everyone else starts it with a click, as before.
 // - A failed license check pauses Pro and never touches free features. When Polar can't be
 //   reached, Pro carries on for two weeks after the last good check.
 
@@ -37,7 +39,15 @@ export const CHECKOUT = {
   /** FOUNDING applied: the same price, for anyone who buys by 31 Dec 2026. */
   founding: 'https://buy.polar.sh/polar_cl_KKWvL022nIO1YdYyJeqsjC6l6TsLOqrmMcSSf14U77l',
   regular: 'https://buy.polar.sh/polar_cl_8DtGJumyRoQioLiBclasbnNcpj5n1vIdpiBHu2KkNoF',
+  /**
+   * 0.9.2: Pro for life, $19 once ("Stackboard Pro Lifetime" in Polar). It grants the same license-key
+   * benefit as the yearly plan, so its keys check exactly like yearly ones.
+   */
+  lifetime: 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W',
 } as const
+
+/** What Pro for life costs, once (0.9.2). */
+export const LIFETIME_PRICE = '$19'
 
 export type LicenseStatus = 'granted' | 'revoked' | 'disabled'
 /** Problems found on our side of the check: no such key, five computers already, or this one removed in the portal. */
@@ -162,9 +172,92 @@ export function isEarlyUser(p: { updatedFrom?: string | null; installedAt?: numb
   return !!p.installedAt && p.installedAt < PRO_CUTOFF
 }
 
-export function checkoutUrl(early: boolean, now: number): string {
-  if (early) return CHECKOUT.early
-  return now <= FOUNDING_ENDS ? CHECKOUT.founding : CHECKOUT.regular
+// ---------- The reverse trial (0.9.2) ----------
+// 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
+// features pause and everything they made stays (the usual trial end). Updates never start one,
+// so everyone who had Stackboard before keeps the opt-in trial.
+
+/** The kill switch: false makes the trial opt-in for new installs again. */
+export const REVERSE_TRIAL = true
+
+/** sync `proTrial` = { startedAt, auto? }; `auto` marks a trial that started by itself on install. Null when malformed. */
+export function readTrial(v: unknown): { startedAt: number; auto: boolean } | null {
+  const t = v as { startedAt?: unknown; auto?: unknown } | null | undefined
+  return typeof t?.startedAt === 'number' && t.startedAt > 0 ? { startedAt: t.startedAt, auto: t.auto === true } : null
+}
+
+/**
+ * Whether a fresh install starts the trial (the service worker asks on install only). Not under the
+ * company's pro lock, which would use the trial up on every computer the Chrome profile syncs to,
+ * and not when sync already holds a trial or a key: Stackboard was here before, or another computer
+ * on the same Chrome profile has it.
+ */
+export function reverseTrialOnInstall(p: { lockPro: boolean; trial: unknown; key: unknown }): boolean {
+  return !p.lockPro && p.trial == null && p.key == null
+}
+
+/**
+ * True when a synced trial (`next`) should give way to the one it replaced (`prev`). A computer added
+ * before Chrome's sync brought this profile's data over finds no trial and starts one by itself;
+ * when sync catches up, that newer start would overwrite the real one. The earlier start wins, so a
+ * Chrome profile never gets a second trial that way.
+ */
+export function olderTrialWins(prev: unknown, next: unknown): boolean {
+  const a = readTrial(prev)
+  const b = readTrial(next)
+  return !!a && !!b && b.auto && a.startedAt < b.startedAt
+}
+
+/** Which buy button opened the checkout (0.9.1; the two lifetime links 0.9.2). */
+export type CheckoutSurface =
+  | 'settings'
+  | 'settings-pending'
+  | 'settings-lifetime'
+  | 'trial-end'
+  | 'trial-end-lifetime'
+  | 'cleanup'
+  | 'keep-look'
+  | 'todo'
+/**
+ * The plan at the click: never tried, on the trial, trial over, or a paused key. 0.9.2: a trial that
+ * started by itself on install reads auto-trial, and auto-trial-ended once it's over.
+ */
+export type CheckoutPlan = 'free' | 'trial' | 'trial-ended' | 'paused' | 'auto-trial' | 'auto-trial-ended'
+export interface CheckoutFrom {
+  surface: CheckoutSurface
+  plan: CheckoutPlan
+  version?: string
+  /** An unpacked build (tests, development): its checkouts are labelled so they stay out of the numbers. */
+  dev?: boolean
+}
+
+/**
+ * The checkout link for this person. With `from`, the link also says which button and plan sent
+ * them and the Stackboard version, nothing about the person or the board; Polar keeps that label
+ * with the checkout, which is how we see which buttons lead to purchases.
+ */
+export function checkoutUrl(early: boolean, now: number, from?: CheckoutFrom): string {
+  return labelled(early ? CHECKOUT.early : now <= FOUNDING_ENDS ? CHECKOUT.founding : CHECKOUT.regular, from)
+}
+
+/** 0.9.2: the Pro for life checkout, with the same labels. */
+export function lifetimeCheckoutUrl(from?: CheckoutFrom): string {
+  return labelled(CHECKOUT.lifetime, from)
+}
+
+function labelled(base: string, from?: CheckoutFrom): string {
+  if (!from) return base
+  const q = new URLSearchParams({ utm_source: from.dev ? 'extension-dev' : 'extension', utm_medium: from.surface, utm_content: from.plan })
+  if (from.version && /^\d+(\.\d+){0,3}$/.test(from.version)) q.set('utm_campaign', `v${from.version}`)
+  return `${base}?${q}`
+}
+
+/** `trialAuto`: the trial (running or over) started by itself on install (0.9.2). */
+export function checkoutPlan(state: ProState, trialAuto = false): CheckoutPlan {
+  if (state.kind === 'trial') return trialAuto ? 'auto-trial' : 'trial'
+  if (state.kind === 'paused') return 'paused'
+  if (state.kind === 'free' && state.trialUsed) return trialAuto ? 'auto-trial-ended' : 'trial-ended'
+  return 'free'
 }
 
 /** "$2.99 a year" for early users and founding buyers, "$4.99 a year" after. */
@@ -261,20 +354,27 @@ export interface ProSub {
   periodEnd?: number
   cancelAtPeriodEnd?: boolean
   startedAt?: number
+  /** 0.9.2: Pro for life, paid once: no period and nothing to renew. `startedAt` is the day of the purchase. */
+  lifetime?: boolean
   /** When Polar said this. */
   at: number
 }
 
-/** Every Pro plan so far is yearly; Polar's own word wins when it gave one. */
+/** Every recurring Pro plan so far is yearly; Polar's own word wins when it gave one. */
 const PLAN_NAME: Record<string, string> = { year: 'Yearly plan', month: 'Monthly plan' }
 const PER: Record<string, string> = { year: 'a year', month: 'a month' }
 
-/** "$2.99"; a currency Intl doesn't know reads "2.99 XYZ". */
-export function money(amount: number, currency = 'usd'): string {
+/** "$2.99"; a currency Intl doesn't know reads "2.99 XYZ". `whole`: a round amount reads "$19" (0.9.2). */
+export function money(amount: number, currency = 'usd', whole = false): string {
+  const digits = whole && amount % 100 === 0 ? 0 : 2
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(amount / 100)
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+      ...(digits ? {} : { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    }).format(amount / 100)
   } catch {
-    return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`
+    return `${(amount / 100).toFixed(digits)} ${currency.toUpperCase()}`
   }
 }
 
@@ -308,25 +408,40 @@ export interface ProCard {
   rows: { label: string; value: string }[]
 }
 
-/** What the Pro card says: only what Polar told us, nothing guessed. */
+/**
+ * What the Pro card says: only what Polar told us, nothing guessed. A key with no plan behind it has
+ * no plan line: Polar's key check doesn't say which product sold it, yearly or Pro for life (0.9.2).
+ */
 export function proCard(p: { license: License; sub: ProSub | null; now: number }): ProCard {
   const { license, sub, now } = p
-  const interval = sub?.interval ?? 'year'
-  const price = sub?.amount != null && sub.amount > 0 ? `, ${money(sub.amount, sub.currency)} ${PER[interval] ?? `a ${interval}`}` : ''
   const rows: ProCard['rows'] = []
-  if (sub?.periodEnd) {
-    const end = sub.cancelAtPeriodEnd ? sub.periodEnd : currentPeriodEnd(sub.periodEnd, interval, now)
-    rows.push(sub.cancelAtPeriodEnd ? { label: 'Ends', value: `${shortDate(end)} (cancelled)` } : { label: 'Renews', value: shortDate(end) })
+  let plan: string
+  if (sub?.lifetime) {
+    // Pro for life (0.9.2): paid once, so there is nothing to renew.
+    plan = `Pro for life${sub.amount != null && sub.amount > 0 ? `, ${money(sub.amount, sub.currency, true)} paid once` : ''}`
+  } else if (sub) {
+    const interval = sub.interval ?? 'year'
+    const price = sub.amount != null && sub.amount > 0 ? `, ${money(sub.amount, sub.currency)} ${PER[interval] ?? `a ${interval}`}` : ''
+    plan = `${PLAN_NAME[interval] ?? 'Plan'}${price}`
+    if (sub.periodEnd) {
+      const end = sub.cancelAtPeriodEnd ? sub.periodEnd : currentPeriodEnd(sub.periodEnd, interval, now)
+      rows.push(sub.cancelAtPeriodEnd ? { label: 'Ends', value: `${shortDate(end)} (cancelled)` } : { label: 'Renews', value: shortDate(end) })
+    }
+  } else {
+    plan = ''
   }
   const since = sub?.startedAt ?? license.since
   if (since) rows.push({ label: 'Pro since', value: shortDate(since) })
   if (license.email) rows.push({ label: 'Email', value: license.email })
   rows.push({ label: 'Key', value: maskKey(license.key) })
   if (license.okAt) rows.push({ label: 'Checked', value: `${daysAgo(license.okAt, now)}, with Polar` })
-  return { plan: `${PLAN_NAME[interval] ?? 'Plan'}${price}`, rows }
+  return { plan, rows }
 }
 
-/** A subscription from Polar's customer portal, in our words; null when it isn't one. */
+/**
+ * A subscription from Polar's customer portal, in our words; null when it isn't one. 0.9.2: the
+ * thanks page sends { lifetime: true, amount, currency, started_at } for a Pro for life order.
+ */
 export function readSub(body: unknown, now: number): ProSub | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
@@ -337,6 +452,13 @@ export function readSub(body: unknown, now: number): ProSub | null {
   const sub: ProSub = { at: now }
   if (typeof b.amount === 'number' && b.amount >= 0) sub.amount = b.amount
   if (typeof b.currency === 'string' && b.currency) sub.currency = b.currency
+  if (b.lifetime === true) {
+    // Paid once: whatever else came along, there is no period to keep.
+    sub.lifetime = true
+    const bought = date(b.started_at) ?? date(b.created_at)
+    if (bought) sub.startedAt = bought
+    return sub
+  }
   if (typeof b.recurring_interval === 'string' && b.recurring_interval) sub.interval = b.recurring_interval
   const end = date(b.current_period_end)
   if (end) sub.periodEnd = end
