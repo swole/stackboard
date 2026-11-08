@@ -1,6 +1,6 @@
-import { TRIAL_DAYS, type ProState } from './proPlan'
+import { TRIAL_DAYS, checkoutPlan, type CheckoutPlan, type ProState } from './proPlan'
 
-// The trial-end recap and the moment-of-need line (0.9.0, goal: "seamlessly convert free users
+// The trial-end recap and the moment-of-need line (0.9.0: "seamlessly convert free users
 // to pro"): who sees which, and what it says. Pure, so tests/unit.test.ts covers the rules. The
 // cards live in components/TrialEndCard.tsx and components/MomentLine.tsx; the corner they share
 // with the what's-new notes is lib/corner.ts.
@@ -14,6 +14,9 @@ import { TRIAL_DAYS, type ProState } from './proPlan'
 //   they've settled in: from the board's third new tab and 20 hours after install, while at least
 //   3 days are left, on two new tabs at most, retired when answered. Never on the welcome screen
 //   or while a checkout this computer opened is pending.
+// - "What stopped you?" (0.9.3) asks someone who opened the checkout on this computer 10 minutes
+//   to 7 days ago and came back without buying, once per checkout and on three checkouts at most
+//   (components/WhyNotCard.tsx). Only an answer they pick leaves the device (lib/whyNot.ts).
 // - School mode: none of them ever shows while the company's pro lock is on (`lockPro`).
 
 const HOUR = 60 * 60 * 1000
@@ -117,7 +120,7 @@ export function showReverseCard(p: {
   return p.shows >= 0 && p.shows < REVERSE_CARD_SHOWS
 }
 
-/** "Pro is on, free until 20 Nov" */
+/** "Pro is on, free until 20 Nov"; also the line once "what stopped you?" starts the trial (0.9.3). */
 export function reverseCardTitle(trialStartedAt: number): string {
   return `Pro is on, free until ${new Date(trialEndsAt(trialStartedAt)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
 }
@@ -127,13 +130,98 @@ export function reverseCardLine(mac: boolean): string {
   return `Try ${mac ? '⌘K' : 'Ctrl+K'} to jump anywhere, a to-do list, or a colour on a stack. Everything you make stays when the trial ends.`
 }
 
+// ---------- "What stopped you?" (0.9.3) ----------
+// one optional question for someone who opened the checkout on this computer and
+// came back without buying, to learn why checkouts don't turn into purchases. Five one-tap answers,
+// and a line to type with Something else. site/api/why.js keeps the answer with nothing that
+// identifies the person.
+
+/** It waits this long after the checkout opened, so it never asks someone who's still paying... */
+export const WHY_NOT_AFTER_MS = 10 * 60 * 1000
+/** ...and stops this long after it: an old checkout isn't news. */
+export const WHY_NOT_WITHIN_MS = 7 * DAY
+/** Checkouts it asks about on this computer, ever. */
+export const WHY_NOT_MAX = 3
+/** It decides this long after the board and Pro are ready: after the reverse-trial card, so it goes last. */
+export const WHY_NOT_DELAY_MS = 2000
+/** After an answer the thanks stays this long, then the card closes itself. */
+export const WHY_NOT_THANKS_MS = 4000
+/** The most Something else sends, as site/api/why.js keeps. */
+export const WHY_NOTE_MAX = 300
+
+export type WhyReason = 'looking' | 'try-first' | 'price' | 'payment' | 'other'
+
+/** The answers in the card's order; the reasons are the words site/api/why.js accepts. */
+export const WHY_REASONS: readonly { reason: WhyReason; label: string }[] = [
+  { reason: 'looking', label: 'Just looking' },
+  { reason: 'try-first', label: 'Want to try it first' },
+  { reason: 'price', label: 'The price' },
+  { reason: 'payment', label: 'Payment method' },
+  { reason: 'other', label: 'Something else' },
+]
+
+/**
+ * Whether this tab asks. Only where Settings sells Pro (free, the trial, a key whose plan ended): a
+ * paid key means they bought, and so does a key that's still being checked or has a problem.
+ */
+export function showWhyNot(p: {
+  state: ProState
+  /** When this computer last opened the checkout (cleared once Pro is on). */
+  checkoutAt: number | null
+  now: number
+  /** The checkout the card last asked about, by its checkoutAt; 0 for none. */
+  askedAt: number
+  /** Checkouts it has asked about on this computer. */
+  asked: number
+  /** The empty-board welcome screen is up. */
+  welcoming: boolean
+  /** The rating ask is on screen. */
+  ratingOpen: boolean
+  lockPro?: boolean
+}): boolean {
+  if (!p.checkoutAt || p.welcoming || p.ratingOpen || p.lockPro) return false
+  const s = p.state
+  if (!(s.kind === 'free' || s.kind === 'trial' || (s.kind === 'paused' && s.reason === 'ended'))) return false
+  const since = p.now - p.checkoutAt
+  if (since < WHY_NOT_AFTER_MS || since > WHY_NOT_WITHIN_MS) return false
+  return p.askedAt !== p.checkoutAt && p.asked < WHY_NOT_MAX
+}
+
+/** What a picked answer sends, and nothing else (site/api/why.js). */
+export interface WhyAnswer {
+  reason: WhyReason
+  /** What they typed with Something else; empty for the other answers. */
+  note: string
+  plan: CheckoutPlan
+  /** The checkout they looked at: the yearly plan or Pro for life. */
+  product: 'yearly' | 'lifetime'
+  /** The Stackboard version. */
+  v: string
+}
+
+export function whyAnswer(p: { reason: WhyReason; note?: string; state: ProState; trialAuto: boolean; lifetime: boolean; version: string }): WhyAnswer {
+  return {
+    reason: p.reason,
+    note: p.reason === 'other' ? (p.note ?? '').trim().slice(0, WHY_NOTE_MAX) : '',
+    plan: checkoutPlan(p.state, p.trialAuto),
+    product: p.lifetime ? 'lifetime' : 'yearly',
+    v: p.version,
+  }
+}
+
+/** After Want to try it first: the trial, when it has never been used here and the company allows it. */
+export function whyNotOffersTrial(p: { reason: WhyReason; trialStartedAt: number | null; lockPro?: boolean }): boolean {
+  return p.reason === 'try-first' && !p.trialStartedAt && !p.lockPro
+}
+
 /**
  * When two are due on one tab, they go in this order: the what's-new notes and the trial recap
  * claim the corner as the board loads; the reverse-trial card decides REVERSE_CARD_DELAY_MS later,
- * so it steps aside for them, and skips a tab where the rating ask is up; the moment line waits for
- * a stash or a bankruptcy.
+ * so it steps aside for them, and skips a tab where the rating ask is up; "what stopped you?"
+ * (0.9.3) decides WHY_NOT_DELAY_MS after load, the same way, and so goes last; the moment line
+ * waits for a stash or a bankruptcy.
  */
-export type CornerCard = 'whatsNew' | 'trialEnd' | 'reverseTrial' | 'moment'
+export type CornerCard = 'whatsNew' | 'trialEnd' | 'reverseTrial' | 'whyNot' | 'moment'
 
 /** The bottom-right corner holds one card at a time; the holder can claim it again. */
 export function claimable(holder: CornerCard | null, card: CornerCard): boolean {

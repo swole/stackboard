@@ -1,9 +1,9 @@
 // Stackboard Pro (0.7.0): who gets what. Pure: no chrome.*, no DOM, so tests/unit.test.ts covers
 // every rule. Storage and the calls to Polar live in lib/pro.ts.
 //
-// The rules (the Pro launch rules, 31 Oct and 1 Nov 2026):
+// The rules (Pro launch rules, 31 Oct and 1 Nov 2026):
 // - Nothing free moves behind Pro for anyone who already uses it. To-do lists are Pro for installs
-//   from 0.7.0 on, and since 0.8.0 (3 Nov) for earlier installs ("early users") too, except
+//   from 0.7.0 on, and since 0.8.0 for earlier installs ("early users") too, except
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
 //   "everything you use today stays free". Lists that exist keep working for everyone.
 // - Lists that already exist keep working for everyone; Pro only gates making a new one.
@@ -173,7 +173,7 @@ export function isEarlyUser(p: { updatedFrom?: string | null; installedAt?: numb
 }
 
 // ---------- The reverse trial (0.9.2) ----------
-// 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
+// a new install starts with Pro for 14 days, and when the trial ends Pro
 // features pause and everything they made stays (the usual trial end). Updates never start one,
 // so everyone who had Stackboard before keeps the opt-in trial.
 

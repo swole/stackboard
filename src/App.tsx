@@ -39,6 +39,7 @@ import { maybeTakeDailySnapshot } from './lib/snapshots'
 import { WhatsNew } from './components/WhatsNew'
 import { TrialEndCard } from './components/TrialEndCard'
 import { ReverseTrialCard } from './components/ReverseTrialCard'
+import { WhyNotCard } from './components/WhyNotCard'
 import { MomentLine } from './components/MomentLine'
 import { useCorner } from './lib/corner'
 import { CommandBar } from './components/CommandBar'
@@ -389,6 +390,7 @@ export default function App() {
         <WhatsNew />
         <TrialEndCard />
         <ReverseTrialCard welcoming={welcoming} />
+        <WhyNotCard welcoming={welcoming} />
         <MomentLine />
         <CommandBar />
         <ShareAddCard />

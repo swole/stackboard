@@ -682,7 +682,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   )
   eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
   eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
-  // 0.8.0 (3 Nov): to-do lists join Pro for early users too, unless they already had a list.
+  // 0.8.0: to-do lists join Pro for early users too, unless they already had a list.
   eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
   eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
   eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
@@ -2319,7 +2319,7 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
   eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
   eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
-  // 0.8.0 (3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  // 0.8.0: the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
   eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
   eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
   eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
@@ -2564,6 +2564,71 @@ import { REVERSE_CARD_DAYS, REVERSE_CARD_OPENS, REVERSE_CARD_SHOWS, REVERSE_CARD
   // The trial-end recap reads the state and the start only, so a trial that started by itself gets it too.
   const ending = { trialStartedAt: now - 13 * DAY, now, endingShows: 0, endedShows: 0, checkoutPending: false }
   eq('reverse trial: the recap comes at its end too', [pickTrialCard({ ...ending, state: { kind: 'trial', daysLeft: 1 } }), pickTrialCard({ ...ending, trialStartedAt: now - 15 * DAY, state: { kind: 'free', trialUsed: true } })], ['ending', 'ended'])
+}
+
+// ---------- 0.9.3: "What stopped you?" after a checkout with no purchase ----------
+import { REVERSE_CARD_DELAY_MS, WHY_NOTE_MAX, WHY_NOT_AFTER_MS, WHY_NOT_DELAY_MS, WHY_NOT_MAX, WHY_NOT_WITHIN_MS, WHY_REASONS, showWhyNot, whyAnswer, whyNotOffersTrial } from '../src/lib/nudgePlan'
+{
+  const DAY = 86_400_000
+  const MIN = 60_000
+  const now = Date.UTC(2026, 10, 8, 9, 0)
+  const at = now - 15 * MIN
+  const free = { kind: 'free', trialUsed: false } as const
+  const base = { state: free, checkoutAt: at, now, askedAt: 0, asked: 0, welcoming: false, ratingOpen: false }
+
+  // When it asks.
+  eq('why not: a free board 15 minutes after a checkout is asked', showWhyNot(base), true)
+  eq('why not: the limits are 10 minutes, 7 days and three checkouts', [WHY_NOT_AFTER_MS, WHY_NOT_WITHIN_MS, WHY_NOT_MAX], [10 * MIN, 7 * DAY, 3])
+  eq('why not: from 10 minutes after the checkout to 7 days after it', [
+    showWhyNot({ ...base, checkoutAt: now - 9 * MIN }),
+    showWhyNot({ ...base, checkoutAt: now - WHY_NOT_AFTER_MS }),
+    showWhyNot({ ...base, checkoutAt: now - 3 * DAY }),
+    showWhyNot({ ...base, checkoutAt: now - WHY_NOT_WITHIN_MS }),
+    showWhyNot({ ...base, checkoutAt: now - WHY_NOT_WITHIN_MS - 1 }),
+  ], [false, true, true, true, false])
+  eq('why not: no checkout, or one stamped in the future, never asks', [showWhyNot({ ...base, checkoutAt: null }), showWhyNot({ ...base, checkoutAt: now + MIN })], [false, false])
+  eq('why not: once per checkout, and a newer checkout asks again', [showWhyNot({ ...base, askedAt: at, asked: 1 }), showWhyNot({ ...base, askedAt: at - 2 * DAY, asked: 1 })], [false, true])
+  eq('why not: three checkouts at most on this computer', [showWhyNot({ ...base, asked: WHY_NOT_MAX - 1 }), showWhyNot({ ...base, asked: WHY_NOT_MAX }), showWhyNot({ ...base, asked: 9 })], [true, false, false])
+  eq('why not: on the trial, after it, and for a key whose plan ended (Renew Pro)', [
+    showWhyNot({ ...base, state: { kind: 'trial', daysLeft: 5 } }),
+    showWhyNot({ ...base, state: { kind: 'free', trialUsed: true } }),
+    showWhyNot({ ...base, state: { kind: 'paused', reason: 'ended' } }),
+  ], [true, true, true])
+  eq('why not: never with Pro on, or with a key that is being checked or has a problem', [
+    showWhyNot({ ...base, state: { kind: 'pro' } }),
+    ...(['checking', 'offline', 'disabled', 'unknown-key', 'device-limit', 'removed'] as const).map((reason) => showWhyNot({ ...base, state: { kind: 'paused', reason } })),
+  ], [false, false, false, false, false, false, false])
+  eq('why not: never under the pro lock, on the welcome screen or with the rating ask open', [
+    showWhyNot({ ...base, lockPro: true }),
+    showWhyNot({ ...base, welcoming: true }),
+    showWhyNot({ ...base, ratingOpen: true }),
+    showWhyNot({ ...base, lockPro: false }),
+  ], [false, false, false, true])
+  eq('why not: it decides after the reverse-trial card, so it goes last', WHY_NOT_DELAY_MS > REVERSE_CARD_DELAY_MS, true)
+  eq('corner: "what stopped you?" takes its turn like the others', [claimable(null, 'whyNot'), claimable('reverseTrial', 'whyNot'), claimable('whyNot', 'moment'), claimable('whyNot', 'whyNot')], [true, false, false, true])
+
+  // What a picked answer sends.
+  eq('why not: five answers in order, with the reasons the server accepts', WHY_REASONS.map((r) => `${r.reason}: ${r.label}`), ['looking: Just looking', 'try-first: Want to try it first', 'price: The price', 'payment: Payment method', 'other: Something else'])
+  const answer = (p: Partial<Parameters<typeof whyAnswer>[0]>) => whyAnswer({ reason: 'price', state: free, trialAuto: false, lifetime: false, version: '0.9.3', ...p })
+  eq('why not: an answer is the reason, the note, the plan, the product and the version, nothing else', JSON.stringify(answer({})), '{"reason":"price","note":"","plan":"free","product":"yearly","v":"0.9.3"}')
+  eq('why not: the plan at the click, and which checkout it was', [
+    answer({ reason: 'looking', state: { kind: 'trial', daysLeft: 3 }, trialAuto: true, lifetime: true }),
+    answer({ reason: 'payment', state: { kind: 'free', trialUsed: true } }),
+    answer({ reason: 'try-first', state: { kind: 'paused', reason: 'ended' } }),
+  ].map((a) => `${a.reason} ${a.plan} ${a.product}`), ['looking auto-trial lifetime', 'payment trial-ended yearly', 'try-first paused yearly'])
+  eq('why not: a note goes with Something else only, trimmed and cut at 300 characters', [
+    answer({ reason: 'other', note: '  Need an invoice for work  ' }).note,
+    answer({ reason: 'other', note: 'x'.repeat(400) }).note.length,
+    answer({ reason: 'other' }).note,
+    answer({ reason: 'price', note: 'typed, then picked The price' }).note,
+  ], ['Need an invoice for work', WHY_NOTE_MAX, '', ''])
+  eq('why not: the cap matches the server', WHY_NOTE_MAX, 300)
+  eq('why not: Want to try it first offers the trial only when it was never used and the company allows it', [
+    whyNotOffersTrial({ reason: 'try-first', trialStartedAt: null }),
+    whyNotOffersTrial({ reason: 'try-first', trialStartedAt: now - 20 * DAY }),
+    whyNotOffersTrial({ reason: 'try-first', trialStartedAt: null, lockPro: true }),
+    whyNotOffersTrial({ reason: 'price', trialStartedAt: null }),
+  ], [true, false, false, false])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

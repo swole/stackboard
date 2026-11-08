@@ -18,6 +18,8 @@ const TRIAL_ENDING = 'stackable:trialEnding'
 const TRIAL_ENDED = 'stackable:trialEnded'
 const MOMENTS = 'stackable:proMoments'
 const REVERSE_TRIAL = 'stackable:reverseTrial'
+const WHY_NOT_AT = 'stackable:whyNotAt'
+const WHY_NOT_ASKED = 'stackable:whyNotAsked'
 
 function read(key: string): string | null {
   try {
@@ -83,6 +85,15 @@ export const prefs = {
   /** New tabs that showed the reverse-trial card; -1 once answered (0.9.2). */
   reverseTrialShows: (): number => Number(read(REVERSE_TRIAL)) || 0,
   setReverseTrialShows: (n: number) => write(REVERSE_TRIAL, String(n)),
+  /** The checkout (its checkoutAt) the "what stopped you?" card last asked about, 0 for none (0.9.3). */
+  whyNotAt: (): number => Number(read(WHY_NOT_AT)) || 0,
+  /** How many checkouts that card has asked about on this device. */
+  whyNotAsked: (): number => Number(read(WHY_NOT_ASKED)) || 0,
+  /** The card asked about the checkout opened at `at`: never again for that one. */
+  markWhyNot: (at: number) => {
+    write(WHY_NOT_AT, String(at))
+    write(WHY_NOT_ASKED, String((Number(read(WHY_NOT_ASKED)) || 0) + 1))
+  },
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

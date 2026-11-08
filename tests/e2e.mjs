@@ -1041,6 +1041,27 @@ try {
     const shown = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
     const offer = await page.evaluate(() => document.querySelector('[data-pro]')?.innerText ?? '')
     check('pro: Settings offers Pro with a trial and a key box', shown && offer.includes('Get Pro') && offer.includes('Try it free for 14 days'), offer.slice(0, 160))
+    // 0.9.3: Get Pro names the price the note above it gives, and stays second to the trial; one quiet
+    // line under the buttons says how checkout works and promises a refund, above Pro for life.
+    const sells = () => page.evaluate(() => {
+      const pro = document.querySelector('[data-pro]')
+      const buttons = [...(pro?.querySelectorAll('button') ?? [])]
+      const getPro = buttons.find((b) => /^Get Pro for \$/.test(b.textContent.trim()))
+      const refund = document.querySelector('[data-pro-refund]')
+      const life = document.querySelector('[data-pro-lifetime]')
+      const after = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+      return {
+        getPro: getPro?.textContent.trim() ?? null,
+        price: pro?.innerText.match(/\$\d+\.\d\d a year/)?.[0] ?? null,
+        secondary: !!getPro && getPro.className.includes('border'),
+        refund: refund?.innerText.trim() ?? null,
+        order: after(getPro, refund) && after(refund, life),
+      }
+    })
+    const REFUND = 'Checkout is by Polar: card, Apple Pay or Google Pay. Changed your mind? Full refund within 14 days.'
+    const free = await sells()
+    check('pro: Get Pro names the price from the note above it, and stays second to the trial', !!free.price && free.getPro === `Get Pro for ${free.price}` && free.secondary, JSON.stringify(free))
+    check('pro: one line under the buy buttons says how checkout works and promises a refund, above Pro for life', free.refund === REFUND && free.order, JSON.stringify(free))
 
     await page.evaluate(() => document.querySelector('[data-pro] input[aria-label="License key"]').focus())
     await page.keyboard.type('nope')
@@ -1056,6 +1077,8 @@ try {
     const optInLine = await page.evaluate(() => document.querySelector('[data-pro-trial-line]')?.dataset.proTrialLine ?? null)
     check('pro: a trial started with a click has no auto mark', !!synced && !('auto' in synced) && optInLine === 'opt-in', JSON.stringify({ synced, optInLine }))
     check('pro: with the trial on, Settings shows auto-archive', await until(page, () => !!document.querySelector('[data-archive-setting]')))
+    const onTrial = await sells()
+    check('pro: on the trial, Get Pro still names the price, with the refund line under it', !!onTrial.price && onTrial.getPro === `Get Pro for ${onTrial.price}` && onTrial.refund === REFUND && onTrial.order, JSON.stringify(onTrial))
 
     const other = await openNtp()
     await other.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings').click())
@@ -1135,6 +1158,7 @@ try {
       JSON.stringify({ life: life?.href, lifeMark }),
     )
     check('lifetime: the finishing steps carry no lifetime line', await page.evaluate(() => !document.querySelector('[data-pro-lifetime]')))
+    check('refund line: the finishing steps carry none, and no priced Get Pro', await page.evaluate(() => !!document.querySelector('[data-pro-pending]') && !document.querySelector('[data-pro-refund]') && ![...document.querySelectorAll('[data-pro] button')].some((b) => /^Get Pro for \$/.test(b.textContent.trim()))))
     await page.evaluate(() => [...document.querySelectorAll('[data-pro-pending] button')].find((b) => b.textContent.trim() === 'Back to checkout')?.click())
     await sleep(600)
     const back = await lastCheckout()
@@ -1145,7 +1169,8 @@ try {
     await page.evaluate(() => window.__opened.splice(0))
 
     // Get Pro opens the checkout and turns Settings to the steps that finish the purchase.
-    await page.evaluate(() => [...document.querySelectorAll('[data-pro] button')].find((b) => b.textContent.trim() === 'Get Pro').click())
+    // 0.9.3: the button names the price ("Get Pro for $2.99 a year").
+    await page.evaluate(() => [...document.querySelectorAll('[data-pro] button')].find((b) => /^Get Pro for \$\d+\.\d\d a year$/.test(b.textContent.trim())).click())
     const steps = await until(page, () => !!document.querySelector('[data-pro-pending]'))
     const opened = await page.evaluate(() => window.__opened.slice())
     const polarTabs = browser.targets().filter((t) => /polar\.sh/.test(t.url())).map((t) => t.url())
@@ -3632,7 +3657,19 @@ try {
     const st2 = await k2.evaluate(() => ({
       text: document.querySelector('[data-pro]')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
       lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+      // 0.9.3: the priced Get Pro, leading now (no outline), and the refund line above Pro for life.
+      getPro: (() => {
+        const b = [...document.querySelectorAll('[data-pro] button')].find((b) => /^Get Pro for \$/.test(b.textContent.trim()))
+        return b ? { text: b.textContent.trim(), leads: !b.className.includes('border') } : null
+      })(),
+      refund: document.querySelector('[data-pro-refund]')?.innerText.trim() ?? null,
+      above: !!document.querySelector('[data-pro-refund] + [data-pro-lifetime]'),
     }))
+    check(
+      'refund line: after the trial, Settings leads with the priced Get Pro and shows the refund line above Pro for life',
+      /^Get Pro for \$\d+\.\d\d a year$/.test(st2.getPro?.text ?? '') && !!st2.getPro?.leads && st2.refund === 'Checkout is by Polar: card, Apple Pay or Google Pay. Changed your mind? Full refund within 14 days.' && st2.above,
+      JSON.stringify({ getPro: st2.getPro, refund: st2.refund, above: st2.above }),
+    )
     await k2.evaluate(() => [...document.querySelectorAll('[data-pro-lifetime] button')].find((b) => b.textContent.trim() === 'Get Pro for life')?.click())
     await sleep(800)
     const ended2 = await lastCheckout(k2)
@@ -3653,12 +3690,222 @@ try {
     const k3 = await openNtp()
     await k3.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
     const renew = await until(k3, () => document.querySelector('[data-pro-reason]')?.dataset.proReason === 'ended')
-    const st3 = await k3.evaluate(() => ({ buttons: [...document.querySelectorAll('[data-pro] button')].map((b) => b.textContent.trim()), lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null }))
+    const st3 = await k3.evaluate(() => ({
+      buttons: [...document.querySelectorAll('[data-pro] button')].map((b) => b.textContent.trim()),
+      lifetime: document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+      refund: document.querySelector('[data-pro-refund]')?.innerText.trim() ?? null,
+      above: !!document.querySelector('[data-pro-refund] + [data-pro-lifetime]'),
+    }))
     check('lifetime: a key whose plan has ended offers Renew Pro, with Pro for life under it', renew && st3.buttons.includes('Renew Pro') && st3.lifetime === 'Prefer to pay once? Get Pro for life for $19.', JSON.stringify(st3))
+    check('refund line: a key whose plan has ended shows it under Renew Pro, above Pro for life', renew && st3.refund === 'Checkout is by Polar: card, Apple Pay or Google Pay. Changed your mind? Full refund within 14 days.' && st3.above, JSON.stringify(st3))
     await k3.close()
 
     await control.evaluate(async (w) => {
       // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was)
+    await sleep(400)
+  }
+
+  // ---------- 0.9.3: "What stopped you?" after a checkout with no purchase ----------
+  // A computer that opened the checkout 10 minutes to 7 days ago, with Pro still off, gets one corner
+  // card: five one-tap answers, and Something else opens a line to type. A store build sends a picked
+  // answer to getstackboard.com/api/why; this unpacked build keeps it in localStorage
+  // (stackable:whyLast) instead, which is what these checks read. Once per checkout, answered or
+  // closed, and three checkouts at most. The checkout's time is played through storage.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const M = 60 * 1000
+    const D = 24 * 60 * M
+    const LS = ['stackable:whyNotAt', 'stackable:whyNotAsked', 'stackable:whyLast', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:rating', 'stackable:managedOverride']
+    const was = await control.evaluate(async (ls) => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      local: await chrome.storage.local.get(['proCheckout', 'proLicense', 'whatsNew080', 'whatsNew090']),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS)
+    const version = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8')).version
+    // A quiet free board (no key, no trial, no note pending, the rating ask answered) that opened the
+    // checkout `ago` ms ago, the Pro for life one when `lifetime`, with no answer kept from before.
+    const setup = (s) => control.evaluate(async (s) => {
+      // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']) localStorage.setItem(k, '-1')
+      localStorage.setItem('stackable:rating', 'dismissed')
+      localStorage.removeItem('stackable:whyLast')
+      for (const [k, v] of Object.entries(s.ls ?? {})) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+      const at = Date.now() - s.ago
+      await chrome.storage.local.set({ proCheckout: s.lifetime ? { at, lifetime: true } : { at } })
+      return at
+    }, s)
+    const fresh = { 'stackable:whyNotAt': null, 'stackable:whyNotAsked': null }
+    const card = (page) => page.evaluate(() => {
+      const c = document.querySelector('[data-why-not]')
+      return c
+        ? {
+            title: c.querySelector('h3')?.textContent.trim() ?? '',
+            line: c.querySelector('h3 + p')?.textContent.trim() ?? '',
+            answers: [...c.querySelectorAll('[data-why-reason]')].map((b) => `${b.dataset.whyReason}: ${b.textContent.trim()}`),
+          }
+        : null
+    })
+    const shown = (page) => until(page, () => !!document.querySelector('[data-why-not]'))
+    // The card decides 2 s after the board and Pro are ready; openNtp has waited 0.6 s of that.
+    const none = async (page) => {
+      await sleep(3500)
+      return page.evaluate(() => !document.querySelector('[data-why-not]'))
+    }
+    const sent = () => control.evaluate(() => JSON.parse(localStorage.getItem('stackable:whyLast') ?? 'null'))
+    const pick = (page, reason) => page.evaluate((r) => document.querySelector(`[data-why-not] [data-why-reason="${r}"]`)?.click(), reason)
+    const thanked = (page) => until(page, () => (document.querySelector('[data-why-not]')?.innerText ?? '').includes('Thanks, that helps.'))
+
+    // 1. A free board 15 minutes after the checkout: the card and its words, then The price in one tap.
+    const at1 = await setup({ ago: 15 * M, ls: fresh })
+    const w1 = await openNtp()
+    const c1 = (await shown(w1)) ? await card(w1) : null
+    check(
+      "why not: 15 minutes after a checkout, a free board asks Didn't get Pro? with five one-tap answers",
+      !!c1 && c1.title === "Didn't get Pro?" && c1.line === "What stopped you? One tap, and it's optional." && c1.answers.join('|') === 'looking: Just looking|try-first: Want to try it first|price: The price|payment: Payment method|other: Something else',
+      JSON.stringify(c1),
+    )
+    await w1.screenshot({ path: path.join(SHOTS, '093-why-not.png') })
+    const marked1 = await control.evaluate(() => ({ at: localStorage.getItem('stackable:whyNotAt'), asked: localStorage.getItem('stackable:whyNotAsked'), sent: localStorage.getItem('stackable:whyLast') }))
+    check('why not: asking marks that checkout on this computer and counts it, and sends nothing yet', marked1.at === String(at1) && marked1.asked === '1' && marked1.sent === null, JSON.stringify({ marked1, at1 }))
+    await pick(w1, 'price')
+    const thanks1 = await thanked(w1)
+    const t1 = Date.now()
+    const got1 = await sent()
+    check(
+      'why not: The price thanks them and keeps what a store build would send: the reason, no note, the plan, the yearly checkout and the version, nothing else',
+      thanks1 && JSON.stringify(got1) === JSON.stringify({ reason: 'price', note: '', plan: 'free', product: 'yearly', v: version }),
+      JSON.stringify({ thanks1, got1, version }),
+    )
+    const gone1 = await until(w1, () => !document.querySelector('[data-why-not]'), null, 8000)
+    const after1 = Date.now() - t1
+    check('why not: after an answer the thanks closes itself in about 4 seconds', gone1 && after1 > 2500 && after1 < 7000, String(after1))
+    await w1.close()
+    const w2 = await openNtp()
+    check('why not: once answered, that checkout never brings it back', await none(w2))
+    await w2.close()
+
+    // 2. A Pro for life checkout two days ago, and Something else with a line typed: the line goes along.
+    await setup({ ago: 2 * D, lifetime: true, ls: fresh })
+    const w3 = await openNtp()
+    await w3.bringToFront()
+    await shown(w3)
+    await pick(w3, 'other')
+    const field = await until(w3, () => !!document.activeElement && document.activeElement === document.querySelector('[data-why-not] input'))
+    const f3 = await w3.evaluate(() => {
+      const i = document.querySelector('[data-why-not] input')
+      return {
+        placeholder: i?.placeholder ?? null,
+        max: i?.maxLength ?? null,
+        send: [...document.querySelectorAll('[data-why-not] button')].some((b) => b.textContent.trim() === 'Send'),
+        sent: localStorage.getItem('stackable:whyLast'),
+      }
+    })
+    check('why not: Something else opens a line to type (300 characters at most) with Send, and sends nothing yet', field && f3.placeholder === 'Anything to add? (optional)' && f3.max === 300 && f3.send && f3.sent === null, JSON.stringify({ field, f3 }))
+    await w3.keyboard.type('Need an invoice for work')
+    await w3.evaluate(() => [...document.querySelectorAll('[data-why-not] button')].find((b) => b.textContent.trim() === 'Send')?.click())
+    const thanks3 = await thanked(w3)
+    const got3 = await sent()
+    check(
+      'why not: Send keeps the typed line with the answer, and a Pro for life checkout records lifetime',
+      thanks3 && JSON.stringify(got3) === JSON.stringify({ reason: 'other', note: 'Need an invoice for work', plan: 'free', product: 'lifetime', v: version }),
+      JSON.stringify(got3),
+    )
+    await w3.close()
+
+    // 3. Want to try it first, on a board that never had the trial: Start the free trial starts it.
+    await setup({ ago: 20 * M, ls: fresh })
+    const w4 = await openNtp()
+    await shown(w4)
+    await pick(w4, 'try-first')
+    const offer4 = await until(w4, () => !!document.querySelector('[data-why-trial]'))
+    await sleep(4500) // longer than a plain answer's thanks stays
+    const s4 = await w4.evaluate(() => ({ text: document.querySelector('[data-why-not]')?.innerText.replace(/\s+/g, ' ').trim() ?? null, button: document.querySelector('[data-why-trial]')?.textContent.trim() ?? null }))
+    const got4 = await sent()
+    check(
+      'why not: Want to try it first thanks them and offers Start the free trial, and waits for them',
+      offer4 && s4.button === 'Start the free trial' && !!s4.text?.includes('Thanks, that helps.') && got4?.reason === 'try-first' && got4.plan === 'free' && got4.product === 'yearly',
+      JSON.stringify({ s4, got4 }),
+    )
+    await w4.evaluate(() => document.querySelector('[data-why-trial]')?.click())
+    let trial4 = null
+    for (let t = 0; t < 6000 && !trial4; t += 200) {
+      trial4 = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
+      if (!trial4) await sleep(200)
+    }
+    const want4 = trial4 ? await w4.evaluate((end) => `Pro is on, free until ${new Date(end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}.`, trial4.startedAt + 14 * D) : null
+    const on4 = !!want4 && (await until(w4, (w) => document.querySelector('[data-why-trial-on]')?.textContent.trim() === w, want4))
+    check(
+      'why not: Start the free trial starts the 14-day trial (a click, so no auto mark) and says until when',
+      typeof trial4?.startedAt === 'number' && Math.abs(Date.now() - trial4.startedAt) < 60000 && !('auto' in trial4) && on4,
+      JSON.stringify({ trial4, want4, on4 }),
+    )
+    await w4.close()
+
+    // 4. Its close button: nothing sent, and that checkout never brings it back.
+    await setup({ ago: 30 * M, ls: fresh })
+    const w5 = await openNtp()
+    await shown(w5)
+    await w5.evaluate(() => document.querySelector('[data-why-not] button[aria-label="Dismiss"]')?.click())
+    const closed5 = await w5.evaluate(() => !document.querySelector('[data-why-not]'))
+    const got5 = await sent()
+    await w5.close()
+    const w6 = await openNtp()
+    const back6 = await none(w6)
+    await w6.close()
+    check('why not: its close button sends nothing, and that checkout never brings it back', closed5 && got5 === null && back6, JSON.stringify({ closed5, got5, back6 }))
+
+    // 5. Never with Pro on, under the company's pro lock, for a checkout 5 minutes old, or after three.
+    await setup({ ago: 15 * M, ls: fresh })
+    await control.evaluate(async () => {
+      const now = Date.now()
+      // The license first: a key that arrives without one makes open pages activate it.
+      await chrome.storage.local.set({ proLicense: { key: 'SB-E2E0-0000-0000-0093', activationId: 'act-why', status: 'granted', checkedAt: now, okAt: now } })
+      await chrome.storage.sync.set({ proKey: { key: 'SB-E2E0-0000-0000-0093' } })
+    })
+    await sleep(400)
+    const w7 = await openNtp()
+    const paid7 = await until(w7, () => !!document.querySelector('[data-pro-crown]'))
+    const quiet7 = await none(w7)
+    await w7.close()
+    check('why not: never with Pro on', paid7 && quiet7, JSON.stringify({ paid7, quiet7 }))
+
+    await control.evaluate(() => localStorage.setItem('stackable:managedOverride', JSON.stringify({ lock: { pro: true } })))
+    await setup({ ago: 15 * M, ls: fresh })
+    const w8 = await openNtp()
+    const locked8 = await none(w8)
+    const text8 = await w8.evaluate(() => document.body.innerText)
+    await w8.close()
+    await control.evaluate(() => localStorage.removeItem('stackable:managedOverride'))
+    check("why not: never under the company's pro lock (school mode)", locked8 && !/Didn't get Pro|What stopped you/i.test(text8), text8.replace(/\s+/g, ' ').slice(0, 120))
+
+    await setup({ ago: 5 * M, ls: fresh })
+    const w9 = await openNtp()
+    const soon9 = await none(w9)
+    await w9.close()
+    check('why not: not for a checkout opened 5 minutes ago', soon9)
+
+    await setup({ ago: 15 * M, ls: { 'stackable:whyNotAt': '1', 'stackable:whyNotAsked': '3' } })
+    const w10 = await openNtp()
+    const max10 = await none(w10)
+    await w10.close()
+    check('why not: three checkouts at most on this computer', max10)
+
+    await control.evaluate(async (w) => {
+      // The license first, as above.
       await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
       await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
       if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
@@ -4600,7 +4847,7 @@ try {
   }
 
   // ---------- 0.8.0: to-do lists join Pro for early users ----------
-  // 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // early users (installed before Pro) need Pro or the trial for a new to-do list too,
   // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
   // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
   {
@@ -4908,12 +5155,15 @@ try {
         rate: [...(dialog?.querySelectorAll('button') ?? [])].some((b) => b.textContent.trim() === 'Rate it'),
         words: rest.match(/[^.\n]*(\bPro\b|\btrials?\b|\$\d)[^.\n]*/gi) ?? [],
         offers: [...(dialog?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()).filter((t) => re.test(t)),
+        // 0.9.3: the priced Get Pro and the checkout and refund line.
+        checkout: !!document.querySelector('[data-pro-refund]') || /refund|Apple Pay|Get Pro for/i.test(dialog?.innerText ?? ''),
       }
     }, OFFERS)
     check('school: Settings shows the managed line in place of the Pro section', !!st.managed && st.managed.includes('Your company manages this setting.') && !st.proSection, JSON.stringify(st.managed))
     check('school: with the trial running, no Pro feature or try-on shows', !st.archive && !st.looks && !st.timeOfDay, JSON.stringify(st))
     check('school: the free clean-up scan stays, and so does Rate it', st.scan && st.rate, JSON.stringify(st))
     check('school: nothing in Settings mentions Pro, a trial or a price, Keys included', !st.words.length && !st.offers.length && !st.keys.includes('(Pro)') && !st.keys.includes('Command bar'), JSON.stringify({ words: st.words, offers: st.offers, keys: st.keys }))
+    check('school: Settings has no priced Get Pro and no checkout or refund line', !st.checkout)
 
     await s1.evaluate(() => document.querySelector('[data-cleanup-scan]')?.click())
     await until(s1, () => !!document.querySelector('[data-cleanup]'))
@@ -4995,10 +5245,12 @@ try {
         buttons: [...(pro?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim()),
         aiPick: !!document.querySelector('[data-ai-file-setting], [data-ai-file-toggle]'),
         keys: document.querySelector('[data-keys]')?.innerText ?? '',
+        refund: !!document.querySelector('[data-pro-refund]') || /refund|Apple Pay/i.test(pro?.innerText ?? ''),
       }
     })
     check('school: a paid key already on this computer keeps its Pro card and Pro features', paid.card && !paid.managed && paid.archive, JSON.stringify(paid))
     check('school: the Pro card has no buy, trial or renew button', paid.buttons.length > 0 && !paid.buttons.some((t) => /Get Pro|trial|Renew|Keep Pro/i.test(t)), JSON.stringify(paid.buttons))
+    check('school: and no checkout or refund line', !paid.refund)
     check('school: with Pro on, Keys lists the command bar without "(Pro)"', paid.keys.includes('Command bar') && !paid.keys.includes('(Pro)'), paid.keys)
     await s3.keyboard.press('Escape')
     await until(s3, () => !document.querySelector('[role=dialog]'))

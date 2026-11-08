@@ -15,7 +15,7 @@ const WHATS_NEW_080_KEY = 'whatsNew080'
 const WHATS_NEW_090_KEY = 'whatsNew090'
 
 /**
- * The what's-new notes: the Pro note (0.7.0, the Pro launch rules: Pro lives in Settings plus
+ * The what's-new notes: the Pro note (0.7.0: Pro lives in Settings plus
  * one note) for people who had Stackboard before Pro, and the 0.8.0 note for people who updated
  * from an older version. A corner card on at most three new tabs, retired when answered. A tab
  * shows one note at most; the Pro note goes first and the 0.8.0 note waits for a later tab.

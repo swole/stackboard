@@ -3,7 +3,7 @@ import { Check, Crown, KeyRound, Sparkles } from 'lucide-react'
 import { PrimaryButton, SecondaryButton, TextInput } from './modals/Modal'
 import { openCheckout, usePro } from '../lib/pro'
 import { loadReady, refreshTidyReady, useTidy } from '../lib/tidy'
-import { FOUNDING_ENDS, LIFETIME_PRICE, PORTAL_URL, checkoutPending, keepsTodoFree, proCard, type PauseReason } from '../lib/proPlan'
+import { FOUNDING_ENDS, LIFETIME_PRICE, PORTAL_URL, checkoutPending, keepsTodoFree, priceLabel, proCard, type PauseReason } from '../lib/proPlan'
 import { openInNewTab } from '../lib/tabs'
 import { ArchiveSetting } from './ArchiveSetting'
 import { TodayStripSetting } from './TodayStripSetting'
@@ -78,7 +78,16 @@ export function ProSection() {
   const removing = useTwoStep(4000)
   const now = Date.now()
   const buy = () => openCheckout('settings')
+  // 0.9.3: Get Pro names the price, $4.99 once the founding price ends (early users keep $2.99).
+  const getPro = `Get Pro for ${priceLabel(early, now)}`
   const portal = () => void openInNewTab(PORTAL_URL, true)
+  // 0.9.3: how checkout works and the 14-day money-back promise, one quiet line above
+  // Pro for life and wherever that line shows, so never in the finishing steps or under the pro lock.
+  const refundLine = (
+    <p className="mt-1.5 text-[11px] text-muted" data-pro-refund>
+      Checkout is by Polar: card, Apple Pay or Google Pay. Changed your mind? Full refund within 14 days.
+    </p>
+  )
   // 0.9.2: Pro for life, one quiet line under the buy buttons (never in the finishing steps).
   const lifetimeLine = (
     <p className="mt-1.5 text-[11px] text-muted" data-pro-lifetime>
@@ -251,7 +260,12 @@ export function ProSection() {
                 no Remove here, it would take Pro off all of them. */}
             {state.reason !== 'device-limit' && state.reason !== 'removed' && removeButton}
           </div>
-          {state.reason === 'ended' && lifetimeLine}
+          {state.reason === 'ended' && (
+            <>
+              {refundLine}
+              {lifetimeLine}
+            </>
+          )}
         </>
       )}
 
@@ -316,16 +330,17 @@ export function ProSection() {
                 <PrimaryButton onClick={() => void startTrial()} data-pro-trial>
                   Try it free for 14 days
                 </PrimaryButton>
-                <SecondaryButton onClick={buy}>Get Pro</SecondaryButton>
+                <SecondaryButton onClick={buy}>{getPro}</SecondaryButton>
               </>
             ) : (
-              <PrimaryButton onClick={buy}>Get Pro</PrimaryButton>
+              <PrimaryButton onClick={buy}>{getPro}</PrimaryButton>
             )}
           </div>
           {/* Never tried only: a trial that started by itself on install must never hear this. */}
           {state.kind === 'free' && !state.trialUsed && (
             <p className="mt-1.5 text-[11px] text-faint">No card needed for the trial, and it never starts by itself.</p>
           )}
+          {refundLine}
           {lifetimeLine}
         </>
       )}

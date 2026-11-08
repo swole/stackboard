@@ -49,7 +49,7 @@ function joinList(items: string[]): string {
   return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
 }
 
-/** Offered in the notes while the person can still start it (3 Nov: say there's a free trial). */
+/** Offered in the notes while the person can still start it (say there's a free trial). */
 const TRIAL_LINE = 'Try it free for 14 days, no card needed.'
 
 /**
@@ -112,7 +112,7 @@ const PRO_090 = 'a Today strip, stack colours, a command bar (Ctrl+K) and looks 
  * What the 0.9.0 note says. Someone whose 0.8.0 note never had its turn (they came from before
  * 0.8.0) also hears the 0.8.0 items, since this note takes its place, and an early user without a
  * to-do list hears that lists moved into Pro. The Pro line goes to everyone and names the trial
- * while it can start (3 Nov: convert free users without nagging), unless the company hides
+ * while it can start (convert free users without nagging), unless the company hides
  * Pro (school mode).
  */
 export function whatsNew090(p: {
