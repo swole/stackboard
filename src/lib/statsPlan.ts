@@ -27,8 +27,8 @@ export function addStat(s: ProStats, key: StatKey, n = 1): ProStats {
   return { ...s, [key]: s[key] + add }
 }
 
-/** "a", "a and b", "a, b and c". */
-function joinList(items: string[]): string {
+/** "a", "a and b", "a, b and c". Also the recap's line on what stops with the trial (nudgePlan.ts, 0.9.4). */
+export function joinList(items: string[]): string {
   if (items.length <= 1) return items.join('')
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }

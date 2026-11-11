@@ -19,6 +19,11 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const PERMISSIONS = ['bookmarks', 'favicon', 'tabs', 'storage', 'tabGroups', 'search']
 // 0.9.2: the Pro for life checkout (CHECKOUT.lifetime in src/lib/proPlan.ts).
 const LIFETIME_CHECKOUT = 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W'
+// 0.9.4: Pro for life at the founding offer, after The price (CHECKOUT.lifetimeOffer).
+const LIFETIME_OFFER_CHECKOUT = 'https://buy.polar.sh/polar_cl_fdIwiaHAZZJmWaP3q3P2nywkOuzRrtaC5wyPh1cbRTo'
+// 0.9.4: anything the trial's one-tap switches say (trialSwitches in src/lib/nudgePlan.ts), as a
+// regex source, since page.evaluate takes no RegExp.
+const SWITCH_WORDS = 'Make the most of your trial|Turn on auto-archive|Show the Today strip|Auto-archive is on|Today strip is on'
 const CHROME = process.env.STACKABLE_TEST_CHROME
 if (!CHROME) throw new Error('Set STACKABLE_TEST_CHROME to a Chrome for Testing chrome.exe')
 let EXT = process.env.STACKABLE_DIST ?? path.resolve(ROOT, '../dist')
@@ -181,6 +186,15 @@ try {
     const afterUpdate = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
     check('reverse trial: the update step starts no trial', replay?.ok === true && afterUpdate === null, JSON.stringify({ replay, afterUpdate }))
   }
+
+  // 0.9.5: the one free tidy would put "Tidy (free once)" on every free board (and Settings would ask
+  // getstackboard.com about it), and the December founding-price note goes by the real clock. Their
+  // own blocks set both up; for every other block the free tidy counts as used and the note as shown
+  // in both its windows, as on a board that has seen them.
+  await control.evaluate(async () => {
+    await chrome.storage.sync.set({ freeTidy: { at: Date.now() } })
+    localStorage.setItem('stackable:foundingNote', 'last-days')
+  })
 
   await control.evaluate(async () => {
     const kids = await chrome.bookmarks.getChildren('2')
@@ -1041,6 +1055,9 @@ try {
     const shown = await until(page, () => document.querySelector('[data-pro]')?.dataset.pro === 'free')
     const offer = await page.evaluate(() => document.querySelector('[data-pro]')?.innerText ?? '')
     check('pro: Settings offers Pro with a trial and a key box', shown && offer.includes('Get Pro') && offer.includes('Try it free for 14 days'), offer.slice(0, 160))
+    // 0.9.4: the trial's one-tap switches (and their row) never show for a free board.
+    const freeRow = await page.evaluate((re) => ({ row: !!document.querySelector('[data-pro-trial-switches], [data-trial-switch]'), words: new RegExp(re).test(document.body.innerText) }), SWITCH_WORDS)
+    check('trial switches: none for a free board, in Settings or on the board', !freeRow.row && !freeRow.words, JSON.stringify(freeRow))
     // 0.9.3: Get Pro names the price the note above it gives, and stays second to the trial; one quiet
     // line under the buttons says how checkout works and promises a refund, above Pro for life.
     const sells = () => page.evaluate(() => {
@@ -1076,6 +1093,21 @@ try {
     // 0.9.2: a trial started with a click carries no auto mark, and Settings keeps its own line.
     const optInLine = await page.evaluate(() => document.querySelector('[data-pro-trial-line]')?.dataset.proTrialLine ?? null)
     check('pro: a trial started with a click has no auto mark', !!synced && !('auto' in synced) && optInLine === 'opt-in', JSON.stringify({ synced, optInLine }))
+    // 0.9.4: during any trial, a row under the trial line offers the features that are still off.
+    const optInRow = await until(page, () => !!document.querySelector('[data-pro-trial-switches]'))
+    const row = await page.evaluate(() => {
+      const r = document.querySelector('[data-pro-trial-switches]')
+      return {
+        text: r?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+        buttons: [...(r?.querySelectorAll('[data-trial-switch]') ?? [])].map((b) => `${b.dataset.trialSwitch}: ${b.textContent.trim()}`),
+        under: !!r && r.previousElementSibling === document.querySelector('[data-pro-trial-line]'),
+      }
+    })
+    check(
+      'trial switches: a trial started with a click gets the row under the trial line, both features off',
+      optInRow && !!row.text?.startsWith('Make the most of your trial:') && row.buttons.join('|') === 'archive: Turn on auto-archive|strip: Show the Today strip' && row.under,
+      JSON.stringify(row),
+    )
     check('pro: with the trial on, Settings shows auto-archive', await until(page, () => !!document.querySelector('[data-archive-setting]')))
     const onTrial = await sells()
     check('pro: on the trial, Get Pro still names the price, with the refund line under it', !!onTrial.price && onTrial.getPro === `Get Pro for ${onTrial.price}` && onTrial.refund === REFUND && onTrial.order, JSON.stringify(onTrial))
@@ -1196,6 +1228,9 @@ try {
     check('pro card: a good key shows the crown card and its details', on && /active/i.test(card) && card.includes('buyer@example.com') && card.includes('3 Nov 2026') && card.includes('SB-...-9F2C') && !card.includes('Yearly plan'), card.replace(/\s+/g, ' ').slice(0, 220))
     check('pro card: a thank-you on the card and a toast', await until(page, () => !!document.querySelector('[data-pro-welcome]') && document.body.innerText.includes('Switched on')))
     check('pro card: a crown beside the name in the sidebar', await page.evaluate(() => !!document.querySelector('[data-pro-crown]')))
+    // 0.9.4: the trial's one-tap switches are for the trial only.
+    const paidRow = await page.evaluate((re) => ({ row: !!document.querySelector('[data-pro-trial-switches], [data-trial-switch]'), words: new RegExp(re).test(document.body.innerText) }), SWITCH_WORDS)
+    check('trial switches: none for a paid key, in Settings or on the board', !paidRow.row && !paidRow.words, JSON.stringify(paidRow))
     const after = await control.evaluate(async () => ({
       checkout: (await chrome.storage.local.get('proCheckout')).proCheckout ?? null,
       key: (await chrome.storage.sync.get('proKey')).proKey ?? null,
@@ -1848,13 +1883,17 @@ try {
     for (const p of await browser.pages()) {
       if (p.url().startsWith(NTP.slice(0, NTP.lastIndexOf('/')))) await p.evaluate(deny).catch(() => {})
     }
-    const fresh = async () => {
+    // `paid`: with the key; without it the board is free (0.9.5, the free tidy). The free tidy starts unused.
+    const fresh = async (paid = true) => {
       const id = await control.evaluate(async (key) => {
         const now = Date.now()
         // The license first: a key that arrives without one makes open pages activate it.
-        await chrome.storage.local.set({ proLicense: { key, activationId: 'act-e2e', status: 'granted', checkedAt: now, okAt: now } })
-        await chrome.storage.sync.set({ proKey: { key } })
-        await chrome.storage.local.remove(['tidyReady', 'tidyNotice2'])
+        if (key) {
+          await chrome.storage.local.set({ proLicense: { key, activationId: 'act-e2e', status: 'granted', checkedAt: now, okAt: now } })
+          await chrome.storage.sync.set({ proKey: { key } })
+        }
+        await chrome.storage.local.remove(['tidyReady', 'tidyNotice2', 'freeTidy'])
+        await chrome.storage.sync.remove('freeTidy')
         const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
         const old = (await chrome.bookmarks.getChildren(root.id)).find((k) => k.title.endsWith('Tidy test'))
         if (old) await chrome.bookmarks.removeTree(old.id)
@@ -1866,7 +1905,7 @@ try {
         }
         localStorage.setItem('stackable:lastSpaceId', space.id)
         return space.id
-      }, KEY)
+      }, paid ? KEY : null)
       return id
     }
     const shapeOf = (spaceId) => control.evaluate(async (id) => {
@@ -1878,7 +1917,8 @@ try {
       return sub.children.flatMap((st) => (st.children ?? []).map((b) => b.id)).sort().join(',')
     }, spaceId)
     // The page's fetch answers for getstackboard.com/api/tidy (and Polar, just in case) and records the calls.
-    const stub = (ready) => {
+    // `answer` 'free-cap' (0.9.5): a run is refused because the day's free tidies are used up.
+    const stub = (ready, answer) => {
       const real = window.fetch.bind(window)
       const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
       window.__tidyCalls = []
@@ -1890,6 +1930,7 @@ try {
           if (method === 'GET') return json({ ok: true, ready, max: 600 })
           const body = JSON.parse(init.body)
           window.__tidyBody = body
+          if (answer === 'free-cap') return json({ ok: false, reason: 'free-cap' }, 429)
           const groups = new Map()
           body.links.forEach((l, i) => {
             const k = new URL(l.url).hostname.split('.')[0].replace(/\d+$/, '')
@@ -1902,11 +1943,11 @@ try {
         return real(input, init)
       }
     }
-    const openStubbed = async (ready) => {
+    const openStubbed = async (ready, answer = 'plan') => {
       const p = await browser.newPage()
       await p.setViewport({ width: 1400, height: 900 })
       p.on('pageerror', (e) => errors.push(`tidy ntp: ${e.message}`))
-      await p.evaluateOnNewDocument(stub, ready)
+      await p.evaluateOnNewDocument(stub, ready, answer)
       await p.goto(NTP, { waitUntil: 'load' })
       await p.bringToFront()
       await p.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Tidy test', { timeout: 10000 })
@@ -1954,6 +1995,7 @@ try {
     await askViaSettings(page)
     const shown = await until(page, () => !!document.querySelector('[data-tidy-button]'))
     check('tidy: the button shows with a Pro key once the server is on', shown)
+    const paidLabel = await page.evaluate(() => document.querySelector('[data-tidy-button]')?.textContent.trim() ?? null)
     await page.evaluate(() => document.querySelector('[data-tidy-button]').click())
     const notice = await until(page, () => !!document.querySelector('[data-tidy-notice]'))
     const noticeText = await page.evaluate(() => document.querySelector('[data-tidy-notice]')?.textContent ?? '')
@@ -1977,6 +2019,14 @@ try {
     check('tidy: links keep their ids', (await idsOf(spaceId)) === beforeIds)
     const toast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
     check('tidy: the toast offers Undo', toast.includes('Tidied') && toast.includes('Undo'), toast)
+    // 0.9.5: a paid key sees no change: no "free once", no free flag, no free-tidy line, and the free tidy stays unused.
+    const paidNote = await page.evaluate(() => !!document.querySelector('.toast [data-toast-note]'))
+    const paidMark = await control.evaluate(async () => (await chrome.storage.sync.get('freeTidy')).freeTidy ?? (await chrome.storage.local.get('freeTidy')).freeTidy ?? null)
+    check(
+      'tidy: a paid key sees Tidy as before: the plain label, its key and no free flag, no free-tidy line, and its free tidy stays unused',
+      paidLabel === 'Tidy' && !('free' in (sent ?? {})) && !paidNote && !toast.includes('free tidy') && paidMark === null,
+      JSON.stringify({ paidLabel, free: sent?.free, paidNote, paidMark }),
+    )
 
     await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo')).click())
     let back = ''
@@ -1994,6 +2044,127 @@ try {
       await chrome.storage.sync.remove('proKey')
       localStorage.removeItem('stackable:lastSpaceId')
     }, spaceId)
+
+    // ---------- 0.9.5: one free tidy per Chrome profile ----------
+    // A free or trial board (or a paused key) gets "Tidy (free once)" where a paid key has Tidy. It sends
+    // the same space with free: true and no key. Once the server has sorted the space it counts as used
+    // (sync freeTidy), its toast says so with See Pro, and the button is gone for good. An answer that
+    // the day's free tidies are used up says so and leaves it unused.
+    const freeMark = () => control.evaluate(async () => (await chrome.storage.sync.get('freeTidy')).freeTidy ?? (await chrome.storage.local.get('freeTidy')).freeTidy ?? null)
+    const toastText = (p) => p.evaluate(() => document.querySelector('.toast')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
+    const freeLabel = (p) => until(p, () => document.querySelector('[data-tidy-button]')?.textContent.trim() === 'Tidy (free once)')
+    // Settings opened and closed again; what it asked the server meanwhile.
+    const settingsCalls = async (p) => {
+      await p.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+      await until(p, () => !!document.querySelector('[data-pro]'))
+      await sleep(1200)
+      const calls = await p.evaluate(() => window.__tidyCalls.slice())
+      await p.evaluate(() => document.querySelector('[role=dialog] button[aria-label="Close"]')?.click())
+      await sleep(300)
+      return calls
+    }
+    const tidied = 'Alpha:Alpha one+Alpha two | Beta:Beta one+Beta two | Gamma:Gamma one'
+
+    // 1. A free board: the free entry, the run, the toast's line, See Pro, and then no entry.
+    const freeId = await fresh(false)
+    const freeBefore = await shapeOf(freeId)
+    const fp = await openStubbed(true)
+    const offered = await freeLabel(fp)
+    check('free tidy: a free board shows Tidy (free once), and a plain new tab asks the server nothing', offered && (await fp.evaluate(() => window.__tidyCalls.length === 0)), JSON.stringify(await fp.evaluate(() => window.__tidyCalls)))
+    check('free tidy: until it is used, Settings asks the server whether Tidy is on for a free board too', (await settingsCalls(fp)).join() === 'GET')
+    await fp.evaluate(() => document.querySelector('[data-tidy-button]').click())
+    const freeNotice = await until(fp, () => !!document.querySelector('[data-tidy-notice]'))
+    await fp.evaluate(() => document.querySelector('[data-tidy-continue]')?.click())
+    const freePreview = await until(fp, () => document.querySelectorAll('[data-tidy-stack]').length === 3)
+    const freeSent = await fp.evaluate(() => window.__tidyBody)
+    check(
+      'free tidy: after the notice it sends the same space with free: true and no key',
+      freeNotice && freePreview && freeSent?.free === true && !('license' in freeSent) && freeSent.scope === 'space' && freeSent.space === 'Tidy test' && freeSent.links?.length === 5,
+      JSON.stringify(freeSent).slice(0, 160),
+    )
+    let usedAt = null
+    for (let t = 0; t < 20 && !usedAt; t++) {
+      usedAt = await freeMark()
+      if (!usedAt) await sleep(150)
+    }
+    const atPreview = await fp.evaluate(() => ({ button: !!document.querySelector('[data-tidy-button]'), stacks: document.querySelectorAll('[data-tidy-stack]').length }))
+    check(
+      'free tidy: it counts as used once the server has sorted the space, and the preview stays up with nothing moved yet',
+      typeof usedAt?.at === 'number' && !atPreview.button && atPreview.stacks === 3 && (await shapeOf(freeId)) === freeBefore,
+      JSON.stringify({ usedAt, atPreview }),
+    )
+    await fp.evaluate(() => document.querySelector('[data-tidy-apply]').click())
+    let freeAfter = ''
+    for (let t = 0; t < 40 && freeAfter !== tidied; t++) {
+      await sleep(150)
+      freeAfter = await shapeOf(freeId)
+    }
+    const noted = await until(fp, () => !!document.querySelector('.toast [data-toast-note]'))
+    const ft = await toastText(fp)
+    check(
+      'free tidy: Apply tidies the space, and its toast adds "That was your free tidy. Pro tidies any space, any time." with See Pro',
+      freeAfter === tidied && noted && ft.includes('Tidied') && ft.includes('Undo') && ft.includes('That was your free tidy. Pro tidies any space, any time. See Pro'),
+      JSON.stringify({ freeAfter, ft }),
+    )
+    await fp.screenshot({ path: path.join(SHOTS, '095-free-tidy.png') })
+    check('free tidy: then the entry is gone from the space header', await fp.evaluate(() => !document.querySelector('[data-tidy-button]')))
+    await fp.evaluate(() => document.querySelector('.toast [data-toast-note] button')?.click())
+    check('free tidy: See Pro opens Settings at Stackboard Pro', await until(fp, () => !!document.querySelector('[role=dialog] [data-pro]')))
+    await fp.close()
+    const fp2 = await openStubbed(true)
+    await sleep(1500)
+    const later = { button: await fp2.evaluate(() => !!document.querySelector('[data-tidy-button]')), calls: await settingsCalls(fp2) }
+    check('free tidy: a new tab has no Tidy either, and Settings no longer asks the server', !later.button && !later.calls.length, JSON.stringify(later))
+    await fp2.close()
+
+    // 2. The day's free tidies are used up: it says so, and the free tidy stays unused.
+    await control.evaluate(async () => {
+      await chrome.storage.sync.remove('freeTidy')
+      await chrome.storage.local.remove('freeTidy')
+    })
+    const cp = await openStubbed(true, 'free-cap')
+    await freeLabel(cp)
+    await cp.evaluate(() => document.querySelector('[data-tidy-button]')?.click()) // the notice was accepted in step 1
+    const capped = await until(cp, () => (document.querySelector('.toast')?.textContent ?? '').includes('Free tidies are used up for today. Try again tomorrow.'))
+    await sleep(400)
+    const cap = { asked: await cp.evaluate(() => window.__tidyBody?.free === true), mark: await freeMark(), label: await cp.evaluate(() => document.querySelector('[data-tidy-button]')?.textContent.trim() ?? null) }
+    check(
+      'free tidy: when the day\'s free tidies are used up it says "Free tidies are used up for today. Try again tomorrow." and the free tidy stays unused',
+      capped && cap.asked && cap.mark === null && cap.label === 'Tidy (free once)',
+      JSON.stringify(cap),
+    )
+    await cp.close()
+
+    // 3. A trial board gets it once too. A preview closed without Apply moves nothing, still uses it, and says so.
+    const trialId = await fresh(false)
+    await control.evaluate(() => chrome.storage.sync.set({ proTrial: { startedAt: Date.now() - 2 * 86400000 } }))
+    const trialBefore = await shapeOf(trialId)
+    const tp = await openStubbed(true)
+    const trialOffered = await freeLabel(tp)
+    const onTrial = await tp.evaluate(() => !!document.querySelector('[data-tidy-free]'))
+    await tp.evaluate(() => document.querySelector('[data-tidy-button]').click())
+    await until(tp, () => !!document.querySelector('[data-tidy-notice]'))
+    await tp.evaluate(() => document.querySelector('[data-tidy-continue]')?.click())
+    const trialPreview = await until(tp, () => document.querySelectorAll('[data-tidy-stack]').length === 3)
+    const trialSent = await tp.evaluate(() => window.__tidyBody)
+    await tp.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
+    const cancelled = await until(tp, () => !!document.querySelector('.toast [data-toast-note]'))
+    const trialAfter = { toast: await toastText(tp), mark: await freeMark(), button: await tp.evaluate(() => !!document.querySelector('[data-tidy-button]')), same: (await shapeOf(trialId)) === trialBefore }
+    check(
+      'free tidy: a trial board gets it once too; a preview closed without Apply moves nothing, still uses it, and the toast says so',
+      trialOffered && onTrial && trialPreview && trialSent?.free === true && !('license' in trialSent) && cancelled && trialAfter.toast === 'That was your free tidy. Pro tidies any space, any time. See Pro' && typeof trialAfter.mark?.at === 'number' && !trialAfter.button && trialAfter.same,
+      JSON.stringify({ trialOffered, onTrial, free: trialSent?.free, ...trialAfter }),
+    )
+    await tp.close()
+
+    // The rest of the suite runs with the free tidy used, as it began.
+    await control.evaluate(async (id) => {
+      await chrome.bookmarks.removeTree(id).catch(() => {})
+      await chrome.storage.sync.remove('proTrial')
+      await chrome.storage.local.remove(['tidyReady', 'tidyNotice2', 'freeTidy'])
+      await chrome.storage.sync.set({ freeTidy: { at: Date.now() } })
+      localStorage.removeItem('stackable:lastSpaceId')
+    }, trialId)
   }
 
   // ---------- 0.9.0: looks (time of day, moving wallpapers, stack colours, try-on) ----------
@@ -2102,7 +2273,13 @@ try {
     await sleep(400)
     await escape(p2)
     await sleep(300)
-    const s3 = await stored()
+    // Every open board tab rewrites the boot mirror when the look changes, and a busy background tab can
+    // land last for a moment: give the mirror up to 5 s to settle before reading it or opening a tab.
+    let s3 = await stored()
+    for (let t = 0; t < 5000 && s3.mirror?.timeOfDay !== true; t += 250) {
+      await sleep(250)
+      s3 = await stored()
+    }
     await p2.close()
     const day = await openAt(10)
     const atDay = await look(day)
@@ -2890,13 +3067,27 @@ try {
     // The popup reads this computer's activation straight from storage. Set it here, so another open
     // test tab re-checking the fake key with the real Polar can't leave it marked unknown first.
     await control.evaluate((key) => chrome.storage.local.set({ proLicense: { key, activationId: 'act-file', status: 'granted', checkedAt: Date.now(), okAt: Date.now() } }), KEY)
+    // Watch both keys the popup reads while it opens, for the failure detail (a flake on 11 Nov saw no request).
+    await control.evaluate(() => {
+      const t0 = Date.now()
+      window.__pickLog = []
+      window.__pickWatch = (ch, area) => {
+        if (ch.proLicense) window.__pickLog.push(`${Date.now() - t0}ms ${area} proLicense=${ch.proLicense.newValue?.status ?? 'removed'}`)
+        if (ch.aiFile) window.__pickLog.push(`${Date.now() - t0}ms ${area} aiFile.on=${ch.aiFile.newValue?.on}`)
+      }
+      chrome.storage.onChanged.addListener(window.__pickWatch)
+    })
     const p2 = await openPopup({ url: 'https://www.filetest-recipes.example/report', title: 'Quarterly report' })
     await until(p2, () => document.querySelector('[data-suggested-stack]')?.dataset.suggestedReason === 'ai')
     const s2 = await suggested(p2)
     const calls = await p2.evaluate(() => window.__fileCalls)
     const sent = calls[0] ?? {}
     const lic = await control.evaluate(async () => { const l = (await chrome.storage.local.get('proLicense')).proLicense; return l ? `${l.status}/${l.activationId}` : null })
-    check('AI pick: the AI answer replaces the local match', s2?.id === made.docs && s2.reason === 'ai' && s2.text === 'File test › Docs', JSON.stringify({ s2, lic }))
+    const watched = await control.evaluate(() => {
+      chrome.storage.onChanged.removeListener(window.__pickWatch)
+      return window.__pickLog
+    })
+    check('AI pick: the AI answer replaces the local match', s2?.id === made.docs && s2.reason === 'ai' && s2.text === 'File test › Docs', JSON.stringify({ s2, lic, watched }))
     check(
       'AI pick: the request carries the page, the stack paths and the key, nothing else',
       calls.length === 1 && sent.page?.url === 'https://www.filetest-recipes.example/report' && sent.page?.title === 'Quarterly report' &&
@@ -2981,6 +3172,13 @@ try {
       names = await folder()
       await sleep(300)
     }
+    // The prune runs right after today's file is closed and ends by stamping backupLast (removed above),
+    // so wait for the stamp and list the folder again: the loop can catch it between the write and the prune.
+    for (let t = 0; t < 5000; t += 200) {
+      if (await control.evaluate(async () => !!(await chrome.storage.local.get('backupLast')).backupLast)) break
+      await sleep(200)
+    }
+    names = await folder()
     const ours = names.filter((n) => /^stackboard-\d{4}-\d{2}-\d{2}\.json$/.test(n))
     const first = names.includes(`stackboard-${today}.json`) ? await readToday(today) : null
     check('folder backup: the daily snapshot also lands in the folder as an importable file', first?.version === 1 && first.spaces > 0 && first.hasFileTest, JSON.stringify(first))
@@ -3254,13 +3452,14 @@ try {
     const D = 24 * 60 * 60 * 1000
     const LS = ['stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:rating', 'stackable:snapshotDay']
     const was = await control.evaluate(async (ls) => ({
-      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'proArchive', 'todayStrip']),
       local: await chrome.storage.local.get(['proStats', 'proCheckout', 'proLicense', 'whatsNew080']),
       ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
     }), LS)
-    // A quiet board: no key, no what's-new note pending, the rating ask already answered.
+    // A quiet board: no key, no what's-new note pending, the rating ask already answered. 0.9.4:
+    // auto-archive (12 hours) and the Today strip are off unless `archive` or `strip` says so.
     const setup = (s) => control.evaluate(async (s) => {
-      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'proArchive', 'todayStrip'])
       await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'proStats'])
       localStorage.setItem('stackable:whatsNew070', '-1')
       localStorage.setItem('stackable:whatsNew080', '-1')
@@ -3268,6 +3467,8 @@ try {
       for (const [k, v] of Object.entries(s.ls ?? {})) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
       if (s.trialStartedAt) await chrome.storage.sync.set({ proTrial: { startedAt: s.trialStartedAt } })
       if (s.stats) await chrome.storage.local.set({ proStats: s.stats })
+      if (s.archive) await chrome.storage.sync.set({ proArchive: { afterMs: 12 * 3600000 } })
+      if (s.strip) await chrome.storage.sync.set({ todayStrip: { on: true } })
     }, s)
     const card = (page) => page.evaluate(() => {
       const c = document.querySelector('[data-trial-end]')
@@ -3277,8 +3478,12 @@ try {
       await sleep(1500)
       return page.evaluate((s) => !document.querySelector(s), sel)
     }
+    // 0.9.4: the line after the numbers, what stops; and the trial's last day as the page writes it.
+    const stops = async (page) => ((await until(page, () => !!document.querySelector('[data-trial-end-stops]'))) ? page.evaluate(() => document.querySelector('[data-trial-end-stops]').textContent.trim()) : null)
+    const lastDay = (page, start) => page.evaluate((end) => new Date(end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), start + 14 * D)
 
-    await setup({ trialStartedAt: Date.now() - 12.5 * D, stats: { archived: 214, snapshots: 12, todosDone: 9 }, ls: { 'stackable:trialEnding': null, 'stackable:trialEnded': null } })
+    const start1 = Date.now() - 12.5 * D
+    await setup({ trialStartedAt: start1, stats: { archived: 214, snapshots: 12, todosDone: 9 }, archive: true, ls: { 'stackable:trialEnding': null, 'stackable:trialEnded': null } })
     const t1 = await openNtp()
     const c1 = (await until(t1, () => !!document.querySelector('[data-trial-end]'))) ? await card(t1) : null
     check(
@@ -3286,6 +3491,18 @@ try {
       !!c1 && c1.kind === 'ending' && /Your Pro trial ends (today|tomorrow|in 2 days)/.test(c1.text) && c1.text.includes('Pro archived 214 tabs, kept 12 snapshots and checked off 9 to-dos.') && c1.text.includes('Keep Pro for $'),
       JSON.stringify(c1),
     )
+    const stops1 = await stops(t1)
+    const day1 = await lastDay(t1, start1)
+    const order1 = await t1.evaluate(() => {
+      const after = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+      return after(document.querySelector('[data-trial-end-stats]'), document.querySelector('[data-trial-end-stops]')) && after(document.querySelector('[data-trial-end-stops]'), document.querySelector('[data-trial-keep]'))
+    })
+    check(
+      'trial recap: after the numbers, one line says what stops on the last day, naming auto-archive while it is on',
+      stops1 === `When it ends on ${day1}, auto-archive and daily snapshots stop. Everything you made stays.` && order1,
+      JSON.stringify({ stops1, day1, order1 }),
+    )
+    await t1.screenshot({ path: path.join(SHOTS, '094-recap-stops.png') })
     await t1.close()
     const t2 = await openNtp()
     const second = await until(t2, () => !!document.querySelector('[data-trial-end]'))
@@ -3295,10 +3512,14 @@ try {
     await t3.close()
     check('trial recap: on two new tabs at most', second && third)
 
-    await setup({ trialStartedAt: Date.now() - 13 * D, ls: { 'stackable:trialEnding': '0' } })
+    const start4 = Date.now() - 13 * D
+    await setup({ trialStartedAt: start4, ls: { 'stackable:trialEnding': '0' } })
     const t4 = await openNtp()
     await until(t4, () => !!document.querySelector('[data-trial-end]'))
     check('trial recap: no stats line while Pro has nothing to show', await t4.evaluate(() => !!document.querySelector('[data-trial-end]') && !document.querySelector('[data-trial-end-stats]')))
+    const stops4 = await stops(t4)
+    const day4 = await lastDay(t4, start4)
+    check('trial recap: with auto-archive off, the line leaves it out and names daily snapshots', stops4 === `When it ends on ${day4}, daily snapshots stop. Everything you made stays.`, JSON.stringify({ stops4, day4 }))
     await t4.evaluate(() => [...document.querySelectorAll('[data-trial-end] button')].find((b) => b.textContent.trim() === 'Not now')?.click())
     const retired = await control.evaluate(() => localStorage.getItem('stackable:trialEnding'))
     await t4.close()
@@ -3336,13 +3557,16 @@ try {
     )
     await kp.close()
 
-    await setup({ trialStartedAt: Date.now() - 15 * D, stats: { snapshots: 14, cleaned: 23 }, ls: { 'stackable:trialEnded': null } })
+    // 0.9.4: the ended card names what has stopped, the Today strip included while it's on, in place
+    // of its "Pro features are paused" line.
+    await setup({ trialStartedAt: Date.now() - 15 * D, stats: { snapshots: 14, cleaned: 23 }, archive: true, strip: true, ls: { 'stackable:trialEnded': null } })
     const e1 = await openNtp()
     const ce = (await until(e1, () => !!document.querySelector('[data-trial-end]'))) ? await card(e1) : null
+    const stopsE = await stops(e1)
     check(
-      'trial recap: the first tabs after the trial ends say so, with what Pro did',
-      !!ce && ce.kind === 'ended' && ce.text.includes('Your Pro trial has ended') && ce.text.includes('Pro kept 14 snapshots and cleaned up 23 links.') && ce.text.includes('Everything you made is still here'),
-      JSON.stringify(ce),
+      'trial recap: the first tabs after the trial ends say so, with what Pro did and what has stopped',
+      !!ce && ce.kind === 'ended' && ce.text.includes('Your Pro trial has ended') && ce.text.includes('Pro kept 14 snapshots and cleaned up 23 links.') && stopsE === 'Auto-archive, daily snapshots and the Today strip have stopped. Everything you made stays.' && !ce.text.includes('Pro features are paused'),
+      JSON.stringify({ ce, stopsE }),
     )
     await e1.close()
     await setup({ trialStartedAt: Date.now() - 30 * D, ls: { 'stackable:trialEnded': null } })
@@ -3454,7 +3678,7 @@ try {
     await s1.close()
 
     await control.evaluate(async (w) => {
-      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'proArchive', 'todayStrip'])
       await chrome.storage.local.remove(['proStats', 'proCheckout', 'proLicense', 'whatsNew080', 'stackboardOpenSpace'])
       if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
       if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
@@ -3481,7 +3705,7 @@ try {
     const H = 60 * 60 * 1000
     const LS = ['stackable:opens', 'stackable:firstSeen', 'stackable:reverseTrial', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:rating', 'stackable:managedOverride']
     const was = await control.evaluate(async (ls) => ({
-      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'proArchive', 'todayStrip']),
       local: await chrome.storage.local.get(['proCheckout', 'proLicense', 'whatsNew080', 'whatsNew090']),
       ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
     }), LS)
@@ -3700,10 +3924,104 @@ try {
     check('refund line: a key whose plan has ended shows it under Renew Pro, above Pro for life', renew && st3.refund === 'Checkout is by Polar: card, Apple Pay or Google Pay. Changed your mind? Full refund within 14 days.' && st3.above, JSON.stringify(st3))
     await k3.close()
 
+    // 8. (0.9.4) Beside See what's in Pro, two small buttons switch on auto-archive (12 hours) and the
+    //    Today strip through their settings, then say so; a tap answers the card. A feature that's on
+    //    already gets no button, and Settings during the trial offers what's still off, under the trial line.
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, ls: fresh })
+    await control.evaluate(() => chrome.storage.sync.remove(['proArchive', 'todayStrip']))
+    await sleep(400)
+    const switches = (page, sel) =>
+      page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-trial-switch]`)].map((b) => `${b.dataset.trialSwitch}${b.hasAttribute('data-on') ? ' on' : ''}: ${b.textContent.trim()}`), sel)
+    const synced = async (key) => {
+      for (let t = 0; t < 4000; t += 150) {
+        const v = await control.evaluate(async (k) => (await chrome.storage.sync.get(k))[k] ?? null, key)
+        if (v) return v
+        await sleep(150)
+      }
+      return null
+    }
+    const w1 = await openNtp()
+    const offered = (await shown(w1)) ? await switches(w1, '[data-reverse-trial]') : null
+    check(
+      "reverse card: two small buttons beside See what's in Pro, Turn on auto-archive and Show the Today strip",
+      offered?.join('|') === 'archive: Turn on auto-archive|strip: Show the Today strip' && (await w1.evaluate(() => !!document.querySelector('[data-reverse-trial] [data-reverse-trial-look]'))),
+      JSON.stringify(offered),
+    )
+    const tappedAt = Date.now()
+    await w1.evaluate(() => document.querySelector('[data-reverse-trial] [data-trial-switch="archive"]')?.click())
+    const arc = await synced('proArchive')
+    const arcSays = await until(w1, () => document.querySelector('[data-reverse-trial] [data-trial-switch="archive"][data-on]')?.textContent.trim() === 'Auto-archive is on: idle tabs save themselves after 12 hours')
+    // As when it's switched on in Settings, the service worker starts its record of tab switches.
+    let rec = null
+    for (let t = 0; t < 3000 && !rec; t += 150) {
+      rec = await control.evaluate(async () => (await chrome.storage.session.get('tabSeen')).tabSeen ?? null)
+      if (!rec) await sleep(150)
+    }
+    check(
+      'reverse card: Turn on auto-archive sets 12 hours and then says so, and the worker starts its tab record',
+      arc?.afterMs === 12 * H && arcSays && !!rec && rec.since >= tappedAt - 1000,
+      JSON.stringify({ arc, arcSays, rec: rec && { since: rec.since - tappedAt } }),
+    )
+    await w1.evaluate(() => document.querySelector('[data-reverse-trial] [data-trial-switch="strip"]')?.click())
+    const strip = await synced('todayStrip')
+    const stripSays = await until(w1, () => document.querySelector('[data-reverse-trial] [data-trial-switch="strip"][data-on]')?.textContent.trim() === 'Today strip is on' && !!document.querySelector('[data-today-strip]'))
+    check('reverse card: Show the Today strip switches it on, the strip shows above the board, and the button says so', strip?.on === true && stripSays, JSON.stringify({ strip, stripSays }))
+    const kept1 = await w1.evaluate(() => ({
+      card: !!document.querySelector('[data-reverse-trial]'),
+      done: [...document.querySelectorAll('[data-reverse-trial] [data-trial-switch][data-on]')].map((b) => b.disabled),
+      shows: localStorage.getItem('stackable:reverseTrial'),
+    }))
+    check('reverse card: it stays up saying both are on, and a tap answers it', kept1.card && kept1.done.length === 2 && kept1.done.every(Boolean) && kept1.shows === '-1', JSON.stringify(kept1))
+    await w1.screenshot({ path: path.join(SHOTS, '094-reverse-switches.png') })
+    await w1.close()
+
+    // Auto-archive stays on and the strip goes off: a fresh card offers the strip alone, and so does
+    // Settings, where a tap switches it on too; with both on, Settings has no row.
+    await setup({ installedAt: Date.now() - 2 * D, opens: 9, ls: fresh })
+    await control.evaluate(() => chrome.storage.sync.remove('todayStrip'))
+    await sleep(400)
+    const w2 = await openNtp()
+    const one = (await shown(w2)) ? await switches(w2, '[data-reverse-trial]') : null
+    check('reverse card: a feature that is on already gets no button', one?.join('|') === 'strip: Show the Today strip', JSON.stringify(one))
+    await w2.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(w2, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial' && !!document.querySelector('[data-pro-trial-switches]'))
+    const row1 = await w2.evaluate(() => {
+      const r = document.querySelector('[data-pro-trial-switches]')
+      return {
+        label: r?.querySelector('span')?.textContent.trim() ?? null,
+        buttons: [...(r?.querySelectorAll('[data-trial-switch]') ?? [])].map((b) => `${b.dataset.trialSwitch}: ${b.textContent.trim()}`),
+        under: !!r && r.previousElementSibling === document.querySelector('[data-pro-trial-line]'),
+        kind: document.querySelector('[data-pro-trial-line]')?.dataset.proTrialLine ?? null,
+      }
+    })
+    check(
+      'trial switches: Settings during the trial offers only what is still off, under the trial line',
+      row1.label === 'Make the most of your trial:' && row1.buttons.join('|') === 'strip: Show the Today strip' && row1.under && row1.kind === 'auto',
+      JSON.stringify(row1),
+    )
+    await w2.evaluate(() => document.querySelector('[data-pro-trial-switches]')?.scrollIntoView({ block: 'center' }))
+    await sleep(300)
+    await w2.screenshot({ path: path.join(SHOTS, '094-settings-switches.png') })
+    await w2.evaluate(() => document.querySelector('[data-pro-trial-switches] [data-trial-switch="strip"]')?.click())
+    const rowSays = await until(
+      w2,
+      () => document.querySelector('[data-pro-trial-switches] [data-trial-switch="strip"][data-on]')?.textContent.trim() === 'Today strip is on' && document.querySelector('[data-today-strip-setting] [data-option="on"]')?.getAttribute('aria-checked') === 'true',
+    )
+    const strip2 = await synced('todayStrip')
+    check('trial switches: a tap in Settings switches the strip on and says so, and the setting below agrees', rowSays && strip2?.on === true, JSON.stringify({ rowSays, strip2 }))
+    await w2.keyboard.press('Escape')
+    await until(w2, () => !document.querySelector('[role=dialog]'))
+    await w2.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(w2, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial')
+    await sleep(300)
+    const row2 = await w2.evaluate(() => ({ line: !!document.querySelector('[data-pro-trial-line]'), row: !!document.querySelector('[data-pro-trial-switches]') }))
+    check('trial switches: with both on, Settings shows no row', row2.line && !row2.row, JSON.stringify(row2))
+    await w2.close()
+
     await control.evaluate(async (w) => {
       // The license first, so no open page tries to free a computer for a key that never was.
       await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
-      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'proArchive', 'todayStrip'])
       if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
       if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
       for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
@@ -3769,7 +4087,8 @@ try {
     const pick = (page, reason) => page.evaluate((r) => document.querySelector(`[data-why-not] [data-why-reason="${r}"]`)?.click(), reason)
     const thanked = (page) => until(page, () => (document.querySelector('[data-why-not]')?.innerText ?? '').includes('Thanks, that helps.'))
 
-    // 1. A free board 15 minutes after the checkout: the card and its words, then The price in one tap.
+    // 1. A free board 15 minutes after the checkout: the card and its words, then Just looking in one
+    //    tap (0.9.4: The price brings an offer now, step 6).
     const at1 = await setup({ ago: 15 * M, ls: fresh })
     const w1 = await openNtp()
     const c1 = (await shown(w1)) ? await card(w1) : null
@@ -3781,15 +4100,17 @@ try {
     await w1.screenshot({ path: path.join(SHOTS, '093-why-not.png') })
     const marked1 = await control.evaluate(() => ({ at: localStorage.getItem('stackable:whyNotAt'), asked: localStorage.getItem('stackable:whyNotAsked'), sent: localStorage.getItem('stackable:whyLast') }))
     check('why not: asking marks that checkout on this computer and counts it, and sends nothing yet', marked1.at === String(at1) && marked1.asked === '1' && marked1.sent === null, JSON.stringify({ marked1, at1 }))
-    await pick(w1, 'price')
+    await pick(w1, 'looking')
     const thanks1 = await thanked(w1)
     const t1 = Date.now()
     const got1 = await sent()
     check(
-      'why not: The price thanks them and keeps what a store build would send: the reason, no note, the plan, the yearly checkout and the version, nothing else',
-      thanks1 && JSON.stringify(got1) === JSON.stringify({ reason: 'price', note: '', plan: 'free', product: 'yearly', v: version }),
+      'why not: Just looking thanks them and keeps what a store build would send: the reason, no note, the plan, the yearly checkout and the version, nothing else',
+      thanks1 && JSON.stringify(got1) === JSON.stringify({ reason: 'looking', note: '', plan: 'free', product: 'yearly', v: version }),
       JSON.stringify({ thanks1, got1, version }),
     )
+    const offer1 = await w1.evaluate(() => !!document.querySelector('[data-why-offer], [data-why-offer-buy]') || /founding offer|\$9\.99/.test(document.querySelector('[data-why-not]')?.innerText ?? ''))
+    check('why not: Just looking brings no offer', !offer1)
     const gone1 = await until(w1, () => !document.querySelector('[data-why-not]'), null, 8000)
     const after1 = Date.now() - t1
     check('why not: after an answer the thanks closes itself in about 4 seconds', gone1 && after1 > 2500 && after1 < 7000, String(after1))
@@ -3903,6 +4224,195 @@ try {
     const max10 = await none(w10)
     await w10.close()
     check('why not: three checkouts at most on this computer', max10)
+
+    // 6. (0.9.4) The price, while the founding price lasts: after the thanks, the founding offer on Pro
+    //    for life, and the card waits for them. Its button opens the offer's own checkout (caught before
+    //    it opens, as in the Pro card block), labelled why-price-offer, as a Pro for life checkout, so
+    //    Back to checkout in the finishing steps opens the offer again. Settings itself keeps $19.
+    const catching = async () => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`why not offer: ${e.message}`))
+      await p.evaluateOnNewDocument(() => {
+        window.__opened = []
+        try {
+          const create = chrome.tabs.create.bind(chrome.tabs)
+          chrome.tabs.create = (o, ...rest) => (/polar\.sh/.test(o?.url ?? '') ? (window.__opened.push(o.url), Promise.resolve({ id: -1 })) : create(o, ...rest))
+        } catch {
+          // read-only binding: the real checkout tab opens and is closed below
+        }
+      })
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      return p
+    }
+    const lastCheckout = async (p) => {
+      const opened = await p.evaluate(() => window.__opened.splice(0))
+      const tabs = browser.targets().filter((t) => /polar\.sh/.test(t.url())).map((t) => t.url())
+      for (const t of browser.targets()) if (/polar\.sh/.test(t.url())) await (await t.page().catch(() => null))?.close().catch(() => {})
+      await p.bringToFront()
+      return [...opened, ...tabs].map((u) => new URL(u)).filter((u) => /(^|\.)polar\.sh$/.test(u.hostname)).pop() ?? null
+    }
+    await setup({ ago: 15 * M, ls: fresh })
+    const w11 = await catching()
+    await shown(w11)
+    await pick(w11, 'price')
+    const thanks11 = await thanked(w11)
+    const got11 = await sent()
+    const offered11 = await until(w11, () => !!document.querySelector('[data-why-offer-buy]'))
+    await sleep(4500) // longer than a plain answer's thanks stays
+    const s11 = await w11.evaluate(() => ({
+      card: !!document.querySelector('[data-why-not]'),
+      line: document.querySelector('[data-why-offer]')?.textContent.trim() ?? null,
+      button: document.querySelector('[data-why-offer-buy]')?.textContent.trim() ?? null,
+    }))
+    check(
+      'why not: The price thanks them, keeps the answer, offers Pro for life for $9.99 until 31 Dec, and waits for them',
+      thanks11 && JSON.stringify(got11) === JSON.stringify({ reason: 'price', note: '', plan: 'free', product: 'yearly', v: version }) && offered11 && s11.card && s11.line === "Here's a founding offer: Pro for life for $9.99 (usually $19), until 31 Dec." && s11.button === 'Get Pro for life for $9.99',
+      JSON.stringify({ thanks11, got11, s11 }),
+    )
+    await w11.screenshot({ path: path.join(SHOTS, '094-why-price-offer.png') })
+    await w11.evaluate(() => document.querySelector('[data-why-offer-buy]')?.click())
+    await sleep(800)
+    const offer11 = await lastCheckout(w11)
+    const mark11 = await control.evaluate(async () => (await chrome.storage.local.get('proCheckout')).proCheckout ?? null)
+    const closed11 = await w11.evaluate(() => !document.querySelector('[data-why-not]'))
+    check(
+      'why not: Get Pro for life for $9.99 opens the offer checkout labelled why-price-offer, as a Pro for life checkout, and the card closes',
+      !!offer11 && offer11.origin + offer11.pathname === LIFETIME_OFFER_CHECKOUT && offer11.searchParams.get('utm_medium') === 'why-price-offer' && offer11.searchParams.get('utm_source') === 'extension-dev' && offer11.searchParams.get('utm_content') === 'free' && offer11.searchParams.get('utm_campaign') === `v${version}` && mark11?.lifetime === true && mark11?.offer === true && closed11,
+      JSON.stringify({ offer11: offer11?.href, mark11, closed11 }),
+    )
+    await w11.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(w11, () => !!document.querySelector('[data-pro-pending]'))
+    await w11.evaluate(() => [...document.querySelectorAll('[data-pro-pending] button')].find((b) => b.textContent.trim() === 'Back to checkout')?.click())
+    await sleep(800)
+    const back11 = await lastCheckout(w11)
+    check('why not: Back to checkout in the finishing steps opens the offer again', !!back11 && back11.origin + back11.pathname === LIFETIME_OFFER_CHECKOUT && back11.searchParams.get('utm_medium') === 'settings-pending', String(back11?.href))
+    // With no checkout pending, Settings sells Pro for life at $19, through the public link.
+    await control.evaluate(() => chrome.storage.local.remove('proCheckout'))
+    await until(w11, () => !document.querySelector('[data-pro-pending]') && !!document.querySelector('[data-pro-lifetime]'))
+    const life11 = await w11.evaluate(() => document.querySelector('[data-pro-lifetime]')?.innerText.replace(/\s+/g, ' ').trim() ?? null)
+    await w11.evaluate(() => [...document.querySelectorAll('[data-pro-lifetime] button')].find((b) => b.textContent.trim() === 'Get Pro for life')?.click())
+    await sleep(800)
+    const public11 = await lastCheckout(w11)
+    const text11 = await w11.evaluate(() => document.body.innerText)
+    check(
+      'why not: the offer stays in the card: Settings still sells Pro for life for $19, through the public link',
+      life11 === 'Prefer to pay once? Get Pro for life for $19.' && !!public11 && public11.origin + public11.pathname === LIFETIME_CHECKOUT && !/\$9\.99|founding offer/.test(text11),
+      JSON.stringify({ life11, public11: public11?.href }),
+    )
+    await w11.close()
+
+    await control.evaluate(async (w) => {
+      // The license first, as above.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was)
+    await sleep(400)
+  }
+
+  // ---------- 0.9.5: the December founding-price note ----------
+  // $2.99 a year is the founding price for new buyers until 31 Dec, 23:59 Singapore time. From 1 Dec a
+  // free or trial board that isn't an early user's gets one corner card, and one more in the last four
+  // days. Each page here has its own clock (Date.now, moved before the app loads); the dates and the
+  // other rules are unit-tested.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const LS = ['stackable:foundingNote', 'stackable:opens', 'stackable:firstSeen', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:rating', 'stackable:managedOverride']
+    const was = await control.evaluate(async (ls) => ({
+      sync: await chrome.storage.sync.get(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']),
+      local: await chrome.storage.local.get(['proCheckout', 'proLicense', 'whatsNew080', 'whatsNew090']),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS)
+    // A quiet free board that has settled in (ten new tabs over five days), nothing else due in the
+    // corner, and the note never shown; `early` makes it an early user's.
+    const setup = (s) => control.evaluate(async (s) => {
+      // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090'])
+      await chrome.storage.sync.remove(['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo'])
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']) localStorage.setItem(k, '-1')
+      localStorage.setItem('stackable:rating', 'dismissed')
+      localStorage.setItem('stackable:opens', '10')
+      localStorage.setItem('stackable:firstSeen', String(Date.now() - 5 * 86400000))
+      localStorage.removeItem('stackable:managedOverride')
+      localStorage.removeItem('stackable:foundingNote')
+      if (s.early) await chrome.storage.sync.set({ proEarly: { from: 'e2e', at: Date.now() } })
+    }, s)
+    // A new tab whose clock reads `at`.
+    const openAt = async (at) => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`founding note: ${e.message}`))
+      await p.evaluateOnNewDocument((at) => {
+        const real = Date.now.bind(Date)
+        const shift = at - real()
+        Date.now = () => real() + shift
+      }, at)
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      return p
+    }
+    const note = (p) => p.evaluate(() => {
+      const c = document.querySelector('[data-founding-note]')
+      return c ? { window: c.dataset.foundingNote, title: c.querySelector('h3')?.textContent.trim() ?? '', text: c.innerText.replace(/\s+/g, ' ').trim() } : null
+    })
+    const shown = (p) => until(p, () => !!document.querySelector('[data-founding-note]'))
+    // The card decides 2.5 s after the board and Pro are ready.
+    const none = async (p) => {
+      await sleep(4000)
+      return p.evaluate(() => !document.querySelector('[data-founding-note]'))
+    }
+    const sgt = (iso) => Date.parse(`${iso}+08:00`)
+
+    // 1. Before 1 Dec, nothing.
+    await setup({})
+    const n0 = await openAt(sgt('2026-11-30T20:00:00'))
+    check('founding note: nothing before 1 Dec', await none(n0))
+    await n0.close()
+
+    // 2. In December a free board that isn't an early user's gets the card; See Pro opens Settings at Stackboard Pro.
+    const n1 = await openAt(sgt('2026-12-02T12:00:00'))
+    const c1 = (await shown(n1)) ? await note(n1) : null
+    check(
+      'founding note: in December a free board gets "$2.99 a year ends on 31 Dec", its line and See Pro',
+      !!c1 && c1.window === 'december' && c1.title === '$2.99 a year ends on 31 Dec' && c1.text.includes('After that Pro is $4.99 a year. If you join before then, it stays $2.99 while you keep Pro.') && c1.text.includes('See Pro'),
+      JSON.stringify(c1),
+    )
+    await n1.screenshot({ path: path.join(SHOTS, '095-founding-note.png') })
+    await n1.evaluate(() => document.querySelector('[data-founding-see-pro]')?.click())
+    check('founding note: See Pro opens Settings at Stackboard Pro', await until(n1, () => !!document.querySelector('[role=dialog] [data-pro]') && !document.querySelector('[data-founding-note]')))
+    await n1.close()
+
+    // 3. One new tab in that window, one more in the last four days, then no more.
+    const n2 = await openAt(sgt('2026-12-05T12:00:00'))
+    const again = await none(n2)
+    await n2.close()
+    const n3 = await openAt(sgt('2026-12-29T12:00:00'))
+    const c3 = (await shown(n3)) ? await note(n3) : null
+    await n3.close()
+    const n4 = await openAt(sgt('2026-12-30T12:00:00'))
+    const third = await none(n4)
+    await n4.close()
+    check('founding note: one new tab from 1 Dec, one more in the last four days, then no more', again && c3?.window === 'last-days' && third, JSON.stringify({ again, c3, third }))
+
+    // 4. Never for an early user, who keeps $2.99 whenever they buy.
+    await setup({ early: true })
+    const n5 = await openAt(sgt('2026-12-02T12:00:00'))
+    const quiet = await none(n5)
+    const said = await n5.evaluate(() => document.body.innerText)
+    await n5.close()
+    check('founding note: never for an early user', quiet && !said.includes('ends on 31 Dec'), said.replace(/\s+/g, ' ').slice(0, 120))
 
     await control.evaluate(async (w) => {
       // The license first, as above.
@@ -4847,7 +5357,7 @@ try {
   }
 
   // ---------- 0.8.0: to-do lists join Pro for early users ----------
-  // early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // the maintainer, 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
   // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
   // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
   {
@@ -4983,8 +5493,8 @@ try {
       return false
     }
     const KEY = 'SB-E2E-0000-SCHOOL'
-    const SYNC = ['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'aiFile']
-    const LOCAL = ['proLicense', 'proCheckout', 'proStats', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'whatsNew090', 'stackboardOpenSpace']
+    const SYNC = ['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo', 'aiFile', 'freeTidy']
+    const LOCAL = ['proLicense', 'proCheckout', 'proStats', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'whatsNew090', 'stackboardOpenSpace', 'freeTidy']
     const LS = ['stackable:managedOverride', 'stackable:opens', 'stackable:firstSeen', 'stackable:rating', 'stackable:stashes', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:lastSpaceId', 'stackable:snapshotDay']
     const was = await control.evaluate(async (s) => ({
       sync: await chrome.storage.sync.get(s.sync),
@@ -5100,8 +5610,9 @@ try {
     await setPolicy(policy)
     await control.evaluate(async (space) => {
       const now = Date.now()
-      await chrome.storage.sync.remove(['proKey', 'proSub', 'aiFile'])
-      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'stackboardOpenSpace'])
+      // 0.9.5: the free tidy unused, so the locks are what keeps it away.
+      await chrome.storage.sync.remove(['proKey', 'proSub', 'aiFile', 'freeTidy'])
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'tidyReady', 'tidyNotice2', 'aiFileReady', 'whatsNew080', 'stackboardOpenSpace', 'freeTidy'])
       await chrome.storage.sync.set({ proTrial: { startedAt: now - 12.5 * 86400000 }, proEarly: { from: 'e2e', at: now }, proEarlyTodo: { keep: false, at: now } })
       await chrome.storage.local.set({ whatsNew090: { from: '0.8.0', at: now } })
       for (const k of ['stackable:whatsNew070', 'stackable:whatsNew090', 'stackable:trialEnding', 'stackable:trialEnded', 'stackable:proMoments', 'stackable:rating']) localStorage.removeItem(k)
@@ -5125,8 +5636,11 @@ try {
         note090Pro: !!document.querySelector('[data-whats-new-090] [data-whats-new-pro]'),
         offers: [...document.querySelectorAll('button, a')].map((b) => b.textContent.trim()).filter((t) => re.test(t)),
         text: re.test(document.body.innerText),
+        tidy: !!document.querySelector('[data-tidy-button]') || /free once/i.test(document.body.innerText),
       }
     }, OFFERS)
+    // 0.9.4: the trial's one-tap switches stay away too: under the lock the trial counts for nothing.
+    const boardSwitches = await s1.evaluate((words) => !!document.querySelector('[data-trial-switch]') || new RegExp(words).test(document.body.innerText), SWITCH_WORDS)
     check('school: the rating card stays away though its rule is met (30 tabs over 5 days)', board.h1 === 'School test' && !board.rating, JSON.stringify(board))
     check("school: no Pro note and no trial recap; the 0.9.0 note comes without its Pro line", !board.proNote && !board.recap && !!board.note090 && !board.note090Pro && !/\bPro\b|trial/i.test(board.note090), JSON.stringify(board))
     check('school: no Get Pro, trial or price anywhere on the board', !board.offers.length && !board.text, JSON.stringify(board.offers))
@@ -5164,6 +5678,8 @@ try {
     check('school: the free clean-up scan stays, and so does Rate it', st.scan && st.rate, JSON.stringify(st))
     check('school: nothing in Settings mentions Pro, a trial or a price, Keys included', !st.words.length && !st.offers.length && !st.keys.includes('(Pro)') && !st.keys.includes('Command bar'), JSON.stringify({ words: st.words, offers: st.offers, keys: st.keys }))
     check('school: Settings has no priced Get Pro and no checkout or refund line', !st.checkout)
+    const settingsSwitches = await s1.evaluate((words) => !!document.querySelector('[data-pro-trial-switches], [data-trial-switch]') || new RegExp(words).test(document.querySelector('[role=dialog]')?.innerText ?? ''), SWITCH_WORDS)
+    check('school: no trial switches on the board or in Settings with the trial running', !boardSwitches && !settingsSwitches, JSON.stringify({ boardSwitches, settingsSwitches }))
 
     await s1.evaluate(() => document.querySelector('[data-cleanup-scan]')?.click())
     await until(s1, () => !!document.querySelector('[data-cleanup]'))
@@ -5203,6 +5719,12 @@ try {
     }))
     check("school: a stack's menu offers its icon alone, with no colour try-on", styleLabel === 'Icon' && sd.title === 'Icon' && sd.colours === 0 && !sd.keep, JSON.stringify({ styleLabel, ...sd }))
     await s1.keyboard.press('Escape')
+    // 0.9.5: the free tidy, unused here, never shows under the locks, and nothing asks the server about
+    // it, from the board, Settings (opened above) or a space menu.
+    await s1.evaluate(() => [...document.querySelectorAll('aside button[aria-label="Space options"]')].find((b) => b.parentElement?.parentElement?.textContent.includes('School test'))?.click())
+    await sleep(1000)
+    const s1Calls = await s1.evaluate(() => window.__calls.filter((c) => c.includes('getstackboard.com/api/')))
+    check('school: a free board gets no free Tidy under the locks, and nothing asks the server, from the board, Settings or a space menu', !board.tidy && !s1Calls.length, JSON.stringify({ tidy: board.tidy, s1Calls }))
     await s1.close()
 
     // Stash and close lands on a new tab, the third stash: no auto-archive line, and no rating ask
@@ -5246,9 +5768,12 @@ try {
         aiPick: !!document.querySelector('[data-ai-file-setting], [data-ai-file-toggle]'),
         keys: document.querySelector('[data-keys]')?.innerText ?? '',
         refund: !!document.querySelector('[data-pro-refund]') || /refund|Apple Pay/i.test(pro?.innerText ?? ''),
+        // 0.9.4: the trial's one-tap switches.
+        switches: !!document.querySelector('[data-pro-trial-switches], [data-trial-switch]'),
       }
     })
     check('school: a paid key already on this computer keeps its Pro card and Pro features', paid.card && !paid.managed && paid.archive, JSON.stringify(paid))
+    check('school: and no trial switches with a paid key', !paid.switches)
     check('school: the Pro card has no buy, trial or renew button', paid.buttons.length > 0 && !paid.buttons.some((t) => /Get Pro|trial|Renew|Keep Pro/i.test(t)), JSON.stringify(paid.buttons))
     check('school: and no checkout or refund line', !paid.refund)
     check('school: with Pro on, Keys lists the command bar without "(Pro)"', paid.keys.includes('Command bar') && !paid.keys.includes('(Pro)'), paid.keys)
@@ -5297,6 +5822,8 @@ try {
     const ratingBack = await until(s5, () => !!document.querySelector('[data-rating-prompt]'), null, 5000)
     const proNoteBack = await until(s5, () => !!document.querySelector('[data-whats-new]'), null, 5000)
     check('school: with no policy the rating card and the Pro note come back on the same board', ratingBack && proNoteBack, JSON.stringify({ ratingBack, proNoteBack }))
+    const freeBack = await until(s5, () => document.querySelector('[data-tidy-button]')?.textContent.trim() === 'Tidy (free once)', null, 5000)
+    check('school: with no policy the free board has Tidy (free once) again', freeBack)
     await s5.evaluate(() => [...document.querySelectorAll('[data-rating-prompt] button')].find((b) => b.textContent.trim() === 'No thanks')?.click())
     await settings(s5)
     const offerBack = await until(s5, () => {

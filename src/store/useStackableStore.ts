@@ -46,6 +46,8 @@ export interface ToastState {
   /** ms before it dismisses itself; the undo countdown pauses while hovered */
   duration: number
   undo?: () => Promise<void>
+  /** 0.9.5: a second line ending on a link, as after the free tidy */
+  note?: { text: string; link: string; onLink: () => void }
 }
 
 /** A one-shot cue for a single item: `seq` changes each time so effects replay. */

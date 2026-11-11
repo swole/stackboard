@@ -4,9 +4,11 @@ import type { Space } from '../lib/types'
 import { IS_EXTENSION } from '../lib/bookmarks'
 import { plural } from '../lib/importPlan'
 import { usePro } from '../lib/pro'
-import { acceptNotice, loadReady, noticeAccepted, requestTidy, useTidy } from '../lib/tidy'
+import { acceptNotice, loadFreeTidy, loadReady, markFreeTidyUsed, noticeAccepted, requestTidy, useTidy } from '../lib/tidy'
 import {
+  FREE_TIDY_NOTE,
   TIDY_ERRORS,
+  TIDY_LABEL,
   cleanName,
   flattenNote,
   flattenedFolders,
@@ -14,17 +16,21 @@ import {
   markSame,
   runApply,
   runUndo,
+  tidyAccess,
   tidyBlock,
   tidyBody,
   tidyInput,
   type BookmarksApi,
   type PlannedStack,
+  type TidyAccess,
   type TidyError,
   type TidyInput,
+  type TidyLicense,
   type TidyRecord,
 } from '../lib/tidyPlan'
 import { useStackableStore } from '../store/useStackableStore'
 import { bumpStat } from '../lib/proStats'
+import { openProSettings } from './CornerCard'
 import { Modal, PrimaryButton, SecondaryButton, TextInput } from './modals/Modal'
 
 /** Links listed under each planned stack before "and N more". */
@@ -36,32 +42,56 @@ interface Run {
 }
 
 /**
- * "Tidy" in the space header (Pro, 0.7.1). Shown only with an active Pro key (the server checks it;
+ * 0.9.5: who can press Tidy on this board (tidyAccess in tidyPlan.ts): a paid key, the one free
+ * tidy, or nobody. Whether the free tidy is used is read from storage once per page, never asked of
+ * the server. Settings and the space menus use it to decide whether to ask if Tidy is on.
+ */
+export function useTidyAccess(): TidyAccess {
+  const proReady = usePro((s) => s.ready)
+  const state = usePro((s) => s.state)
+  const activated = usePro((s) => !!s.license?.activationId)
+  const lockAi = useStackableStore((s) => !!s.tree?.company?.lock.ai)
+  const lockPro = useStackableStore((s) => !!s.tree?.company?.lock.pro)
+  const freeUsed = useTidy((s) => s.freeUsed)
+  const paid = state.kind === 'pro'
+  useEffect(() => {
+    if (proReady && !paid && !lockAi && !lockPro) loadFreeTidy()
+  }, [proReady, paid, lockAi, lockPro])
+  return proReady ? tidyAccess({ state, activated, freeUsed, lockAi, lockPro }) : null
+}
+
+/**
+ * "Tidy" in the space header (Pro, 0.7.1). Shown with an active Pro key (the server checks it;
  * the trial has none), unless the server last said it's switched off. The first run explains what is sent;
  * every run shows the new stacks before anything moves, and the toast's Undo puts it all back.
  * To-do stacks, other spaces and company spaces are never touched. School mode: never under the
- * company's ai lock.
+ * company's ai lock. 0.9.5: without a paid key, "Tidy (free once)" until the one free tidy is used
+ * (it counts once the server has sorted the space), and then its toast says so, with See Pro.
  */
 export function TidyButton({ space }: { space: Space }) {
-  const hasKey = usePro((s) => s.state.kind === 'pro' && !!s.license?.activationId)
-  const aiLocked = useStackableStore((s) => !!s.tree?.company?.lock.ai)
+  const access = useTidyAccess()
   const ready = useTidy((s) => s.ready)
   const loaded = useTidy((s) => s.loaded)
   const [step, setStep] = useState<'idle' | 'notice' | 'asking' | 'preview'>('idle')
   const [run, setRun] = useState<Run | null>(null)
+  /** How the run under way started: on the paid key, or as the free tidy. */
+  const [mode, setMode] = useState<'paid' | 'free'>('paid')
 
   // The last answer only: the server is asked when Settings or a space menu opens, never per new tab.
   // No answer yet, or one over a day old, still shows the button (0.9.0): until then a new key had no
   // Tidy until Settings opened, and it went again a day later. A run that finds it off hides it.
   useEffect(() => {
-    if (hasKey && IS_EXTENSION && !aiLocked) void loadReady()
-  }, [hasKey, aiLocked])
+    if (access && IS_EXTENSION) void loadReady()
+  }, [access])
 
-  if (!IS_EXTENSION || !hasKey || aiLocked || !loaded || ready === false || space.company) return null
-  if (tidyBlock(tidyInput(space)) === 'few') return null
+  if (!IS_EXTENSION || space.company) return null
+  const offered = !!access && loaded && ready !== false && tidyBlock(tidyInput(space)) !== 'few'
+  // A run under way keeps its dialogs when the free tidy gets used up meanwhile: only the button goes.
+  if (!offered && step === 'idle') return null
 
   const store = () => useStackableStore.getState()
   const label = `${space.emoji} ${space.name}`.trim()
+  const freeNote = { ...FREE_TIDY_NOTE, onLink: openProSettings }
 
   const fail = (error: TidyError) => {
     store().showToast({ verb: TIDY_ERRORS[error], title: '', duration: 6000 })
@@ -71,31 +101,39 @@ export function TidyButton({ space }: { space: Space }) {
     }
   }
 
-  const ask = async () => {
-    const license = usePro.getState().license
+  const ask = async (how: 'paid' | 'free') => {
     const input = tidyInput(space)
-    if (!license?.activationId) return setStep('idle')
+    let license: TidyLicense | null = null
+    if (how === 'paid') {
+      const held = usePro.getState().license
+      if (!held?.activationId) return setStep('idle')
+      license = { key: held.key, activationId: held.activationId }
+    }
     if (tidyBlock(input) === 'many') {
       setStep('idle')
       return fail('too-many')
     }
     setStep('asking')
-    const out = await requestTidy(tidyBody(space.name, input, { key: license.key, activationId: license.activationId }))
+    const out = await requestTidy(tidyBody(space.name, input, license))
     if ('error' in out) {
       setStep('idle')
       return fail(out.error)
     }
     setRun({ input, plan: markSame(out.plan, input) })
     setStep('preview')
+    // The server ran it, so the free tidy is used, whether or not the preview gets applied.
+    if (how === 'free') void markFreeTidyUsed()
   }
 
   const start = async () => {
-    if (step !== 'idle') return
-    if (await noticeAccepted()) await ask()
+    if (step !== 'idle' || !access) return
+    setMode(access)
+    if (await noticeAccepted()) await ask(access)
     else setStep('notice')
   }
 
   const apply = async (plan: PlannedStack[], input: TidyInput) => {
+    const free = mode === 'free'
     setStep('idle')
     setRun(null)
     const api = chrome.bookmarks as unknown as BookmarksApi
@@ -127,21 +165,33 @@ export function TidyButton({ space }: { space: Space }) {
         store().unfoldFolders([...remade].filter(([was]) => open.has(was)).map(([, id]) => id))
         store().showToast({ verb: 'Restored', title: label, duration: 2200 })
       },
+      // 0.9.5: after the free tidy, one more line: that was it, and what Pro does.
+      ...(free ? { note: freeNote } : {}),
     })
+  }
+
+  // A free tidy's preview closed without Apply still used it (the server ran it), so it says so.
+  const closePreview = () => {
+    setStep('idle')
+    setRun(null)
+    if (mode === 'free') store().showToast({ verb: '', title: '', duration: 8000, note: freeNote })
   }
 
   return (
     <>
-      <button
-        onClick={() => void start()}
-        disabled={step === 'asking'}
-        data-tidy-button
-        title="Sort this space's links into stacks with AI"
-        className="flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-fg hover:border-line-strong hover:bg-hover disabled:opacity-60"
-      >
-        <WandSparkles className={`h-3.5 w-3.5 ${step === 'asking' ? 'animate-pulse' : ''}`} />
-        {step === 'asking' ? 'Tidying…' : 'Tidy'}
-      </button>
+      {offered && (
+        <button
+          onClick={() => void start()}
+          disabled={step === 'asking'}
+          data-tidy-button
+          data-tidy-free={access === 'free' ? '' : undefined}
+          title="Sort this space's links into stacks with AI"
+          className="flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-fg hover:border-line-strong hover:bg-hover disabled:opacity-60"
+        >
+          <WandSparkles className={`h-3.5 w-3.5 ${step === 'asking' ? 'animate-pulse' : ''}`} />
+          {step === 'asking' ? 'Tidying…' : TIDY_LABEL[access === 'free' ? 'free' : 'paid']}
+        </button>
+      )}
 
       {step === 'notice' && (
         <Modal
@@ -155,7 +205,7 @@ export function TidyButton({ space }: { space: Space }) {
                 onClick={() =>
                   void (async () => {
                     await acceptNotice()
-                    await ask()
+                    await ask(mode)
                   })()
                 }
               >
@@ -175,15 +225,7 @@ export function TidyButton({ space }: { space: Space }) {
       )}
 
       {step === 'preview' && run && (
-        <TidyPreview
-          name={space.name}
-          run={run}
-          onClose={() => {
-            setStep('idle')
-            setRun(null)
-          }}
-          onApply={(plan) => void apply(plan, run.input)}
-        />
+        <TidyPreview name={space.name} run={run} onClose={closePreview} onApply={(plan) => void apply(plan, run.input)} />
       )}
     </>
   )

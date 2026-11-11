@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Crown } from 'lucide-react'
 import { useStackableStore } from '../store/useStackableStore'
+import { useArchive } from '../lib/autoArchive'
 import { IS_EXTENSION } from '../lib/bookmarks'
 import { useCorner } from '../lib/corner'
-import { pickTrialCard, trialCardTitle, type TrialCard } from '../lib/nudgePlan'
+import { pickTrialCard, trialCardTitle, trialStopsLine, type TrialCard } from '../lib/nudgePlan'
 import { prefs } from '../lib/prefs'
 import { openCheckout, usePro } from '../lib/pro'
 import { LIFETIME_PRICE, checkoutPending, priceLabel } from '../lib/proPlan'
 import { loadStats } from '../lib/proStats'
 import { statsLine } from '../lib/statsPlan'
+import { useTodayStrip } from '../lib/todayStrip'
 import { CornerCard, PRIMARY, QUIET } from './CornerCard'
 
 /**
@@ -16,13 +18,20 @@ import { CornerCard, PRIMARY, QUIET } from './CornerCard'
  * one corner card with what Pro did on this computer and Keep Pro. Decided once, when this tab
  * loads, so a trial starting or ending in another tab never wakes a tab that's already open. On at
  * most two new tabs each, retired when answered. The same for a trial that started by itself on
- * install (0.9.2), and Pro for life sits beside Keep Pro.
+ * install (0.9.2), and Pro for life sits beside Keep Pro. 0.9.4: a line after the numbers says what
+ * stops when the trial ends, naming auto-archive and the Today strip only while they're switched on
+ * (trialStopsLine in nudgePlan.ts), and that everything they made stays.
  */
 export function TrialEndCard() {
   const loaded = useStackableStore((s) => !!s.tree)
   const ready = usePro((s) => s.ready)
   const early = usePro((s) => s.early)
-  const [card, setCard] = useState<{ kind: TrialCard; title: string; line: string | null } | null>(null)
+  // What stops follows the two settings, once both have been read.
+  const archiveReady = useArchive((s) => s.ready)
+  const archiveOn = useArchive((s) => !!s.afterMs)
+  const stripReady = useTodayStrip((s) => s.ready)
+  const stripOn = useTodayStrip((s) => s.on)
+  const [card, setCard] = useState<{ kind: TrialCard; title: string; line: string | null; startedAt: number } | null>(null)
   const decided = useRef(false)
 
   useEffect(() => {
@@ -41,7 +50,7 @@ export function TrialEndCard() {
     })
     if (!kind || !trialStartedAt || !useCorner.getState().claim('trialEnd')) return
     prefs.setTrialCardShows(kind, prefs.trialCardShows(kind) + 1)
-    void loadStats().then((stats) => setCard({ kind, title: trialCardTitle(kind, trialStartedAt, now), line: statsLine(stats) }))
+    void loadStats().then((stats) => setCard({ kind, title: trialCardTitle(kind, trialStartedAt, now), line: statsLine(stats), startedAt: trialStartedAt }))
   }, [loaded, ready])
 
   if (!card) return null
@@ -71,7 +80,12 @@ export function TrialEndCard() {
           {card.line}
         </p>
       )}
-      {card.kind === 'ended' && <p className="mt-1.5 leading-relaxed text-muted">Pro features are paused. Everything you made is still here.</p>}
+      {/* It also takes the place of the ended card's "Pro features are paused" line (0.9.0). */}
+      {archiveReady && stripReady && (
+        <p className="mt-1.5 leading-relaxed text-muted" data-trial-end-stops>
+          {trialStopsLine({ card: card.kind, trialStartedAt: card.startedAt, archiveOn, stripOn })}
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
         <button onClick={keep} className={PRIMARY} data-trial-keep>
           Keep Pro for {priceLabel(early, Date.now())}

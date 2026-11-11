@@ -682,7 +682,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   )
   eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
   eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
-  // 0.8.0: to-do lists join Pro for early users too, unless they already had a list.
+  // 0.8.0 (the maintainer, 3 Nov): to-do lists join Pro for early users too, unless they already had a list.
   eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
   eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
   eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
@@ -2319,7 +2319,7 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
   eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
   eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
-  // 0.8.0: the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  // 0.8.0 (the maintainer, 3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
   eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
   eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
   eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
@@ -2629,6 +2629,268 @@ import { REVERSE_CARD_DELAY_MS, WHY_NOTE_MAX, WHY_NOT_AFTER_MS, WHY_NOT_DELAY_MS
     whyNotOffersTrial({ reason: 'try-first', trialStartedAt: null, lockPro: true }),
     whyNotOffersTrial({ reason: 'price', trialStartedAt: null }),
   ], [true, false, false, false])
+}
+
+// ---------- 0.9.4: one-tap switches during a trial, and what stops when it ends ----------
+import { DEFAULT_ARCHIVE_AFTER } from '../src/lib/archivePlan'
+import { joinList } from '../src/lib/statsPlan'
+import { trialStopsLine, trialSwitches } from '../src/lib/nudgePlan'
+{
+  const HOUR = 3_600_000
+  const views = (v: ReturnType<typeof trialSwitches>) => v.map((s) => `${s.key} ${s.on ? 'on' : 'off'}: ${s.label}`)
+
+  // The switches on the reverse-trial card and in Settings > Stackboard Pro during a trial.
+  eq('trial switches: auto-archive goes to 12 hours, one of the choices in Settings', [DEFAULT_ARCHIVE_AFTER, ARCHIVE_AFTER.some((c) => c.ms === DEFAULT_ARCHIVE_AFTER && c.label === '12 hours')], [12 * HOUR, true])
+  eq('trial switches: both off, two buttons, auto-archive first', views(trialSwitches({ archiveAfter: null, stripOn: false, switched: [] })), [
+    'archive off: Turn on auto-archive',
+    'strip off: Show the Today strip',
+  ])
+  eq('trial switches: once switched on from here, the button says so', views(trialSwitches({ archiveAfter: DEFAULT_ARCHIVE_AFTER, stripOn: false, switched: ['archive'] })), [
+    'archive on: Auto-archive is on: idle tabs save themselves after 12 hours',
+    'strip off: Show the Today strip',
+  ])
+  eq('trial switches: both switched on from here', views(trialSwitches({ archiveAfter: DEFAULT_ARCHIVE_AFTER, stripOn: true, switched: ['archive', 'strip'] })), [
+    'archive on: Auto-archive is on: idle tabs save themselves after 12 hours',
+    'strip on: Today strip is on',
+  ])
+  eq('trial switches: no button for a feature that was on already', [
+    views(trialSwitches({ archiveAfter: 6 * HOUR, stripOn: false, switched: [] })),
+    views(trialSwitches({ archiveAfter: null, stripOn: true, switched: [] })),
+  ], [['strip off: Show the Today strip'], ['archive off: Turn on auto-archive']])
+  eq('trial switches: nothing when both were on already, so the Settings row goes', trialSwitches({ archiveAfter: DEFAULT_ARCHIVE_AFTER, stripOn: true, switched: [] }), [])
+  eq('trial switches: switched off again (in Settings or on another computer), the button comes back', views(trialSwitches({ archiveAfter: null, stripOn: false, switched: ['archive', 'strip'] })), [
+    'archive off: Turn on auto-archive',
+    'strip off: Show the Today strip',
+  ])
+  eq('trial switches: the line names the time picked later in Settings', [6 * HOUR, 24 * HOUR, 7 * 24 * HOUR].map((ms) => trialSwitches({ archiveAfter: ms, stripOn: true, switched: ['archive'] })[0]?.label), [
+    'Auto-archive is on: idle tabs save themselves after 6 hours',
+    'Auto-archive is on: idle tabs save themselves after 1 day',
+    'Auto-archive is on: idle tabs save themselves after 1 week',
+  ])
+
+  // The trial-end recap's line after the numbers: what stops, from what's switched on.
+  const start = new Date(2026, 10, 6, 10, 0).getTime() // the trial ends on 20 Nov
+  const line = (card: 'ending' | 'ended', archiveOn: boolean, stripOn: boolean) => trialStopsLine({ card, trialStartedAt: start, archiveOn, stripOn })
+  eq('trial stops: before the end, auto-archive is named only while it is on', [line('ending', true, false), line('ending', false, false)], [
+    'When it ends on 20 Nov, auto-archive and daily snapshots stop. Everything you made stays.',
+    'When it ends on 20 Nov, daily snapshots stop. Everything you made stays.',
+  ])
+  eq('trial stops: before the end, the Today strip too while it is on', [line('ending', true, true), line('ending', false, true)], [
+    'When it ends on 20 Nov, auto-archive, daily snapshots and the Today strip stop. Everything you made stays.',
+    'When it ends on 20 Nov, daily snapshots and the Today strip stop. Everything you made stays.',
+  ])
+  eq('trial stops: after the end, the same names in the past', [line('ended', true, false), line('ended', false, false), line('ended', true, true), line('ended', false, true)], [
+    'Auto-archive and daily snapshots have stopped. Everything you made stays.',
+    'Daily snapshots have stopped. Everything you made stays.',
+    'Auto-archive, daily snapshots and the Today strip have stopped. Everything you made stays.',
+    'Daily snapshots and the Today strip have stopped. Everything you made stays.',
+  ])
+  eq(
+    'trial stops: the date is the day and the short month, no leading zero, across a month end',
+    trialStopsLine({ card: 'ending', trialStartedAt: new Date(2026, 10, 17, 23, 30).getTime(), archiveOn: false, stripOn: false }),
+    'When it ends on 1 Dec, daily snapshots stop. Everything you made stays.',
+  )
+  eq('trial stops: the same last day the reverse-trial card names', line('ending', false, false).startsWith(`When it ends on ${reverseCardTitle(start).replace('Pro is on, free until ', '')}, `), true)
+  eq('trial stops: the list reads like the stats line', [joinList(['a']), joinList(['a', 'b']), joinList(['a', 'b', 'c'])], ['a', 'a and b', 'a, b and c'])
+
+  // The copy rules: plain words, no dashes or dots between them.
+  const words = [
+    ...views(trialSwitches({ archiveAfter: null, stripOn: false, switched: [] })),
+    ...views(trialSwitches({ archiveAfter: DEFAULT_ARCHIVE_AFTER, stripOn: true, switched: ['archive', 'strip'] })),
+    ...(['ending', 'ended'] as const).flatMap((c) => [line(c, true, true), line(c, false, false)]),
+  ]
+  // Em dash, en dash and middle dot, by code point.
+  eq('trial copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+}
+
+// ---------- 0.9.4: the founding offer on Pro for life, after The price ----------
+import { LIFETIME_OFFER_PRICE, lifetimeOfferUrl } from '../src/lib/proPlan'
+import { WHY_PRICE_OFFER, whyNotOffersPrice } from '../src/lib/nudgePlan'
+{
+  const before = Date.UTC(2026, 10, 10, 9, 0)
+  eq('price offer: The price brings it until the founding price ends, and not a second later', [
+    whyNotOffersPrice({ reason: 'price', now: before }),
+    whyNotOffersPrice({ reason: 'price', now: FOUNDING_ENDS }),
+    whyNotOffersPrice({ reason: 'price', now: FOUNDING_ENDS + 1 }),
+  ], [true, true, false])
+  eq('price offer: never under the company pro lock', [whyNotOffersPrice({ reason: 'price', now: before, lockPro: true }), whyNotOffersPrice({ reason: 'price', now: before, lockPro: false })], [false, true])
+  eq('price offer: no other answer brings it', (['looking', 'try-first', 'payment', 'other'] as const).map((reason) => whyNotOffersPrice({ reason, now: before })), [false, false, false, false])
+  eq('price offer: the line and the button', [WHY_PRICE_OFFER.line, WHY_PRICE_OFFER.button, LIFETIME_OFFER_PRICE, LIFETIME_PRICE], [
+    "Here's a founding offer: Pro for life for $9.99 (usually $19), until 31 Dec.",
+    'Get Pro for life for $9.99',
+    '$9.99',
+    '$19',
+  ])
+  eq(
+    'price offer: 31 Dec in the line is the last day of the founding price, Singapore time',
+    [FOUNDING_ENDS, new Date(FOUNDING_ENDS).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Singapore' })],
+    [Date.parse('2026-12-31T15:59:59Z'), '31 Dec'],
+  )
+  eq('price offer: its own checkout link, and the public Pro for life link stays the $19 one', [CHECKOUT.lifetimeOffer, lifetimeOfferUrl(), lifetimeCheckoutUrl()], [
+    'https://buy.polar.sh/polar_cl_fdIwiaHAZZJmWaP3q3P2nywkOuzRrtaC5wyPh1cbRTo',
+    'https://buy.polar.sh/polar_cl_fdIwiaHAZZJmWaP3q3P2nywkOuzRrtaC5wyPh1cbRTo',
+    'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W',
+  ])
+  const offer = new URL(lifetimeOfferUrl({ surface: 'why-price-offer', plan: 'trial-ended', version: '0.9.4' }))
+  eq(
+    'price offer: the link carries the usual labels, why-price-offer as the button',
+    [offer.origin + offer.pathname, offer.searchParams.get('utm_source'), offer.searchParams.get('utm_medium'), offer.searchParams.get('utm_content'), offer.searchParams.get('utm_campaign')],
+    [CHECKOUT.lifetimeOffer, 'extension', 'why-price-offer', 'trial-ended', 'v0.9.4'],
+  )
+}
+
+// ---------- 0.9.5: one free AI tidy per person ----------
+// The server's budget is plain JavaScript in site/api/_lib/freeTidy.js, with no imports, so it's tested here.
+import { FREE_LINKS, FREE_RUNS, dayPrefix, fits, freeDay, markerLinks, markerPath, readBudget, tally } from '../site/api/_lib/freeTidy.js'
+import { FREE_TIDY_NOTE, TIDY_LABEL, tidyAccess } from '../src/lib/tidyPlan'
+{
+  // The daily budget all free runs share.
+  eq('free tidy budget: 300 runs and 30,000 links a day', [FREE_RUNS, FREE_LINKS], [300, 30000])
+  eq('free tidy budget: runs count towards the UTC day', [freeDay(Date.UTC(2026, 10, 12, 23, 59, 59)), freeDay(Date.UTC(2026, 10, 13, 0, 0, 0))], ['2026-11-12', '2026-11-13'])
+  eq("free tidy budget: a marker sits in its day's folder, named by its link count", [dayPrefix('2026-11-12'), markerPath('2026-11-12', 137)], ['free-tidy/2026-11-12/', 'free-tidy/2026-11-12/137.json'])
+  eq("free tidy budget: the count reads back with the store's random suffix or without; a name without one counts no links", [
+    markerLinks('free-tidy/2026-11-12/137-Ab3xYz9QpL.json'),
+    markerLinks('free-tidy/2026-11-12/12.json'),
+    markerLinks('free-tidy/2026-11-12/odd-name.json'),
+    markerLinks(''),
+  ], [137, 12, 0, 0])
+  eq("free tidy budget: a day's tally counts every marker as a run", [
+    tally(['free-tidy/2026-11-12/137-a1.json', 'free-tidy/2026-11-12/5-b2.json', 'free-tidy/2026-11-12/odd-name.json']),
+    tally([]),
+  ], [{ runs: 3, links: 142 }, { runs: 0, links: 0 }])
+  const budget = readBudget({})
+  eq('free tidy budget: a run fits while the day stays within 300 runs and 30,000 links, both included', [
+    fits({ runs: 0, links: 0 }, 600, budget),
+    fits({ runs: 299, links: 29400 }, 600, budget),
+    fits({ runs: 300, links: 0 }, 1, budget),
+    fits({ runs: 10, links: 29401 }, 600, budget),
+    fits({ runs: 10, links: 30000 }, 1, budget),
+  ], [true, true, false, false, false])
+  eq('free tidy budget: FREE_TIDY_RUNS and FREE_TIDY_LINKS can change it, and 0 stops free runs', [
+    readBudget({ FREE_TIDY_RUNS: '50', FREE_TIDY_LINKS: '5000' }),
+    readBudget({ FREE_TIDY_RUNS: '0' }),
+    readBudget({ FREE_TIDY_RUNS: ' 12 ', FREE_TIDY_LINKS: '' }),
+    readBudget({ FREE_TIDY_RUNS: '-1', FREE_TIDY_LINKS: '1e3' }),
+    fits({ runs: 0, links: 0 }, 1, readBudget({ FREE_TIDY_RUNS: '0' })),
+  ], [{ runs: 50, links: 5000 }, { runs: 0, links: 30000 }, { runs: 12, links: 30000 }, { runs: 300, links: 30000 }, false])
+
+  // Who gets it.
+  const access = (p: Partial<Parameters<typeof tidyAccess>[0]>) => tidyAccess({ state: { kind: 'free', trialUsed: false }, activated: false, freeUsed: false, lockAi: false, lockPro: false, ...p })
+  eq('free tidy: free and trial boards, and a key that is paused, get it while it is unused', [
+    access({}),
+    access({ state: { kind: 'free', trialUsed: true } }),
+    access({ state: { kind: 'trial', daysLeft: 9 } }),
+    ...(['ended', 'offline', 'disabled', 'unknown-key', 'device-limit', 'removed'] as const).map((reason) => access({ state: { kind: 'paused', reason }, activated: true })),
+  ], ['free', 'free', 'free', 'free', 'free', 'free', 'free', 'free', 'free'])
+  eq('free tidy: once used, or until that is known, there is none', [access({ freeUsed: true }), access({ freeUsed: null }), access({ state: { kind: 'trial', daysLeft: 3 }, freeUsed: true })], [null, null, null])
+  eq('free tidy: a paid key gets Tidy as before, whatever the free tidy says', [
+    access({ state: { kind: 'pro' }, activated: true }),
+    access({ state: { kind: 'pro' }, activated: true, freeUsed: true }),
+    access({ state: { kind: 'pro' }, activated: true, freeUsed: null }),
+  ], ['paid', 'paid', 'paid'])
+  eq('free tidy: a key with no activation here, or on its first check, gets neither', [access({ state: { kind: 'pro' }, activated: false }), access({ state: { kind: 'paused', reason: 'checking' } })], [null, null])
+  eq('free tidy: the ai lock hides Tidy from everyone, the pro lock hides the free one', [
+    access({ lockAi: true }),
+    access({ state: { kind: 'pro' }, activated: true, lockAi: true }),
+    access({ lockPro: true }),
+    access({ state: { kind: 'free', trialUsed: true }, lockPro: true }),
+    access({ state: { kind: 'pro' }, activated: true, lockPro: true }),
+  ], [null, null, null, null, 'paid'])
+
+  // What it sends, and how the answers read.
+  const one = { links: [{ title: 'A', url: 'https://a.example/' }], ids: ['1'], stacks: [] }
+  eq('free tidy: the same space goes with free: true and no key', JSON.stringify(tidyBody('Home', one, null)), '{"scope":"space","space":"Home","links":[{"title":"A","url":"https://a.example/"}],"free":true}')
+  eq('free tidy: a paid run sends its key and no free flag, as before', JSON.stringify(tidyBody('Home', one, { key: 'SB-1', activationId: 'act' })), '{"scope":"space","space":"Home","links":[{"title":"A","url":"https://a.example/"}],"license":{"key":"SB-1","activationId":"act"}}')
+  eq('free tidy: the answers to a free run', [
+    readAnswer(429, { ok: false, reason: 'free-cap' }, 6, true),
+    readAnswer(429, { ok: false, reason: 'busy' }, 6, true),
+    readAnswer(402, { ok: false, reason: 'pro' }, 6, true),
+    readAnswer(503, { ok: false, reason: 'free-check' }, 6, true),
+    readAnswer(503, { ok: false, reason: 'not-ready' }, 6, true),
+    readAnswer(403, { ok: false }, 6, true),
+    'plan' in readAnswer(200, { ok: true, board: { spaces: [{ stacks: [{ name: 'A', links: [0] }] }] } }, 1, true),
+  ], [{ error: 'free-cap' }, { error: 'busy' }, { error: 'not-ready' }, { error: 'busy' }, { error: 'not-ready' }, { error: 'busy' }, true])
+  eq('free tidy: a paid run reads its answers as before', [readAnswer(402, { reason: 'pro' }, 6), readAnswer(429, { reason: 'daily-cap' }, 6)], [{ error: 'pro' }, { error: 'cap' }])
+  eq('free tidy: the words', [TIDY_LABEL.free, TIDY_LABEL.paid, FREE_TIDY_NOTE.text, FREE_TIDY_NOTE.link, TIDY_ERRORS['free-cap']], [
+    'Tidy (free once)',
+    'Tidy',
+    'That was your free tidy. Pro tidies any space, any time.',
+    'See Pro',
+    'Free tidies are used up for today. Try again tomorrow.',
+  ])
+}
+
+// ---------- 0.9.5: the December founding-price note ----------
+import { FOUNDING_LAST_DAYS_FROM, FOUNDING_NOTE, FOUNDING_NOTE_DELAY_MS, FOUNDING_NOTE_FROM, foundingNote, foundingWindow } from '../src/lib/nudgePlan'
+{
+  const DAY = 86_400_000
+  const HOUR = 3_600_000
+  const sgt = (iso: string) => Date.parse(`${iso}+08:00`)
+  eq('founding note: the windows open on 1 Dec and on 28 Dec, 00:00 Singapore time', [FOUNDING_NOTE_FROM, FOUNDING_LAST_DAYS_FROM], [sgt('2026-12-01T00:00:00'), sgt('2026-12-28T00:00:00')])
+  eq('founding note: the second window is the last four days before the founding price ends', FOUNDING_LAST_DAYS_FROM, FOUNDING_ENDS + 1000 - 4 * DAY)
+  eq('founding note: the windows by the clock', [
+    foundingWindow(sgt('2026-11-30T23:59:59')),
+    foundingWindow(sgt('2026-12-01T00:00:00')),
+    foundingWindow(sgt('2026-12-15T12:00:00')),
+    foundingWindow(sgt('2026-12-27T23:59:59')),
+    foundingWindow(sgt('2026-12-28T00:00:00')),
+    foundingWindow(FOUNDING_ENDS),
+    foundingWindow(FOUNDING_ENDS + 1),
+    foundingWindow(sgt('2027-03-01T00:00:00')),
+  ], [null, 'december', 'december', 'december', 'last-days', 'last-days', null, null])
+
+  const base = {
+    state: { kind: 'free', trialUsed: false } as const,
+    early: false,
+    now: sgt('2026-12-02T12:00:00'),
+    shown: null,
+    opens: 10,
+    firstSeen: sgt('2026-11-20T09:00:00'),
+    welcoming: false,
+    checkoutPending: false,
+  }
+  const last = sgt('2026-12-29T12:00:00')
+  eq('founding note: before 1 Dec, nothing', [foundingNote({ ...base, now: sgt('2026-11-30T20:00:00') }), foundingNote({ ...base, now: sgt('2026-11-10T09:00:00') })], [null, null])
+  eq('founding note: a free board in the first window, on one new tab', [foundingNote(base), foundingNote({ ...base, shown: 'december' })], ['december', null])
+  eq('founding note: once more in the last four days, whether or not it showed before', [
+    foundingNote({ ...base, now: last, shown: 'december' }),
+    foundingNote({ ...base, now: last }),
+    foundingNote({ ...base, now: last, shown: 'last-days' }),
+  ], ['last-days', 'last-days', null])
+  eq('founding note: up to the deadline, and nothing after it', [foundingNote({ ...base, now: FOUNDING_ENDS }), foundingNote({ ...base, now: FOUNDING_ENDS + 1 }), foundingNote({ ...base, now: sgt('2027-01-02T09:00:00') })], ['last-days', null, null])
+  eq('founding note: trial boards too, and boards whose trial ended', [foundingNote({ ...base, state: { kind: 'trial', daysLeft: 6 } }), foundingNote({ ...base, state: { kind: 'free', trialUsed: true }, now: last })], ['december', 'last-days'])
+  eq('founding note: never for an early user, who keeps $2.99 whenever they buy', [foundingNote({ ...base, early: true }), foundingNote({ ...base, early: true, now: last }), foundingNote({ ...base, early: true, state: { kind: 'trial', daysLeft: 6 } })], [null, null, null])
+  eq('founding note: never for a paid key, or a key that is paused', [
+    foundingNote({ ...base, state: { kind: 'pro' } }),
+    foundingNote({ ...base, state: { kind: 'pro' }, now: last }),
+    ...(['ended', 'checking', 'offline'] as const).map((reason) => foundingNote({ ...base, state: { kind: 'paused', reason } })),
+  ], [null, null, null, null, null])
+  eq('founding note: never under the company pro lock', [foundingNote({ ...base, lockPro: true }), foundingNote({ ...base, lockPro: true, now: last }), foundingNote({ ...base, lockPro: false })], [null, null, 'december'])
+  eq('founding note: not on the welcome screen, or while a checkout from this computer is pending', [foundingNote({ ...base, welcoming: true }), foundingNote({ ...base, checkoutPending: true })], [null, null])
+  eq("founding note: a new install settles in first, as for the reverse-trial card: the third new tab and 20 hours", [
+    foundingNote({ ...base, opens: REVERSE_CARD_OPENS - 1 }),
+    foundingNote({ ...base, opens: REVERSE_CARD_OPENS }),
+    foundingNote({ ...base, firstSeen: base.now - 19 * HOUR }),
+    foundingNote({ ...base, firstSeen: base.now - REVERSE_CARD_WAIT_MS }),
+  ], [null, 'december', null, 'december'])
+  eq('founding note: the words', [FOUNDING_NOTE.title, FOUNDING_NOTE.line, FOUNDING_NOTE.button], [
+    '$2.99 a year ends on 31 Dec',
+    'After that Pro is $4.99 a year. If you join before then, it stays $2.99 while you keep Pro.',
+    'See Pro',
+  ])
+  eq('founding note: the prices are the ones Settings shows either side of the deadline', [priceLabel(false, FOUNDING_ENDS), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$4.99 a year'])
+  eq('founding note: it decides after "what stopped you?" and takes its turn in the corner', [
+    FOUNDING_NOTE_DELAY_MS > WHY_NOT_DELAY_MS,
+    claimable(null, 'founding'),
+    claimable('whyNot', 'founding'),
+    claimable('founding', 'moment'),
+    claimable('founding', 'founding'),
+  ], [true, true, false, false, true])
+
+  // The copy rules: plain words, no dashes or dots between them.
+  const words = [FOUNDING_NOTE.title, FOUNDING_NOTE.line, FOUNDING_NOTE.button, FREE_TIDY_NOTE.text, FREE_TIDY_NOTE.link, TIDY_LABEL.free, TIDY_ERRORS['free-cap']]
+  // Em dash, en dash and middle dot, by code point.
+  eq('0.9.5 copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

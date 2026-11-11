@@ -1,14 +1,15 @@
 // Stackboard Pro (0.7.0): who gets what. Pure: no chrome.*, no DOM, so tests/unit.test.ts covers
 // every rule. Storage and the calls to Polar live in lib/pro.ts.
 //
-// The rules (Pro launch rules, 31 Oct and 1 Nov 2026):
+// The rules ("Pro launch rules", the maintainer 31 Oct and 1 Nov 2026):
 // - Nothing free moves behind Pro for anyone who already uses it. To-do lists are Pro for installs
-//   from 0.7.0 on, and since 0.8.0 for earlier installs ("early users") too, except
+//   from 0.7.0 on, and since 0.8.0 (the maintainer, 3 Nov) for earlier installs ("early users") too, except
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
 //   "everything you use today stays free". Lists that exist keep working for everyone.
 // - Lists that already exist keep working for everyone; Pro only gates making a new one.
 // - Early users get $2.99 a year whenever they buy; new buyers get it until 31 Dec 2026. Pro for
-//   life is $19 once, for anyone (0.9.2).
+//   life is $19 once, for anyone (0.9.2). 0.9.4 (the maintainer, 10 Nov): $9.99 once at the founding offer,
+//   shown only to someone who says the price stopped them ("Didn't get Pro?"), until the same date.
 // - The trial is 14 days with no card. Since 0.9.2 a new install starts it by itself (the reverse
 //   trial, REVERSE_TRIAL); everyone else starts it with a click, as before.
 // - A failed license check pauses Pro and never touches free features. When Polar can't be
@@ -44,10 +45,18 @@ export const CHECKOUT = {
    * benefit as the yearly plan, so its keys check exactly like yearly ones.
    */
   lifetime: 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W',
+  /**
+   * 0.9.4: the founding offer, Pro for life for $9.99 until the founding price ends (FOUNDING_ENDS): its
+   * own link, with a $9.01 discount and no code, so the public lifetime link stays $19. Only "Didn't get
+   * Pro?" opens it, after The price (whyNotOffersPrice in nudgePlan.ts); the same /pro/thanks hand-off.
+   */
+  lifetimeOffer: 'https://buy.polar.sh/polar_cl_fdIwiaHAZZJmWaP3q3P2nywkOuzRrtaC5wyPh1cbRTo',
 } as const
 
 /** What Pro for life costs, once (0.9.2). */
 export const LIFETIME_PRICE = '$19'
+/** ...and at the founding offer, until the founding price ends (0.9.4). */
+export const LIFETIME_OFFER_PRICE = '$9.99'
 
 export type LicenseStatus = 'granted' | 'revoked' | 'disabled'
 /** Problems found on our side of the check: no such key, five computers already, or this one removed in the portal. */
@@ -173,7 +182,7 @@ export function isEarlyUser(p: { updatedFrom?: string | null; installedAt?: numb
 }
 
 // ---------- The reverse trial (0.9.2) ----------
-// a new install starts with Pro for 14 days, and when the trial ends Pro
+// the maintainer, 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
 // features pause and everything they made stays (the usual trial end). Updates never start one,
 // so everyone who had Stackboard before keeps the opt-in trial.
 
@@ -208,7 +217,7 @@ export function olderTrialWins(prev: unknown, next: unknown): boolean {
   return !!a && !!b && b.auto && a.startedAt < b.startedAt
 }
 
-/** Which buy button opened the checkout (0.9.1; the two lifetime links 0.9.2). */
+/** Which buy button opened the checkout (0.9.1; the two lifetime links 0.9.2; the founding offer 0.9.4). */
 export type CheckoutSurface =
   | 'settings'
   | 'settings-pending'
@@ -218,6 +227,7 @@ export type CheckoutSurface =
   | 'cleanup'
   | 'keep-look'
   | 'todo'
+  | 'why-price-offer'
 /**
  * The plan at the click: never tried, on the trial, trial over, or a paused key. 0.9.2: a trial that
  * started by itself on install reads auto-trial, and auto-trial-ended once it's over.
@@ -243,6 +253,11 @@ export function checkoutUrl(early: boolean, now: number, from?: CheckoutFrom): s
 /** 0.9.2: the Pro for life checkout, with the same labels. */
 export function lifetimeCheckoutUrl(from?: CheckoutFrom): string {
   return labelled(CHECKOUT.lifetime, from)
+}
+
+/** 0.9.4: the founding offer on Pro for life, with the same labels. */
+export function lifetimeOfferUrl(from?: CheckoutFrom): string {
+  return labelled(CHECKOUT.lifetimeOffer, from)
 }
 
 function labelled(base: string, from?: CheckoutFrom): string {

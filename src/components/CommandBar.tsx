@@ -28,7 +28,8 @@ function availableActions(): Set<CommandAction> {
     out.add('light')
     out.add('dark')
   }
-  // AI tidy needs a paid key and the server not switched off; its button only shows when both hold.
+  // AI tidy needs a paid key (or, 0.9.5, the free tidy not used yet) and the server not switched off;
+  // its button only shows when both hold.
   if (document.querySelector('[data-tidy-button]')) out.add('tidy')
   return out
 }

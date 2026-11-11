@@ -56,6 +56,13 @@ export function UndoToast() {
 
   if (!toast) return null
 
+  const line = (
+    <>
+      {toast.verb} <span className="font-semibold text-inverse-strong">{toast.title}</span>
+      {toast.detail && <span className="text-inverse-muted"> ({toast.detail})</span>}
+    </>
+  )
+
   return (
     <div
       role="status"
@@ -66,10 +73,23 @@ export function UndoToast() {
         key={toast.id}
         className="toast pointer-events-auto relative flex max-w-full items-center gap-3 overflow-hidden rounded-xl bg-inverse py-2 pl-4 pr-2 text-sm text-on-inverse shadow-toast ring-1 ring-on-inverse/10 ring-inset"
       >
-        <span className="min-w-0 truncate py-1">
-          {toast.verb} <span className="font-semibold text-inverse-strong">{toast.title}</span>
-          {toast.detail && <span className="text-inverse-muted"> ({toast.detail})</span>}
-        </span>
+        {toast.note ? (
+          // 0.9.5: a second line under the first (or alone, with no first), ending on a link.
+          <span className="min-w-0 py-1">
+            {(toast.verb || toast.title) && <span className="block truncate">{line}</span>}
+            <span data-toast-note className="block text-inverse-muted">
+              {toast.note.text}{' '}
+              <button
+                onClick={toast.note.onLink}
+                className="rounded font-semibold text-inverse-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inverse-accent"
+              >
+                {toast.note.link}
+              </button>
+            </span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate py-1">{line}</span>
+        )}
         {toast.undo ? (
           <button
             onClick={() => void undo()}

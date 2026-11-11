@@ -1,4 +1,5 @@
 import type { Space } from './types'
+import type { ProState } from './proPlan'
 import { allLinks, walkFolders } from './folderPlan'
 import { plural } from './importPlan'
 
@@ -6,7 +7,8 @@ import { plural } from './importPlan'
 // space" run sends, how the server's answer is checked and read, which planned stacks match a stack
 // the space already has, and the bookmark moves that turn a plan into stacks and back again (Undo).
 // The moves run against any object shaped like chrome.bookmarks, so the tests use an in-memory one.
-// The network calls live in lib/tidy.ts; the server is site/api/tidy.js.
+// The network calls live in lib/tidy.ts; the server is site/api/tidy.js. 0.9.5: who gets the one free
+// tidy (tidyAccess).
 
 export const TIDY_API = 'https://getstackboard.com/api/tidy'
 /** The server takes up to this many links a run (MAX_LINKS in site/api/_lib/tidy.js). */
@@ -66,15 +68,55 @@ export interface TidyLicense {
   activationId: string
 }
 
-/** The POST body: one space, so the server answers with stacks for that space only. */
-export function tidyBody(spaceName: string, input: TidyInput, license: TidyLicense) {
-  return {
-    scope: 'space' as const,
-    space: Array.from(spaceName).slice(0, 60).join(''),
-    links: input.links,
-    license: { key: license.key, activationId: license.activationId },
-  }
+export interface TidyBody {
+  scope: 'space'
+  space: string
+  links: TidyLink[]
+  license?: TidyLicense
+  /** 0.9.5: the one free tidy, sent with no key; the server counts it in a daily budget for everyone. */
+  free?: true
 }
+
+/** The POST body: one space, so the server answers with stacks for that space only. No license: the free tidy (0.9.5). */
+export function tidyBody(spaceName: string, input: TidyInput, license: TidyLicense | null): TidyBody {
+  const body: TidyBody = { scope: 'space', space: Array.from(spaceName).slice(0, 60).join(''), links: input.links }
+  if (license) body.license = { key: license.key, activationId: license.activationId }
+  else body.free = true
+  return body
+}
+
+// ---------- One free tidy per person (0.9.5) ----------
+// the maintainer, 10 Nov 2026: Tidy needs a paid key, so the trial can't use it and almost nobody had seen
+// it. Free and trial users, and a key that's paused, now get one tidy per Chrome profile. It sends
+// the same space with `free: true` and no key, and the server runs it within a daily budget all
+// free runs share (site/api/_lib/freeTidy.js). Once used (sync storage, lib/tidy.ts) only a paid key
+// gets Tidy, as before, and there's no locked button. Never under the company's ai lock, nor its pro
+// lock: the free tidy ends on a word about Pro, and school mode has none.
+
+/** Who can press Tidy: a paid key, the one free tidy, or nobody. */
+export type TidyAccess = 'paid' | 'free' | null
+
+export function tidyAccess(p: {
+  state: ProState
+  /** This computer holds an activation for the key. */
+  activated: boolean
+  /** The Chrome profile has used its free tidy; null until read. */
+  freeUsed: boolean | null
+  lockAi: boolean
+  lockPro: boolean
+}): TidyAccess {
+  if (p.lockAi) return null
+  if (p.state.kind === 'pro') return p.activated ? 'paid' : null
+  // A key on its first check (a new computer, for a few seconds) is a paid key on its way in.
+  if (p.state.kind === 'paused' && p.state.reason === 'checking') return null
+  return !p.lockPro && p.freeUsed === false ? 'free' : null
+}
+
+/** The button's words. */
+export const TIDY_LABEL = { paid: 'Tidy', free: 'Tidy (free once)' } as const
+
+/** After the free tidy, in its toast: the line, then the link to Settings > Stackboard Pro. */
+export const FREE_TIDY_NOTE = { text: 'That was your free tidy. Pro tidies any space, any time.', link: 'See Pro' } as const
 
 /** A stack name as it may be saved: one line, at most 40 characters, never empty. */
 export function cleanName(raw: unknown, fallback = FALLBACK_NAME): string {
@@ -170,12 +212,13 @@ export function flattenNote(n: number): string | null {
     : `${plural(n, 'folder')} inside stacks get flattened into the new stacks; Undo puts them back.`
 }
 
-export type TidyError = 'pro' | 'cap' | 'busy' | 'not-ready' | 'refused' | 'too-many' | 'answer'
+export type TidyError = 'pro' | 'cap' | 'free-cap' | 'busy' | 'not-ready' | 'refused' | 'too-many' | 'answer'
 
 /** What went wrong, in words for the toast. */
 export const TIDY_ERRORS: Record<TidyError, string> = {
   pro: 'Your Pro key needs attention',
   cap: "That's today's limit, try again tomorrow",
+  'free-cap': 'Free tidies are used up for today. Try again tomorrow.',
   busy: "Couldn't reach Stackboard, try again in a moment",
   'not-ready': 'Tidy is switched off for now',
   refused: "Tidy couldn't sort this space",
@@ -183,15 +226,19 @@ export const TIDY_ERRORS: Record<TidyError, string> = {
   answer: "Couldn't read the answer, try again in a moment",
 }
 
-/** Reads the server's response into a plan or an error (status codes from site/api/tidy.js). */
-export function readAnswer(status: number, body: unknown, count: number): { plan: PlannedStack[] } | { error: TidyError } {
+/**
+ * Reads the server's response into a plan or an error (status codes from site/api/tidy.js). `free`:
+ * the free tidy (0.9.5), which a server from before it answers as a run with no Pro key, so for that
+ * one Tidy is switched off.
+ */
+export function readAnswer(status: number, body: unknown, count: number, free = false): { plan: PlannedStack[] } | { error: TidyError } {
   const reason = (body as { reason?: unknown } | null)?.reason
   if (status === 200) {
     const plan = readPlan((body as { board?: unknown } | null)?.board, count)
     return plan && plan.length ? { plan } : { error: 'answer' }
   }
-  if (status === 402) return { error: 'pro' }
-  if (status === 429) return { error: reason === 'busy' ? 'busy' : 'cap' }
+  if (status === 402) return { error: free ? 'not-ready' : 'pro' }
+  if (status === 429) return { error: reason === 'busy' ? 'busy' : reason === 'free-cap' ? 'free-cap' : 'cap' }
   if (status === 503 && reason === 'not-ready') return { error: 'not-ready' }
   if (status === 422) return { error: 'refused' }
   if (status === 400 && reason === 'count') return { error: 'too-many' }

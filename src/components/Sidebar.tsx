@@ -29,6 +29,7 @@ import { spaceIndexForKey, typingInField } from '../lib/shortcuts'
 import { usePro } from '../lib/pro'
 import { hasPro } from '../lib/proPlan'
 import { refreshTidyReady } from '../lib/tidy'
+import { useTidyAccess } from './TidyButton'
 import { useAllTodos } from '../lib/allTodos'
 import { countDue } from '../lib/duePlan'
 import { useToday } from '../lib/today'
@@ -52,11 +53,12 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
   const flashSeq = useStackableStore((s) => (s.flash?.id === space.id ? s.flash.seq : 0))
   const [menuOpen, setMenuOpen] = useState(false)
   const rowRef = useRef<HTMLDivElement | null>(null)
-  const hasKey = usePro((s) => s.state.kind === 'pro' && !!s.license?.activationId)
-  // AI tidy: a space menu is one of the two places that ask whether Tidy is on (at most once a day).
+  // AI tidy: a space menu is one of the two places that ask whether Tidy is on (at most once a day),
+  // for a paid key and, since 0.9.5, for the free tidy until it's used.
+  const canTidy = useTidyAccess() !== null
   useEffect(() => {
-    if (menuOpen) refreshTidyReady(hasKey)
-  }, [menuOpen, hasKey])
+    if (menuOpen) refreshTidyReady(canTidy)
+  }, [menuOpen, canTidy])
 
   const {
     attributes,

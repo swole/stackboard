@@ -2,6 +2,7 @@
 // right space with no flicker. Bookmark ids are per-device too, so nothing here should sync.
 
 import { parseOpenFolders, OPEN_FOLDERS_MAX } from './folderPlan'
+import type { FoundingWindow } from './nudgePlan'
 
 const LAST_SPACE = 'stackable:lastSpaceId'
 const OPEN_FOLDERS = 'stackable:openFolders'
@@ -20,6 +21,7 @@ const MOMENTS = 'stackable:proMoments'
 const REVERSE_TRIAL = 'stackable:reverseTrial'
 const WHY_NOT_AT = 'stackable:whyNotAt'
 const WHY_NOT_ASKED = 'stackable:whyNotAsked'
+const FOUNDING_NOTE = 'stackable:foundingNote'
 
 function read(key: string): string | null {
   try {
@@ -94,6 +96,12 @@ export const prefs = {
     write(WHY_NOT_AT, String(at))
     write(WHY_NOT_ASKED, String((Number(read(WHY_NOT_ASKED)) || 0) + 1))
   },
+  /** The window the December note last showed in on this device, or null (0.9.5). */
+  foundingNote: (): FoundingWindow | null => {
+    const w = read(FOUNDING_NOTE)
+    return w === 'december' || w === 'last-days' ? w : null
+  },
+  setFoundingNote: (w: FoundingWindow) => write(FOUNDING_NOTE, w),
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

@@ -7,11 +7,13 @@ import { FOUNDING_ENDS, LIFETIME_PRICE, PORTAL_URL, checkoutPending, keepsTodoFr
 import { openInNewTab } from '../lib/tabs'
 import { ArchiveSetting } from './ArchiveSetting'
 import { TodayStripSetting } from './TodayStripSetting'
+import { TrialSwitchButton, useTrialSwitches } from './TrialSwitches'
 import { ScheduleSetting } from './ScheduleSetting'
 import { useTwoStep } from '../hooks/useTwoStep'
 import { SnapshotsPanel } from './SnapshotsPanel'
 import { AiFileSetting } from './AiFileSetting'
 import { CleanupScanEntry } from './CleanupUpsell'
+import { useTidyAccess } from './TidyButton'
 import { useStackableStore } from '../store/useStackableStore'
 
 // Settings > Stackboard Pro (0.7.0). The only place Pro is sold: no locked buttons on the board.
@@ -60,20 +62,24 @@ export function ProSection() {
   const sub = usePro((s) => s.sub)
   const checkoutAt = usePro((s) => s.checkoutAt)
   const checkoutLifetime = usePro((s) => s.checkoutLifetime)
+  // 0.9.4: that checkout was the founding offer ("Didn't get Pro?" after The price).
+  const checkoutOffer = usePro((s) => s.checkoutOffer)
   const trialAuto = usePro((s) => s.trialAuto)
+  // 0.9.4: during a trial, one tap turns on auto-archive or the Today strip (TrialSwitches.tsx).
+  const switches = useTrialSwitches()
   const { activate, check, remove, startTrial } = usePro.getState()
   const [key, setKey] = useState('')
   const tidyReady = useTidy((s) => s.ready)
   // School mode: with the company's ai lock, AI tidy is neither listed nor asked about.
   const aiLocked = useStackableStore((s) => !!s.tree?.company?.lock.ai)
-  const hasKey = state.kind === 'pro' && !!license?.activationId
-  // What this computer last heard from the server (reading it sends nothing). With an active key,
-  // opening Settings also asks the server, at most once a day.
+  const canTidy = useTidyAccess() !== null
+  // What this computer last heard from the server (reading it sends nothing). With an active key, or
+  // the free tidy not used yet (0.9.5), opening Settings also asks the server, at most once a day.
   useEffect(() => {
     if (aiLocked) return
     void loadReady()
-    refreshTidyReady(hasKey)
-  }, [hasKey, aiLocked])
+    refreshTidyReady(canTidy)
+  }, [canTidy, aiLocked])
   // Removing the key takes Pro off every computer on the Chrome profile, so it asks twice.
   const removing = useTwoStep(4000)
   const now = Date.now()
@@ -81,7 +87,7 @@ export function ProSection() {
   // 0.9.3: Get Pro names the price, $4.99 once the founding price ends (early users keep $2.99).
   const getPro = `Get Pro for ${priceLabel(early, now)}`
   const portal = () => void openInNewTab(PORTAL_URL, true)
-  // 0.9.3: how checkout works and the 14-day money-back promise, one quiet line above
+  // 0.9.3 (the maintainer, 8 Nov): how checkout works and the 14-day money-back promise, one quiet line above
   // Pro for life and wherever that line shows, so never in the finishing steps or under the pro lock.
   const refundLine = (
     <p className="mt-1.5 text-[11px] text-muted" data-pro-refund>
@@ -284,7 +290,7 @@ export function ProSection() {
             </button>
             <button
               type="button"
-              onClick={() => openCheckout('settings-pending', { lifetime: checkoutLifetime })}
+              onClick={() => openCheckout('settings-pending', { lifetime: checkoutLifetime, offer: checkoutOffer })}
               className="underline underline-offset-2 hover:text-fg"
             >
               Back to checkout
@@ -306,11 +312,22 @@ export function ProSection() {
       {(state.kind === 'free' || state.kind === 'trial') && !pending && (
         <>
           {state.kind === 'trial' ? (
-            <p className="mb-2 text-xs text-fg" data-pro-trial-line={trialAuto ? 'auto' : 'opt-in'}>
-              {trialAuto ? 'Your free Pro trial started when you added Stackboard: ' : 'Pro trial: '}
-              {state.daysLeft} day{state.daysLeft === 1 ? '' : 's'} left. When it ends, Pro features pause and everything you
-              made stays.
-            </p>
+            <>
+              <p className="mb-2 text-xs text-fg" data-pro-trial-line={trialAuto ? 'auto' : 'opt-in'}>
+                {trialAuto ? 'Your free Pro trial started when you added Stackboard: ' : 'Pro trial: '}
+                {state.daysLeft} day{state.daysLeft === 1 ? '' : 's'} left. When it ends, Pro features pause and everything you
+                made stays.
+              </p>
+              {/* 0.9.4: the features that are still off, one tap each; no row when both were on already. */}
+              {switches.views.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5" data-pro-trial-switches>
+                  <span className="text-xs text-fg">Make the most of your trial:</span>
+                  {switches.views.map((v) => (
+                    <TrialSwitchButton key={v.key} view={v} onTurnOn={switches.turnOn} />
+                  ))}
+                </div>
+              )}
+            </>
           ) : state.trialUsed ? (
             <p className="mb-2 text-xs text-fg">Your trial has ended, so Pro features are paused. Everything you made is still here.</p>
           ) : null}

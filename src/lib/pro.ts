@@ -4,6 +4,7 @@ import { readLocks } from './company'
 import { installedAt, visit } from './onboarding'
 import { openInNewTab } from './tabs'
 import {
+  FOUNDING_ENDS,
   LICENSE_API,
   PRO_ORG_ID,
   checkoutPlan,
@@ -12,6 +13,7 @@ import {
   decideEarlyTodo,
   isEarlyUser,
   lifetimeCheckoutUrl,
+  lifetimeOfferUrl,
   needsCheck,
   olderTrialWins,
   proState,
@@ -39,8 +41,9 @@ const TRIAL = 'proTrial'
 /** sync: ProSub. The plan behind the key, when Polar described it at purchase (0.8.0). */
 export const SUB_KEY = 'proSub'
 /**
- * local: { at, lifetime? }. This computer opened the checkout; Settings shows the finishing steps for
- * a day. `lifetime` (0.9.2): it was the Pro for life checkout, so Back to checkout opens that one again.
+ * local: { at, lifetime?, offer? }. This computer opened the checkout; Settings shows the finishing steps
+ * for a day. `lifetime` (0.9.2): it was the Pro for life checkout, so Back to checkout opens that one
+ * again; `offer` (0.9.4): at the founding offer, which Back to checkout opens again too.
  */
 const CHECKOUT_KEY = 'proCheckout'
 /** sync: { from, at }. background.ts sets it when an update arrives from a version before Pro. */
@@ -73,10 +76,12 @@ interface ProStore {
   checkoutAt: number | null
   /** 0.9.2: that checkout was Pro for life. */
   checkoutLifetime: boolean
+  /** 0.9.4: ...at the founding offer ("Didn't get Pro?" after The price). */
+  checkoutOffer: boolean
   /** The plan behind the key, when Polar described it. */
   sub: ProSub | null
   /** Opening the checkout: remembered so Settings can show what to do next. */
-  markCheckout: (lifetime?: boolean) => void
+  markCheckout: (lifetime?: boolean, offer?: boolean) => void
   activate: (raw: string) => Promise<boolean>
   /** Asks Polar about the key; `force` asks even when the last answer is recent. */
   check: (force?: boolean) => Promise<void>
@@ -197,12 +202,15 @@ export const usePro = create<ProStore>((set, get) => ({
   note: null,
   checkoutAt: null,
   checkoutLifetime: false,
+  checkoutOffer: false,
   sub: null,
 
-  markCheckout: (lifetime = false) => {
+  markCheckout: (lifetime = false, offer = false) => {
     const at = Date.now()
-    set({ checkoutAt: at, checkoutLifetime: lifetime })
-    if (IS_EXTENSION) void chrome.storage.local.set({ [CHECKOUT_KEY]: lifetime ? { at, lifetime } : { at } }).catch(() => {})
+    const atOffer = lifetime && offer
+    set({ checkoutAt: at, checkoutLifetime: lifetime, checkoutOffer: atOffer })
+    const mark = atOffer ? { at, lifetime, offer: true } : lifetime ? { at, lifetime } : { at }
+    if (IS_EXTENSION) void chrome.storage.local.set({ [CHECKOUT_KEY]: mark }).catch(() => {})
   },
 
   activate: async (raw) => {
@@ -352,6 +360,11 @@ function readLifetime(v: unknown): boolean {
   return readAt(v) !== null && (v as { lifetime?: unknown }).lifetime === true
 }
 
+/** ...at the founding offer (0.9.4). */
+function readOffer(v: unknown): boolean {
+  return readLifetime(v) && (v as { offer?: unknown }).offer === true
+}
+
 /** A plan saved by this or another computer; anything malformed counts as none. */
 function readStoredSub(v: unknown): ProSub | null {
   if (!v || typeof v !== 'object') return null
@@ -407,15 +420,19 @@ export function setProLock(on: boolean): void {
  * Every buy button (0.9.1): remembers the checkout for Settings' finishing steps and opens it,
  * labelled with the button, the plan and the version (checkoutUrl). An unpacked build has no
  * update_url in its manifest, so test and development checkouts carry a dev label. `lifetime`
- * (0.9.2) opens the Pro for life checkout instead of the yearly one.
+ * (0.9.2) opens the Pro for life checkout instead of the yearly one. `offer` (0.9.4) opens Pro for
+ * life at the founding offer while the founding price lasts (the $19 link after it); it counts as a
+ * Pro for life checkout, so Back to checkout opens the offer again.
  */
-export function openCheckout(surface: CheckoutSurface, opts: { lifetime?: boolean } = {}): void {
+export function openCheckout(surface: CheckoutSurface, opts: { lifetime?: boolean; offer?: boolean } = {}): void {
   const s = usePro.getState()
-  const lifetime = !!opts.lifetime
-  s.markCheckout(lifetime)
+  const now = Date.now()
+  const lifetime = !!opts.lifetime || !!opts.offer
+  const offer = !!opts.offer && now <= FOUNDING_ENDS
+  s.markCheckout(lifetime, offer)
   const manifest = IS_EXTENSION ? chrome.runtime.getManifest() : null
   const from = { surface, plan: checkoutPlan(s.state, s.trialAuto), version: manifest?.version, dev: !manifest?.update_url }
-  void openInNewTab(lifetime ? lifetimeCheckoutUrl(from) : checkoutUrl(s.early, Date.now(), from), true)
+  void openInNewTab(offer ? lifetimeOfferUrl(from) : lifetime ? lifetimeCheckoutUrl(from) : checkoutUrl(s.early, now, from), true)
 }
 
 let started = false
@@ -460,6 +477,7 @@ export function initPro(): void {
         sub: readStoredSub(sync[SUB_KEY]),
         checkoutAt: readAt(local[CHECKOUT_KEY]),
         checkoutLifetime: readLifetime(local[CHECKOUT_KEY]),
+        checkoutOffer: readOffer(local[CHECKOUT_KEY]),
       })
       if (needsCheck(license, Date.now())) setTimeout(() => void usePro.getState().check(), 3000)
     } catch {
@@ -471,7 +489,7 @@ export function initPro(): void {
     const s = usePro.getState()
     if (area === 'local' && CHECKOUT_KEY in changes) {
       const v = changes[CHECKOUT_KEY].newValue
-      usePro.setState({ checkoutAt: readAt(v), checkoutLifetime: readLifetime(v) })
+      usePro.setState({ checkoutAt: readAt(v), checkoutLifetime: readLifetime(v), checkoutOffer: readOffer(v) })
     }
     if (area === 'local' && LICENSE in changes) {
       // Another tab on this computer checked the key.
