@@ -49,9 +49,11 @@ export function WhyNotCard({ welcoming }: { welcoming: boolean }) {
   // Read when the card decides: the welcome screen stays up while it fills the board.
   const welcome = useRef(welcoming)
   welcome.current = welcoming
+  // 0.9.6: the company policy has answered (corner.ts); the card doesn't decide before that.
+  const settled = useCorner((s) => s.locks !== null)
 
   useEffect(() => {
-    if (decided.current || !loaded || !ready || !IS_EXTENSION) return
+    if (decided.current || !loaded || !ready || !settled || !IS_EXTENSION) return
     const id = setTimeout(() => {
       decided.current = true
       const { state, checkoutAt, checkoutLifetime } = usePro.getState()
@@ -64,8 +66,8 @@ export function WhyNotCard({ welcoming }: { welcoming: boolean }) {
         asked: prefs.whyNotAsked(),
         welcoming: welcome.current,
         ratingOpen: corner.ratingOpen,
-        // School mode: the company's pro lock, read with the board that loaded.
-        lockPro: !!useStackableStore.getState().tree?.company?.lock.pro,
+        // School mode: the company's pro lock, from the policy's real answer (0.9.6).
+        lockPro: !!corner.locks?.pro,
       })
       // A tab where another card got there first goes without; a later tab can still ask.
       if (!due || !checkoutAt || !corner.claim('whyNot')) return
@@ -73,7 +75,7 @@ export function WhyNotCard({ welcoming }: { welcoming: boolean }) {
       setCard({ lifetime: checkoutLifetime })
     }, WHY_NOT_DELAY_MS)
     return () => clearTimeout(id)
-  }, [loaded, ready])
+  }, [loaded, ready, settled])
 
   const close = () => {
     setCard(null)
@@ -98,7 +100,7 @@ export function WhyNotCard({ welcoming }: { welcoming: boolean }) {
     if (done) return
     sendWhyAnswer({ reason, note, lifetime: card.lifetime })
     const { trialStartedAt } = usePro.getState()
-    const lockPro = !!useStackableStore.getState().tree?.company?.lock.pro
+    const lockPro = !!useCorner.getState().locks?.pro
     setDone({ trial: whyNotOffersTrial({ reason, trialStartedAt, lockPro }), offer: whyNotOffersPrice({ reason, now: Date.now(), lockPro }) })
   }
   // The founding offer's own checkout, which counts as Pro for life (pro.ts openCheckout).

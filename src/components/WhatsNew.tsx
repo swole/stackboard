@@ -25,6 +25,8 @@ export function WhatsNew() {
   const ready = usePro((s) => s.ready)
   const early = usePro((s) => s.early)
   const paid = usePro((s) => s.state.kind === 'pro')
+  // 0.9.6: the company policy has answered (corner.ts); no note decides before that.
+  const settled = useCorner((s) => s.locks !== null)
   const [card, setCard] = useState<WhatsNewCard | null>(null)
   const [updated, setUpdated] = useState<{ u080: boolean; u090: boolean } | null>(IS_EXTENSION ? null : { u080: false, u090: false })
   // 0.9.0: whether this person's 0.8.0 note was still waiting when the 0.9.0 one took its place.
@@ -44,7 +46,7 @@ export function WhatsNew() {
   }, [])
 
   useEffect(() => {
-    if (shownHere.current || !loaded || !ready || updated === null) return
+    if (shownHere.current || !loaded || !ready || updated === null || !settled) return
     const pick = pickWhatsNew({
       early,
       shows070: prefs.whatsNewShows(),
@@ -53,8 +55,8 @@ export function WhatsNew() {
       updated090: updated.u090,
       shows090: prefs.whatsNew090Shows(),
       paid,
-      // School mode: the company's pro lock, read with the board that just loaded.
-      lockPro: !!useStackableStore.getState().tree?.company?.lock.pro,
+      // School mode: the company's pro lock, from the policy's real answer (0.9.6).
+      lockPro: !!useCorner.getState().locks?.pro,
     })
     if (!pick) return
     shownHere.current = true
@@ -66,7 +68,7 @@ export function WhatsNew() {
       prefs.setWhatsNew090Shows(prefs.whatsNew090Shows() + 1)
     } else prefs.setWhatsNew080Shows(prefs.whatsNew080Shows() + 1)
     setCard(pick)
-  }, [loaded, ready, early, updated])
+  }, [loaded, ready, early, updated, settled])
 
   const done = () => {
     setCard(null)
@@ -139,7 +141,8 @@ function ProNote({ onClose }: { onClose: () => void }) {
 
 /** 0.8.0: the free features first, one line for Pro, and a way to try Packed with an Undo. */
 function Note080({ onClose }: { onClose: () => void }) {
-  const lock = useStackableStore((s) => s.tree?.company?.lock)
+  // 0.9.6: the locks the note was decided with: the policy's real answer.
+  const lock = useCorner((s) => s.locks)
   const layout = useAppearance((s) => s.appearance.layout)
   const early = usePro((s) => s.early)
   const pro = usePro((s) => hasPro(s.state))
@@ -195,7 +198,8 @@ function Note080({ onClose }: { onClose: () => void }) {
 
 /** 0.9.0: what's new for everyone, one line for Pro with the trial, and Try Packed for anyone who missed 0.8.0's note. */
 function Note090({ onClose, missed080 }: { onClose: () => void; missed080: boolean }) {
-  const lock = useStackableStore((s) => s.tree?.company?.lock)
+  // 0.9.6: the locks the note was decided with: the policy's real answer.
+  const lock = useCorner((s) => s.locks)
   const layout = useAppearance((s) => s.appearance.layout)
   const paid = usePro((s) => s.state.kind === 'pro')
   const todoMoved = usePro((s) => s.early && s.earlyTodo === false)

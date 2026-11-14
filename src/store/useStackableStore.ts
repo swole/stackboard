@@ -11,7 +11,8 @@ import {
 } from '../lib/bookmarks'
 import type { OpenTabIndex } from '../lib/openTabs'
 import { prefs } from '../lib/prefs'
-import { readCompany, withCompany } from '../lib/company'
+import { readCompany, readLocksSettled, withCompany } from '../lib/company'
+import { useCorner } from '../lib/corner'
 import { setFolderOpen } from '../lib/folderPlan'
 import { appearanceSettled, setPolicyAccent } from './useAppearance'
 import { mirroredRules } from '../lib/spaceSchedule'
@@ -87,6 +88,11 @@ interface StackableState {
   wins: number
   /** Bumped at a rating milestone: the first saved certificate or the third stash (0.5.3). */
   milestones: number
+  /**
+   * Bumped when a tidy is applied (0.9.6): a rating milestone once nothing else is on screen
+   * (RatingPrompt). The tidy is also kept in localStorage (prefs.tidyWin) until the ask takes it.
+   */
+  tidied: number
 
   refresh: () => Promise<void>
   selectSpace: (id: string | null) => void
@@ -110,6 +116,8 @@ interface StackableState {
   setOnboarding: (on: boolean) => void
   celebrate: () => void
   reachMilestone: () => void
+  /** A tidy was applied (0.9.6); its Undo takes it back with prefs.clearTidyWin. */
+  noteTidied: () => void
   removeWithUndo: (kind: DeletableKind, id: string, title: string, detail?: string) => Promise<void>
 }
 
@@ -137,18 +145,24 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   companyChosen: false,
   wins: 0,
   milestones: 0,
+  tidied: 0,
 
   refresh: async () => {
     try {
       set({ loading: true, error: null })
       // Teams (0.8.0): the company's read-only spaces from Chrome policy go first. The board also
       // waits for the saved settings when there was no boot copy, so it shows in its own layout.
+      // 0.9.6: what a lock can veto (Pro's trial, the corner cards, the rating ask, the coach mark)
+      // waits for the policy's real answer, however long managed storage takes; the paint below
+      // doesn't, and goes ahead after 1.5 s with the locks the policy last had.
+      void readLocksSettled().then((locks) => {
+        setProLock(locks.pro)
+        useCorner.getState().settle(locks)
+      })
       const [own, company] = await Promise.all([readTree(), readCompany().catch(() => null), appearanceSettled])
       const tree = withCompany(own, company)
       // Teams T8: the company's accent shows for everyone while the policy sets it.
       setPolicyAccent(company?.config.brand?.accent ?? null)
-      // School mode: Pro follows the company's pro lock (no trial while it's on), before anything below reads it.
-      setProLock(!!company?.config.lock.pro)
       const has = (id: string | null) => !!id && tree.spaces.some((s) => s.id === id)
       const current = get().selectedSpaceId
       const remembered = prefs.lastSpaceId()
@@ -209,6 +223,10 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   },
   celebrate: () => set((s) => ({ wins: s.wins + 1 })),
   reachMilestone: () => set((s) => ({ milestones: s.milestones + 1 })),
+  noteTidied: () => {
+    prefs.setTidyWin(Date.now())
+    set((s) => ({ tidied: s.tidied + 1 }))
+  },
   dismissToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : {})),
 
   flashItem: (id) => {

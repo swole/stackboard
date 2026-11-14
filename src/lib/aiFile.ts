@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { IS_EXTENSION } from './bookmarks'
-import { readLocks } from './company'
+import { readLocksSettled } from './company'
 import { fileBody, readPick, type FileTarget, type Suggestion } from './filePlan'
 
 // "Let AI pick the stack" (Pro, 0.9.0): off until switched on in Settings, and only with an active
@@ -39,7 +39,7 @@ function readOn(v: unknown): boolean {
  */
 export async function loadAiFile(): Promise<boolean> {
   if (!IS_EXTENSION) return false
-  const [got, locks] = await Promise.all([chrome.storage.sync.get(AI_FILE_KEY).catch(() => ({}) as Record<string, unknown>), readLocks()])
+  const [got, locks] = await Promise.all([chrome.storage.sync.get(AI_FILE_KEY).catch(() => ({}) as Record<string, unknown>), readLocksSettled()])
   const on = !locks.ai && readOn(got[AI_FILE_KEY])
   useAiFile.setState({ on })
   return on
@@ -52,7 +52,7 @@ export async function setAiFile(on: boolean): Promise<void> {
 
 /** Is the server switched on? Asked at most once a day, only while Settings shows the option. */
 export async function checkAiFileReady(): Promise<boolean> {
-  if (!IS_EXTENSION || (await readLocks()).ai) return false
+  if (!IS_EXTENSION || (await readLocksSettled()).ai) return false
   const got = await chrome.storage.local.get(READY).catch(() => ({}) as Record<string, unknown>)
   const r = got[READY] as { ready?: unknown; at?: unknown } | undefined
   const now = Date.now()

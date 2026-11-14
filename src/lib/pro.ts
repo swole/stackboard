@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { IS_EXTENSION } from './bookmarks'
-import { readLocks } from './company'
+import { readLocksSettled } from './company'
 import { installedAt, visit } from './onboarding'
 import { openInNewTab } from './tabs'
 import {
@@ -96,7 +96,9 @@ interface ProStore {
 /**
  * School mode: the company's pro lock (Chrome policy). While it's on, a trial doesn't count here and
  * can't start; a paid key keeps working. Read before the store is ready, then kept in step by the
- * board (setProLock), which sees policy changes.
+ * board (setProLock), which sees policy changes. 0.9.6: both read the policy's real answer, however
+ * long managed storage takes (readLocksSettled), never the board's 1.5 s race, so a trial never counts
+ * as Pro under the lock, and a lock removed since the last answer never hides one.
  */
 let lockPro = false
 
@@ -408,7 +410,7 @@ function preview(): void {
   usePro.setState({ ready: true, early, earlyTodo: early ? p === 'early-todo' : null, license, sub, checkoutAt, trialStartedAt, trialAuto, state: derive(license, trialStartedAt) })
 }
 
-/** School mode: the board calls this with the pro lock each time it reads the policy. */
+/** School mode: the board calls this with the pro lock each time the policy answers (settled, 0.9.6). */
 export function setProLock(on: boolean): void {
   if (on === lockPro) return
   lockPro = on
@@ -452,10 +454,11 @@ export function initPro(): void {
     try {
       const seen = trialChanges
       // The lock comes with the stored state, so a trial never shows as Pro under it, even for a moment.
+      // 0.9.6: the settled answer, so a slow managed storage can't let one through.
       const [sync, local, locks] = await Promise.all([
         chrome.storage.sync.get([KEY, TRIAL, EARLY_KEY, EARLY_TODO_KEY, SUB_KEY]),
         chrome.storage.local.get([LICENSE, CHECKOUT_KEY]),
-        readLocks(),
+        readLocksSettled(),
       ])
       lockPro = locks.pro
       const held = local[LICENSE] as License | undefined

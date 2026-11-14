@@ -540,3 +540,32 @@
     animation: none;
   }
 }
+
+/* ---------- Tidy coach mark (0.9.6) ----------
+   The card drops in from the button it points at, and the button wears a soft ring in the
+   palette's accent that breathes twice while the card is up. Reduced motion: both simply there. */
+.coach-in {
+  animation: coach-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes coach-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+[data-tidy-coached] {
+  border-color: var(--sb-accent-line);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sb-accent) 22%, transparent);
+  animation: coach-ring 1.6s ease-in-out 2;
+}
+@keyframes coach-ring {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--sb-accent) 10%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coach-in,
+  [data-tidy-coached] {
+    animation: none;
+  }
+}

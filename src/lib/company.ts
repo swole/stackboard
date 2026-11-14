@@ -4,6 +4,7 @@ import {
   EMPTY_CONFIG,
   NO_LOCKS,
   addDismissed,
+  anyLock,
   arrangeOnboarding,
   companyLabel,
   companySpaces,
@@ -11,6 +12,7 @@ import {
   managedFolderSpace,
   onboardingActive,
   parseDismissed,
+  parseLocks,
   parseManagedConfig,
   type ManagedConfig,
 } from './managedPlan'
@@ -22,6 +24,13 @@ import type { CompanyLocks, StackableTree } from './types'
 
 /** Unpacked builds only (tests): JSON here stands in for chrome.storage.managed. */
 const OVERRIDE = 'stackable:managedOverride'
+/**
+ * Unpacked builds only (tests, 0.9.6): the override answers this many ms late, once per page, the way
+ * a slow managed storage does. Pages only (localStorage).
+ */
+const OVERRIDE_DELAY = 'stackable:managedDelayMs'
+/** chrome.storage.local (0.9.6): the locks the policy had when it last answered, for a paint that can't wait. */
+const LAST_LOCKS = 'policyLocks'
 /** Outside the extension (vite preview): JSON here plays the policy. */
 const PREVIEW = 'stackable:managedPreview'
 const DISMISSED = 'stackable:announcementsDismissed'
@@ -56,13 +65,20 @@ function unpacked(): boolean {
   }
 }
 
-/** The board never waits on policy: managed storage that doesn't answer counts as no policy. */
+/**
+ * The board never waits on policy: managed storage that doesn't answer within this counts as no
+ * policy for that paint, or since 0.9.6 as the locks it had when it last answered.
+ */
 const POLICY_WAIT_MS = 1500
 
 /** Managed storage is read once per page and again only when Chrome reports a policy change. */
-let policyRead: Promise<unknown> | null = null
+let managedAnswer: Promise<unknown> | null = null
+/** The test override's delay (stackable:managedDelayMs), run once per page. */
+let overrideWait: Promise<void> | null = null
 /** Set by watchCompany: a policy that answers after the wait still reaches the board. */
 let lateAnswer: (() => void) | null = null
+/** The lock set kept in chrome.storage.local (LAST_LOCKS), as JSON; undefined until read on this page. */
+let lastSeen: string | null | undefined
 
 /**
  * The test override, unpacked builds only. Pages read it from localStorage; the service worker
@@ -79,35 +95,98 @@ async function readOverride(): Promise<string | null> {
   }
 }
 
-async function readPolicy(): Promise<unknown> {
+/**
+ * The policy as Chrome gives it, however long that takes (0.9.6): the test override in unpacked
+ * builds (late by stackable:managedDelayMs when that's set), else managed storage. Null for none;
+ * managed storage that's missing or refuses counts as none. Decisions a lock can veto wait for this
+ * (readLocksSettled); the board's paint races it (readPolicy).
+ */
+async function policyAnswer(): Promise<unknown> {
   if (!IS_EXTENSION) return json(readLocal(PREVIEW))
   const override = await readOverride()
-  if (override) return json(override)
-  policyRead ??= readManaged()
-  return policyRead
+  if (override) {
+    overrideWait ??= overrideDelay()
+    await overrideWait
+    return json(override)
+  }
+  managedAnswer ??= askManaged()
+  return managedAnswer
 }
 
-async function readManaged(waitMs = POLICY_WAIT_MS): Promise<unknown> {
-  if (!chrome.storage?.managed) return null
+function askManaged(): Promise<unknown> {
+  if (!chrome.storage?.managed) return Promise.resolve(null)
   // no policy, or managed storage unavailable: Chrome treats both as empty
-  const got: Promise<unknown> = chrome.storage.managed.get(null).then((v) => v ?? null, () => null)
-  const late = Symbol('late')
+  return chrome.storage.managed.get(null).then((v) => v ?? null, () => null)
+}
+
+/** Unpacked builds only: the test override's delay. The service worker has no localStorage, so none there. */
+function overrideDelay(): Promise<void> {
+  const ms = unpacked() ? Number(readLocal(OVERRIDE_DELAY)) : 0
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, Math.min(ms, 30_000))) : Promise.resolve()
+}
+
+/** Resolves with `answer`, or with `late` if it takes longer than `ms`. */
+async function within<T, L>(answer: Promise<T>, ms: number, late: L): Promise<T | L> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const first = await Promise.race([
-    got,
-    new Promise<typeof late>((resolve) => {
-      timer = setTimeout(() => resolve(late), waitMs)
-    }),
-  ])
+  const first = await Promise.race([answer, new Promise<L>((resolve) => (timer = setTimeout(() => resolve(late), ms)))])
   clearTimeout(timer)
-  if (first !== late) return first
-  // Too slow for this paint: show the board now, then the company spaces when Chrome answers.
-  void got.then((v) => {
-    if (!v || !Object.keys(v as object).length) return
-    policyRead = Promise.resolve(v)
-    lateAnswer?.()
+  return first
+}
+
+/** The lock set the policy had when it last answered on this computer (0.9.6); null when none is kept. */
+async function lastLocks(): Promise<string | null> {
+  if (lastSeen === undefined) {
+    try {
+      const v = (await chrome.storage.local.get(LAST_LOCKS))[LAST_LOCKS]
+      lastSeen ??= typeof v === 'string' ? v : null
+    } catch {
+      lastSeen ??= null
+    }
+  }
+  return lastSeen
+}
+
+/** Keeps the answer's locks for the next paint that can't wait, when they differ from what's kept. */
+async function rememberLocks(raw: unknown): Promise<void> {
+  if (!IS_EXTENSION) return
+  let locks = NO_LOCKS
+  try {
+    locks = parseManagedConfig(raw).lock
+  } catch {
+    // a malformed policy counts as none, as for the board
+  }
+  const next = anyLock(locks) ? JSON.stringify(locks) : null
+  if ((await lastLocks()) === next) return
+  lastSeen = next
+  try {
+    if (next) await chrome.storage.local.set({ [LAST_LOCKS]: next })
+    else await chrome.storage.local.remove(LAST_LOCKS)
+  } catch {
+    // storage refused: the next paint just can't use them
+  }
+}
+
+/**
+ * For the board's paint: the policy if it answers within POLICY_WAIT_MS. Past that the paint goes
+ * ahead without it, using the locks it had when it last answered (0.9.6), so locked buttons stay
+ * hidden from the first frame on later loads; the board refreshes when the answer lands, if that
+ * changes anything.
+ */
+async function readPolicy(): Promise<unknown> {
+  const answer = policyAnswer()
+  const late = Symbol('late')
+  const first = await within(answer, POLICY_WAIT_MS, late)
+  if (first !== late) {
+    void rememberLocks(first)
+    return first
+  }
+  const kept = await lastLocks()
+  void answer.then((v) => {
+    void rememberLocks(v)
+    // Too slow for this paint: the company spaces, or the locks the paint went without, come now.
+    if ((v && Object.keys(v as object).length) || kept) lateAnswer?.()
   })
-  return null
+  return kept ? { lock: parseLocks(json(kept)) } : null
 }
 
 /** Chrome's ManagedBookmarks folder, if the admin set that policy. */
@@ -177,19 +256,32 @@ export async function readCompany(now = Date.now()): Promise<CompanyBoard> {
 }
 
 /**
- * Just the policy's locks, for code that runs without the board's tree: the save popup, the calls
- * to the AI server, and Pro before the board has loaded (school mode). Never throws. `waitMs`
- * (0.9.2): wait that long for managed storage, for a decision nothing on screen is waiting for (the
- * service worker's reverse trial on install). Chrome for Testing takes about 2 s to answer, past
- * POLICY_WAIT_MS.
+ * Just the policy's locks, for code that runs without the board's tree: Pro before the board has
+ * loaded (school mode), raced like the board's paint. Never throws. `waitMs` (0.9.2): wait that long
+ * for managed storage, for a decision nothing on screen is waiting for (the service worker's reverse
+ * trial on install). Chrome for Testing takes about 2 s to answer, past POLICY_WAIT_MS. Since 0.9.6
+ * the save popup and the calls to the AI server use readLocksSettled.
  */
 export async function readLocks(opts: { waitMs?: number } = {}): Promise<CompanyLocks> {
   try {
-    if (opts.waitMs && IS_EXTENSION) {
-      const override = await readOverride()
-      return parseManagedConfig(override ? json(override) : await readManaged(opts.waitMs)).lock
-    }
+    if (opts.waitMs && IS_EXTENSION) return parseManagedConfig(await within(policyAnswer(), opts.waitMs, null)).lock
     return parseManagedConfig(await readPolicy()).lock
+  } catch {
+    return NO_LOCKS
+  }
+}
+
+/**
+ * The policy's locks once it has answered, however long that takes (0.9.6), for every decision a
+ * lock can veto: the rating card, the corner cards (corner.ts holds them for the cards), trial and
+ * upgrade prompts, the tidy coach mark, and every call to the AI server. No policy, or managed
+ * storage missing or refusing, is no lock. Never throws.
+ */
+export async function readLocksSettled(): Promise<CompanyLocks> {
+  try {
+    const answer = await policyAnswer()
+    void rememberLocks(answer)
+    return parseManagedConfig(answer).lock
   } catch {
     return NO_LOCKS
   }
@@ -200,7 +292,7 @@ export function watchCompany(onChange: () => void): () => void {
   if (!IS_EXTENSION || !chrome.storage?.onChanged) return () => {}
   const listener = (_changes: unknown, area: string) => {
     if (area !== 'managed') return
-    policyRead = null
+    managedAnswer = null
     onChange()
   }
   lateAnswer = onChange

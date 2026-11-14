@@ -28,12 +28,14 @@ export function ReverseTrialCard({ welcoming }: { welcoming: boolean }) {
   const switches = useTrialSwitches()
   const [card, setCard] = useState<{ title: string; line: string } | null>(null)
   const decided = useRef(false)
+  // 0.9.6: the company policy has answered (corner.ts); the card doesn't decide before that.
+  const settled = useCorner((s) => s.locks !== null)
   // Read when the card decides: the welcome screen stays up while it fills the board.
   const welcome = useRef(welcoming)
   welcome.current = welcoming
 
   useEffect(() => {
-    if (decided.current || !loaded || !ready || !IS_EXTENSION) return
+    if (decided.current || !loaded || !ready || !settled || !IS_EXTENSION) return
     const id = setTimeout(() => {
       decided.current = true
       const { state, trialAuto, trialStartedAt, checkoutAt } = usePro.getState()
@@ -49,8 +51,8 @@ export function ReverseTrialCard({ welcoming }: { welcoming: boolean }) {
         now,
         welcoming: welcome.current,
         checkoutPending: checkoutPending(checkoutAt, now),
-        // School mode: the company's pro lock, read with the board that loaded.
-        lockPro: !!useStackableStore.getState().tree?.company?.lock.pro,
+        // School mode: the company's pro lock, from the policy's real answer (0.9.6).
+        lockPro: !!corner.locks?.pro,
       })
       // A tab where the rating ask or another card got there first goes without.
       if (!due || !trialStartedAt || corner.ratingOpen || !corner.claim('reverseTrial')) return
@@ -58,7 +60,7 @@ export function ReverseTrialCard({ welcoming }: { welcoming: boolean }) {
       setCard({ title: reverseCardTitle(trialStartedAt), line: reverseCardLine(/Mac|iPhone|iPad/.test(navigator.platform)) })
     }, REVERSE_CARD_DELAY_MS)
     return () => clearTimeout(id)
-  }, [loaded, ready])
+  }, [loaded, ready, settled])
 
   if (!card || welcoming || ratingOpen) return null
 

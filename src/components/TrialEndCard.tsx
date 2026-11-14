@@ -33,9 +33,11 @@ export function TrialEndCard() {
   const stripOn = useTodayStrip((s) => s.on)
   const [card, setCard] = useState<{ kind: TrialCard; title: string; line: string | null; startedAt: number } | null>(null)
   const decided = useRef(false)
+  // 0.9.6: the company policy has answered (corner.ts); the recap doesn't decide before that.
+  const settled = useCorner((s) => s.locks !== null)
 
   useEffect(() => {
-    if (decided.current || !loaded || !ready || !IS_EXTENSION) return
+    if (decided.current || !loaded || !ready || !settled || !IS_EXTENSION) return
     decided.current = true
     const { state, trialStartedAt, checkoutAt } = usePro.getState()
     const now = Date.now()
@@ -46,12 +48,13 @@ export function TrialEndCard() {
       endingShows: prefs.trialCardShows('ending'),
       endedShows: prefs.trialCardShows('ended'),
       checkoutPending: checkoutPending(checkoutAt, now),
-      lockPro: !!useStackableStore.getState().tree?.company?.lock.pro,
+      // School mode: the pro lock from the policy's real answer (0.9.6).
+      lockPro: !!useCorner.getState().locks?.pro,
     })
     if (!kind || !trialStartedAt || !useCorner.getState().claim('trialEnd')) return
     prefs.setTrialCardShows(kind, prefs.trialCardShows(kind) + 1)
     void loadStats().then((stats) => setCard({ kind, title: trialCardTitle(kind, trialStartedAt, now), line: statsLine(stats), startedAt: trialStartedAt }))
-  }, [loaded, ready])
+  }, [loaded, ready, settled])
 
   if (!card) return null
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { IS_EXTENSION } from './bookmarks'
-import { readLocks } from './company'
+import { readLocksSettled } from './company'
 import { READY_TTL_MS, TIDY_API, readAnswer, type PlannedStack, type TidyBody, type TidyError } from './tidyPlan'
 
 // AI tidy on this computer (Pro, 0.7.1): is the server switched on, has the notice been accepted,
@@ -11,7 +11,8 @@ import { READY_TTL_MS, TIDY_API, readAnswer, type PlannedStack, type TidyBody, t
 // for an active key unless that answer says off, so a new key gets Tidy without opening Settings.
 // 0.9.5: the one free tidy calls it too, with no key, and until it's used the same check runs for it.
 // Whether it's used is kept in sync storage, so the Chrome profile's other computers know.
-// School mode: with the company's ai lock nothing here talks to the server at all.
+// School mode: with the company's ai lock nothing here talks to the server at all. 0.9.6: that lock
+// is read from the policy's real answer, never the board's 1.5 s race (company.ts readLocksSettled).
 
 const READY = 'tidyReady' // local: { ready, at }
 // local: true once the notice was accepted on this computer. "2" since 0.8.0, when the notice began
@@ -54,7 +55,7 @@ export async function loadReady(): Promise<boolean | null> {
 
 /** Is the server switched on? Asked at most once a day (a GET with nothing about the person in it). */
 export async function checkReady(): Promise<boolean> {
-  if (IS_EXTENSION && (await readLocks()).ai) return false
+  if (IS_EXTENSION && (await readLocksSettled()).ai) return false
   const known = await loadReady()
   if (known !== null || !IS_EXTENSION) return !!known
   try {
@@ -120,9 +121,14 @@ export async function acceptNotice(): Promise<void> {
   if (IS_EXTENSION) await chrome.storage.local.set({ [NOTICE]: true })
 }
 
-/** Asks the server for a plan. A "switched off" answer also hides the button until the next check. */
+/**
+ * Asks the server for a plan. A "switched off" answer also hides the button until the next check.
+ * 0.9.6: the locks are the policy's real answer, however long it takes; the free tidy also stays off
+ * under the pro lock, as tidyAccess has it, in case the button showed before the policy answered.
+ */
 export async function requestTidy(body: TidyBody): Promise<{ plan: PlannedStack[] } | { error: TidyError }> {
-  if ((await readLocks()).ai) return { error: 'not-ready' }
+  const locks = await readLocksSettled()
+  if (locks.ai || (body.free && locks.pro)) return { error: 'not-ready' }
   let status = 0
   let data: unknown = null
   try {

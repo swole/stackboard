@@ -55,6 +55,8 @@ export const RATING_LOAD_OPENS = 25
 // after one day, whatever the tab count.
 export const RATING_MILESTONE_DAYS = 1
 export const RATING_MILESTONE_STASHES = 3
+/** After a win the ask waits this long, so the success toast lands first (0.4.1). */
+export const RATING_WIN_DELAY_MS = 1800
 
 /** Links on the board, the ones in folders inside stacks included (0.8.0). */
 export function linkCount(tree: StackableTree | null): number {
@@ -96,4 +98,22 @@ export function shouldAskForRating(p: {
     p.opens >= minOpens &&
     p.now - p.firstSeen >= RATING_MIN_DAYS * DAY
   )
+}
+
+/**
+ * 0.9.6: an applied tidy (free or paid; Apply pressed and the stacks written) is a milestone too.
+ * 'ask' now, by the milestone rule; 'later' keeps it for the first new tab where that rule passes (a
+ * tidy before the install is a day old); 'drop' once the ask is answered or the company locks it.
+ * RatingPrompt asks only once nothing else is on screen, and an Undo takes the milestone back.
+ */
+export function tidyRatingStep(p: {
+  opens: number
+  firstSeen: number
+  now: number
+  answered: boolean
+  links: number
+  lockRating?: boolean
+}): 'ask' | 'later' | 'drop' {
+  if (p.lockRating || p.answered) return 'drop'
+  return shouldAskForRating({ ...p, trigger: 'milestone' }) ? 'ask' : 'later'
 }

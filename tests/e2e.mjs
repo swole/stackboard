@@ -5850,6 +5850,508 @@ try {
     await sleep(400)
   }
 
+  // ---------- 0.9.6: the tidy coach mark after an import, and the rating ask after a tidy ----------
+  // An import that lands a space of 15 to 600 links points at its Tidy button with a one-time card,
+  // once the server says Tidy is on (the GET Settings and the space menus send; stubbed here as in the
+  // tidy block). Nothing under 15 links or under the company's ai lock; once per Chrome profile
+  // (localStorage stackable:tidyCoach). An applied tidy is a rating milestone: it asks once its toast
+  // has gone, an Undo takes it back, and before the install is a day old it waits for the first new
+  // tab after that. The spaces wait in a folder under Other bookmarks, so the board is empty.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    // Board tabs left open by earlier blocks would react to every write below: close them.
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    const SYNC = ['freeTidy', 'proTrial', 'proKey']
+    const LOCAL = ['proLicense', 'proCheckout', 'freeTidy', 'tidyReady', 'tidyNotice2', 'appearance', 'policyLocks']
+    const LS = ['stackable:tidyCoach', 'stackable:tidyWin', 'stackable:rating', 'stackable:opens', 'stackable:firstSeen', 'stackable:lastSpaceId', 'stackable:managedOverride', 'stackable:managedDelayMs', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']
+    const was = await control.evaluate(async (s) => ({
+      sync: await chrome.storage.sync.get(s.sync),
+      local: await chrome.storage.local.get(s.local),
+      ls: Object.fromEntries(s.ls.map((k) => [k, localStorage.getItem(k)])),
+    }), { sync: SYNC, local: LOCAL, ls: LS })
+    // getstackboard.com/api answers in the page, as in the tidy block: GET says whether Tidy is on, POST
+    // sorts the links by the first word of their host. Every call is recorded.
+    const stub = (ready) => {
+      const real = window.fetch.bind(window)
+      const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+      window.__tidyCalls = []
+      window.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.startsWith('https://getstackboard.com/api/')) {
+          const method = (init.method || 'GET').toUpperCase()
+          window.__tidyCalls.push(`${method} ${new URL(url).pathname}`)
+          if (method === 'GET') return json({ ok: true, ready, max: 600 })
+          const body = JSON.parse(init.body)
+          const groups = new Map()
+          body.links.forEach((l, i) => {
+            const k = new URL(l.url).hostname.split('.')[0].replace(/\d+$/, '')
+            groups.set(k, [...(groups.get(k) ?? []), i])
+          })
+          const stacks = [...groups].map(([name, links]) => ({ name: name[0].toUpperCase() + name.slice(1), links }))
+          return json({ ok: true, board: { spaces: [{ name: body.space, emoji: '🧪', stacks }], missing: 0 } })
+        }
+        if (url.startsWith('https://api.polar.sh/')) return Promise.reject(new TypeError('blocked by the e2e'))
+        return real(input, init)
+      }
+    }
+    const open = async (ready = true) => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`coach: ${e.message}`))
+      await p.evaluateOnNewDocument(stub, ready)
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1') || !!document.querySelector('[data-welcome="import"] label'), { timeout: 10000 })
+      return p
+    }
+    // Copy on the welcome screen with what's ticked (the bookmarks bar); returns the button's words.
+    const copyIn = async (p) => {
+      await until(p, () => !!document.querySelector('[data-welcome="import"] label'))
+      const said = await p.evaluate(() => {
+        const b = [...document.querySelectorAll('[data-welcome="import"] button')].find((x) => x.textContent.trim().startsWith('Copy'))
+        b?.click()
+        return b?.textContent.trim() ?? ''
+      })
+      await until(p, () => document.querySelector('main h1')?.textContent === 'Bookmarks bar', null, 15000)
+      return said
+    }
+    const shownCoach = (p) => until(p, () => !!document.querySelector('[data-tidy-coach]'), null, 10000)
+    // The default palette on a plain background, so the screenshots show the mark and nothing else.
+    const setLook = (mode) => control.evaluate(async (mode) => {
+      const a = (await chrome.storage.local.get('appearance')).appearance ?? {}
+      await chrome.storage.local.set({ appearance: { ...a, palette: 'stackboard', mode, bg: { ...(a.bg ?? {}), kind: 'solid' } } })
+    }, mode)
+
+    const held = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const hold = await chrome.bookmarks.create({ parentId: '2', title: 'e2e hold' })
+      for (const k of await chrome.bookmarks.getChildren(root.id)) await chrome.bookmarks.move(k.id, { parentId: hold.id })
+      return { root: root.id, hold: hold.id }
+    })
+    const emptyBoard = () => control.evaluate(async (rootId) => {
+      for (const k of await chrome.bookmarks.getChildren(rootId)) await chrome.bookmarks.removeTree(k.id)
+    }, held.root)
+    // The bookmarks bar holds 3 links from the welcome block; a folder of 11 more makes 14.
+    const addToPile = (id, from, to) => control.evaluate(async (id, from, to) => {
+      const hosts = ['alpha', 'beta', 'gamma']
+      for (let i = from; i < to; i++) await chrome.bookmarks.create({ parentId: id, title: `Pile ${i + 1}`, url: `https://${hosts[i % 3]}${i + 1}.coach.example/` })
+    }, id, from, to)
+    const pile = await control.evaluate(async () => (await chrome.bookmarks.create({ parentId: '1', title: 'Coach pile' })).id)
+    await addToPile(pile, 0, 11)
+    await control.evaluate(async () => {
+      // The license first, so no open page tries to free a computer for a key that never was.
+      await chrome.storage.local.remove(['proLicense', 'proCheckout', 'freeTidy', 'tidyReady', 'tidyNotice2'])
+      await chrome.storage.sync.remove(['freeTidy', 'proTrial', 'proKey'])
+      for (const k of ['stackable:tidyCoach', 'stackable:tidyWin', 'stackable:rating', 'stackable:lastSpaceId', 'stackable:managedOverride']) localStorage.removeItem(k)
+      // No corner card takes the corner first: the what's-new notes count as answered here.
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']) localStorage.setItem(k, '-1')
+      localStorage.setItem('stackable:opens', '2')
+      // Installed three hours ago: the rating milestone's first day isn't over yet.
+      localStorage.setItem('stackable:firstSeen', String(Date.now() - 3 * 3600000))
+    })
+    await setLook('light')
+
+    // 1. Fourteen links: Tidy (free once) is there, but no coach mark, and nothing asks the server.
+    const a = await open()
+    const aSaid = await copyIn(a)
+    const aTidy = await until(a, () => document.querySelector('[data-tidy-button]')?.textContent.trim() === 'Tidy (free once)')
+    await sleep(3200) // past the mark's wait after an import
+    const aState = await a.evaluate(() => ({ coach: !!document.querySelector('[data-tidy-coach]'), calls: window.__tidyCalls.slice(), marker: localStorage.getItem('stackable:tidyCoach') }))
+    check(
+      'tidy coach: an import of 14 links shows no coach mark, though Tidy (free once) is there, and asks the server nothing',
+      aSaid === 'Copy 14 links' && aTidy && !aState.coach && !aState.calls.length && aState.marker === null,
+      JSON.stringify({ aSaid, aTidy, ...aState }),
+    )
+    await a.close()
+    await emptyBoard()
+    await addToPile(pile, 11, 20)
+
+    // 2. The company's ai lock: 23 links, and still no coach mark, no Tidy and no request.
+    await control.evaluate(() => localStorage.setItem('stackable:managedOverride', JSON.stringify({ lock: { ai: true } })))
+    const b = await open()
+    const bSaid = await copyIn(b)
+    await sleep(3500)
+    const bState = await b.evaluate(() => ({ coach: !!document.querySelector('[data-tidy-coach]'), tidy: !!document.querySelector('[data-tidy-button]'), calls: window.__tidyCalls.slice(), marker: localStorage.getItem('stackable:tidyCoach') }))
+    check(
+      'tidy coach: under the company ai lock an import of 23 links shows no coach mark and no Tidy, and asks the server nothing',
+      bSaid === 'Copy 23 links' && !bState.coach && !bState.tidy && !bState.calls.length && bState.marker === null,
+      JSON.stringify({ bSaid, ...bState }),
+    )
+    await b.close()
+    await control.evaluate(() => localStorage.removeItem('stackable:managedOverride'))
+    await emptyBoard()
+
+    // The server says Tidy is off: the one GET, then nothing, and the button goes too.
+    const off = await open(false)
+    await copyIn(off)
+    const asked0 = await until(off, () => window.__tidyCalls.includes('GET /api/tidy'))
+    await sleep(3000)
+    const offState = await off.evaluate(() => ({ coach: !!document.querySelector('[data-tidy-coach]'), tidy: !!document.querySelector('[data-tidy-button]'), calls: window.__tidyCalls.slice(), marker: localStorage.getItem('stackable:tidyCoach') }))
+    check(
+      'tidy coach: when the server says Tidy is off, the import asks once and shows nothing',
+      asked0 && !offState.coach && !offState.tidy && JSON.stringify(offState.calls) === JSON.stringify(['GET /api/tidy']) && offState.marker === null,
+      JSON.stringify(offState),
+    )
+    await off.close()
+    await control.evaluate(() => chrome.storage.local.remove('tidyReady'))
+    await emptyBoard()
+
+    // 3. 23 links: the mark hangs from that space's Tidy button once the server says Tidy is on.
+    const c = await open()
+    const cSaid = await copyIn(c)
+    const cShown = await shownCoach(c)
+    await sleep(400) // its entrance
+    const coach = await c.evaluate(() => {
+      const card = document.querySelector('[data-tidy-coach]')
+      const btn = document.querySelector('[data-tidy-button]')
+      const caret = document.querySelector('[data-tidy-coach-caret]')
+      if (!card || !btn || !caret) return null
+      const r = card.getBoundingClientRect()
+      const b = btn.getBoundingClientRect()
+      const k = caret.getBoundingClientRect()
+      return {
+        h1: document.querySelector('main h1')?.textContent,
+        kind: card.dataset.tidyCoach,
+        title: card.querySelector('h3')?.textContent.trim(),
+        body: card.querySelector('p')?.textContent.trim(),
+        buttons: [...card.querySelectorAll('button')].map((x) => x.textContent.trim()),
+        under: r.top > b.bottom && r.top - b.bottom <= 16 && Math.abs(r.right - b.right) <= 1,
+        caret: Math.abs(k.left + k.width / 2 - (b.left + b.width / 2)) <= 2 && k.top >= b.bottom - 1 && k.top < r.top,
+        ring: btn.hasAttribute('data-tidy-coached'),
+        calls: window.__tidyCalls.slice(),
+        marker: localStorage.getItem('stackable:tidyCoach'),
+        dialog: !!document.querySelector('[role=dialog]'),
+      }
+    })
+    check(
+      "tidy coach: an import of 23 links points at that space's Tidy button, the caret on the button's middle",
+      cSaid === 'Copy 23 links' && cShown && coach?.h1 === 'Bookmarks bar' && coach.kind === 'free' && coach.under && coach.caret && coach.ring && !coach.dialog,
+      JSON.stringify(coach),
+    )
+    check(
+      'tidy coach: it says "Want these sorted?" with the free line, "Sort them for me" and "Not now"',
+      coach?.title === 'Want these sorted?' &&
+        coach.body === 'Tidy reads the titles and links in this space and sorts them into stacks. You can undo it. Your first one is free.' &&
+        JSON.stringify(coach.buttons) === JSON.stringify(['Sort them for me', 'Not now']),
+      JSON.stringify(coach && { title: coach.title, body: coach.body, buttons: coach.buttons }),
+    )
+    check('tidy coach: right after the import it asked whether Tidy is on, one GET, and sent nothing else', JSON.stringify(coach?.calls) === JSON.stringify(['GET /api/tidy']), JSON.stringify(coach?.calls))
+    check('tidy coach: it is marked shown in localStorage, once per Chrome profile', !!coach?.marker && Number(coach.marker) > 0, String(coach?.marker))
+    // The whole tab, and a close-up of the button with the mark hanging from it.
+    const closeUp = () => c.evaluate(() => {
+      const b = document.querySelector('[data-tidy-button]').getBoundingClientRect()
+      const r = document.querySelector('[data-tidy-coach]').getBoundingClientRect()
+      const x = Math.max(0, Math.min(b.left, r.left) - 48)
+      const y = Math.max(0, b.top - 40)
+      return { x, y, width: Math.min(innerWidth - x, Math.max(b.right, r.right) + 48 - x), height: r.bottom + 48 - y }
+    })
+    await c.screenshot({ path: path.join(SHOTS, '096-coach-light.png') })
+    await c.screenshot({ path: path.join(SHOTS, '096-coach-light-close.png'), clip: await closeUp() })
+    await setLook('dark')
+    const darkOn = await until(c, () => document.documentElement.dataset.scheme === 'dark')
+    await sleep(500)
+    await c.screenshot({ path: path.join(SHOTS, '096-coach-dark.png') })
+    await c.screenshot({ path: path.join(SHOTS, '096-coach-dark-close.png'), clip: await closeUp() })
+    const darkCard = await c.evaluate(() => {
+      const card = document.querySelector('[data-tidy-coach]')
+      return card ? { bg: getComputedStyle(card).backgroundColor, title: getComputedStyle(card.querySelector('h3')).color } : null
+    })
+    check('tidy coach: in the dark scheme it takes the palette (Stackboard Dark) and stays up', darkOn && darkCard?.bg === rgb('#302925'), JSON.stringify(darkCard))
+    await setLook('light')
+    await until(c, () => document.documentElement.dataset.scheme === 'light')
+
+    // "Sort them for me" starts Tidy exactly as its button does: the notice first, nothing sent yet.
+    await c.evaluate(() => document.querySelector('[data-tidy-coach-sort]')?.click())
+    const viaCoach = await until(c, () => !!document.querySelector('[data-tidy-notice]'))
+    const n1 = await c.evaluate(() => ({
+      html: document.querySelector('[role=dialog]')?.innerHTML ?? '',
+      title: document.querySelector('[role=dialog]')?.getAttribute('aria-label'),
+      coach: !!document.querySelector('[data-tidy-coach]'),
+      ring: !!document.querySelector('[data-tidy-coached]'),
+      posts: window.__tidyCalls.filter((x) => x.startsWith('POST')).length,
+    }))
+    await c.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((x) => x.textContent.trim() === 'Cancel')?.click())
+    await until(c, () => !document.querySelector('[role=dialog]'))
+    await c.evaluate(() => document.querySelector('[data-tidy-button]')?.click())
+    const viaButton = await until(c, () => !!document.querySelector('[data-tidy-notice]'))
+    const n2 = await c.evaluate(() => document.querySelector('[role=dialog]')?.innerHTML ?? '')
+    check(
+      'tidy coach: "Sort them for me" opens the same AI notice as the Tidy button, and sends nothing yet',
+      viaCoach && viaButton && n1.title === 'Tidy this space' && n1.html.includes("Anthropic's AI") && n1.html === n2 && !n1.coach && !n1.ring && n1.posts === 0,
+      JSON.stringify({ viaCoach, viaButton, title: n1.title, same: n1.html === n2, coach: n1.coach, ring: n1.ring, posts: n1.posts }),
+    )
+
+    // 4. Sorted from there. Three hours after install, so the rating ask keeps the milestone for later.
+    await c.evaluate(() => document.querySelector('[data-tidy-continue]')?.click())
+    const cPreview = await until(c, () => document.querySelectorAll('[data-tidy-stack]').length >= 3, null, 10000)
+    await c.evaluate(() => document.querySelector('[data-tidy-apply]')?.click())
+    const cApplied = await until(c, () => (document.querySelector('.toast')?.textContent ?? '').includes('Tidied'), null, 10000)
+    const cWin = await c.evaluate(() => localStorage.getItem('stackable:tidyWin'))
+    const cGone = await until(c, () => !document.querySelector('.toast'), null, 16000) // the Tidied toast lasts 10 s
+    await sleep(1200)
+    const cAfter = await c.evaluate(() => ({ rating: !!document.querySelector('[data-rating-prompt]'), win: localStorage.getItem('stackable:tidyWin') }))
+    check(
+      'tidy rating: a tidy applied before the install is a day old asks nothing on its tab, and is kept for later',
+      cPreview && cApplied && !!cWin && cGone && !cAfter.rating && cAfter.win === cWin,
+      JSON.stringify({ cPreview, cApplied, cWin, cGone, ...cAfter }),
+    )
+    await c.close()
+    const c2 = await open()
+    await sleep(1500)
+    const early = await c2.evaluate(() => ({ rating: !!document.querySelector('[data-rating-prompt]'), win: localStorage.getItem('stackable:tidyWin') }))
+    await c2.close()
+    // The clock moves on: installed two days ago.
+    await control.evaluate(() => localStorage.setItem('stackable:firstSeen', String(Date.now() - 2 * 86400000)))
+    const c3 = await open()
+    const asked = await until(c3, () => !!document.querySelector('[data-rating-prompt]'), null, 5000)
+    const ask3 = await c3.evaluate(() => {
+      const card = document.querySelector('[data-rating-prompt]')
+      const r = card?.getBoundingClientRect()
+      return {
+        centred: !!r && Math.abs(r.left + r.width / 2 - innerWidth / 2) < 4,
+        stars: card ? card.querySelectorAll('svg.lucide-star').length : -1,
+        text: card?.textContent ?? '',
+        win: localStorage.getItem('stackable:tidyWin'),
+      }
+    })
+    check(
+      'tidy rating: a new tab inside the first day keeps it; the first new tab after the one-day mark asks, with the same star-free card',
+      !early.rating && !!early.win && asked && ask3.centred && ask3.stars === 0 && ask3.text.includes('A small favour') && ask3.text.includes('Rate on the Chrome Web Store') && ask3.win === null,
+      JSON.stringify({ early, asked, ...ask3, text: ask3.text.slice(0, 60) }),
+    )
+    // Once: with that card still unanswered, the next new tab asks nothing.
+    const c4 = await open()
+    await sleep(1500)
+    const onceOnly = await c4.evaluate(() => !document.querySelector('[data-rating-prompt]'))
+    await c4.close()
+    await c3.bringToFront()
+    await c3.evaluate(() => [...document.querySelectorAll('[data-rating-prompt] button')].find((x) => x.textContent.trim() === 'No thanks')?.click())
+    const answered = await until(c3, () => !document.querySelector('[data-rating-prompt]') && localStorage.getItem('stackable:rating') === 'dismissed')
+    check('tidy rating: the carried-over ask comes once, and No thanks retires it', onceOnly && answered, JSON.stringify({ onceOnly, answered }))
+    await c3.close()
+
+    // 5. Again, with the free tidy unused and no marker: Not now retires the mark, and a later import
+    //    on a new tab never brings it back.
+    await emptyBoard()
+    const fresh = () => control.evaluate(async () => {
+      await chrome.storage.local.remove('freeTidy')
+      await chrome.storage.sync.remove('freeTidy')
+      localStorage.removeItem('stackable:tidyCoach')
+    })
+    await fresh()
+    const d = await open()
+    await copyIn(d)
+    const dShown = await shownCoach(d)
+    await d.evaluate(() => document.querySelector('[data-tidy-coach-later]')?.click())
+    const dGone = await until(d, () => !document.querySelector('[data-tidy-coach]') && !document.querySelector('[data-tidy-coached]'))
+    const dState = await d.evaluate(() => ({ marker: localStorage.getItem('stackable:tidyCoach'), tidy: document.querySelector('[data-tidy-button]')?.textContent.trim() ?? null, dialog: !!document.querySelector('[role=dialog]') }))
+    check('tidy coach: Not now retires it and leaves Tidy (free once) where it was', dShown && dGone && !!dState.marker && dState.tidy === 'Tidy (free once)' && !dState.dialog, JSON.stringify({ dShown, dGone, ...dState }))
+    await d.close()
+    await emptyBoard()
+    const d2 = await open()
+    await copyIn(d2)
+    await sleep(3500)
+    const dAgain = await d2.evaluate(() => ({ coach: !!document.querySelector('[data-tidy-coach]'), tidy: document.querySelector('[data-tidy-button]')?.textContent.trim() ?? null }))
+    await d2.close()
+    const d3 = await open()
+    await sleep(2500)
+    const dLater = await d3.evaluate(() => !document.querySelector('[data-tidy-coach]'))
+    await d3.close()
+    check('tidy coach: once retired it never returns, on a new tab or after another import', !dAgain.coach && dAgain.tidy === 'Tidy (free once)' && dLater, JSON.stringify({ ...dAgain, dLater }))
+
+    // 6. Esc retires it too.
+    await emptyBoard()
+    await fresh()
+    const e = await open()
+    await copyIn(e)
+    const eShown = await shownCoach(e)
+    await e.keyboard.press('Escape')
+    const eGone = await until(e, () => !document.querySelector('[data-tidy-coach]'))
+    const eMarker = await e.evaluate(() => localStorage.getItem('stackable:tidyCoach'))
+    check('tidy coach: Esc retires it as well', eShown && eGone && !!eMarker, JSON.stringify({ eShown, eGone, eMarker }))
+
+    // 7. Two days in, the rating unanswered: an Undo takes the milestone back; a tidy that stays asks
+    //    once its toast has gone, and not while the toast and its Undo are up.
+    await control.evaluate(() => {
+      localStorage.removeItem('stackable:rating')
+      localStorage.removeItem('stackable:tidyWin')
+    })
+    const sortHere = async (p) => {
+      await until(p, () => document.querySelector('[data-tidy-button]')?.textContent.trim() === 'Tidy (free once)')
+      await p.evaluate(() => document.querySelector('[data-tidy-button]')?.click()) // the notice was accepted in step 3
+      await until(p, () => document.querySelectorAll('[data-tidy-stack]').length >= 3, null, 10000)
+      await p.evaluate(() => document.querySelector('[data-tidy-apply]')?.click())
+      return until(p, () => (document.querySelector('.toast')?.textContent ?? '').includes('Tidied'), null, 10000)
+    }
+    const undoApplied = await sortHere(e)
+    await e.evaluate(() => [...document.querySelectorAll('.toast button')].find((x) => x.textContent.includes('Undo'))?.click())
+    const restored = await until(e, () => (document.querySelector('.toast')?.textContent ?? '').includes('Restored'), null, 10000)
+    await until(e, () => !document.querySelector('.toast'), null, 8000)
+    await sleep(1500)
+    const undone = await e.evaluate(() => ({ rating: !!document.querySelector('[data-rating-prompt]'), win: localStorage.getItem('stackable:tidyWin') }))
+    check('tidy rating: an Undo takes the milestone back, so no ask after its toast', undoApplied && restored && !undone.rating && undone.win === null, JSON.stringify({ undoApplied, restored, ...undone }))
+    await control.evaluate(async () => {
+      await chrome.storage.local.remove('freeTidy')
+      await chrome.storage.sync.remove('freeTidy')
+    })
+    const kept = await sortHere(e)
+    await sleep(2500) // past the 1.8 s a win waits
+    const during = await e.evaluate(() => ({ toast: !!document.querySelector('.toast'), rating: !!document.querySelector('[data-rating-prompt]') }))
+    const gAsked = await until(e, () => !document.querySelector('.toast') && !!document.querySelector('[data-rating-prompt]'), null, 16000)
+    const gState = await e.evaluate(() => ({ win: localStorage.getItem('stackable:tidyWin'), stars: document.querySelectorAll('[data-rating-prompt] svg.lucide-star').length }))
+    check(
+      'tidy rating: after the first day an applied tidy brings the rating card once its toast, with Undo, has gone',
+      kept && during.toast && !during.rating && gAsked && gState.win === null && gState.stars === 0,
+      JSON.stringify({ kept, during, gAsked, ...gState }),
+    )
+    await e.evaluate(() => [...document.querySelectorAll('[data-rating-prompt] button')].find((x) => x.textContent.trim() === 'No thanks')?.click())
+    await e.close()
+
+    // 8. Settings > Copy from Chrome bookmarks is the same import, on a board that has spaces: the copy
+    //    closes the dialog, then the mark shows on the new space (a second copy of the bar).
+    await fresh()
+    const f = await open()
+    await f.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Settings')?.click())
+    await until(f, (t) => [...document.querySelectorAll('[role=dialog] button')].some((x) => x.textContent.trim() === t), 'Copy from Chrome bookmarks')
+    await f.evaluate((t) => [...document.querySelectorAll('[role=dialog] button')].find((x) => x.textContent.trim() === t)?.click(), 'Copy from Chrome bookmarks')
+    const fOffer = await until(f, (t) => [...document.querySelectorAll('[role=dialog] button')].some((x) => x.textContent.trim() === t), 'Copy 23 links')
+    await f.evaluate((t) => [...document.querySelectorAll('[role=dialog] button')].find((x) => x.textContent.trim() === t)?.click(), 'Copy 23 links')
+    const fShown = await shownCoach(f)
+    const fState = await f.evaluate(() => ({
+      dialog: !!document.querySelector('[role=dialog]'),
+      h1: document.querySelector('main h1')?.textContent,
+      stacks: [...document.querySelectorAll('[data-stack-grid] [id^="stack-"] h3')].map((x) => x.textContent.trim()),
+      kind: document.querySelector('[data-tidy-coach]')?.dataset.tidyCoach ?? null,
+    }))
+    check(
+      'tidy coach: Settings > Copy from Chrome bookmarks is the same import: once the copy closes the dialog, the mark shows on the new space',
+      fOffer && fShown && !fState.dialog && fState.h1 === 'Bookmarks bar' && fState.stacks.includes('Coach pile') && fState.kind === 'free',
+      JSON.stringify({ fOffer, fShown, ...fState }),
+    )
+    await f.evaluate(() => document.querySelector('[data-tidy-coach-later]')?.click())
+    await f.close()
+
+    // 9. A company policy that answers late (0.9.6). stackable:managedDelayMs (unpacked builds only)
+    //    makes the test policy answer 3 s after a page asks, as a slow managed storage can. The board
+    //    paints anyway after its 1.5 s wait; the rating card and the coach mark wait for the answer and
+    //    stay away under its locks; and the locks are kept, so the next paint hides locked buttons from
+    //    its first frame.
+    const late = (p, ms = 3000) => control.evaluate(async (p, ms) => {
+      await chrome.storage.local.remove(['policyLocks', 'freeTidy', 'tidyReady'])
+      await chrome.storage.sync.remove('freeTidy')
+      localStorage.setItem('stackable:managedOverride', JSON.stringify(p))
+      localStorage.setItem('stackable:managedDelayMs', String(ms))
+    }, p, ms)
+    // When the board painted (from the page's start), what it showed then, whether the rating card
+    // showed at any point in the first 5 s, and what it shows after the answer.
+    const lateBoard = async (p) => {
+      const atPaint = await p.evaluate(() => ({
+        at: Math.round(performance.getEntriesByName('sb:board')[0]?.startTime ?? -1),
+        now: Math.round(performance.now()),
+        exportButton: !!document.querySelector('[data-export-button]'),
+        rating: !!document.querySelector('[data-rating-prompt]'),
+      }))
+      let rating = atPaint.rating
+      while ((await p.evaluate(() => performance.now())) < 5000) {
+        if (await p.evaluate(() => !!document.querySelector('[data-rating-prompt]'))) rating = true
+        await sleep(100)
+      }
+      const after = await p.evaluate(() => ({ exportButton: !!document.querySelector('[data-export-button]'), tidy: !!document.querySelector('[data-tidy-button]'), calls: window.__tidyCalls.slice() }))
+      return { atPaint, rating, after }
+    }
+    const LATE_LOCKS = { ai: true, rating: true, importExport: true }
+    await late({ lock: LATE_LOCKS })
+    await control.evaluate(() => {
+      // The rating rule is met (30 new tabs over 5 days), so only the lock keeps the card away.
+      localStorage.removeItem('stackable:rating')
+      localStorage.setItem('stackable:opens', '30')
+      localStorage.setItem('stackable:firstSeen', String(Date.now() - 5 * 86400000))
+    })
+    const g = await open()
+    const gSeen = await lateBoard(g)
+    await g.close()
+    const keptLocks = await control.evaluate(async () => (await chrome.storage.local.get('policyLocks')).policyLocks ?? null)
+    check(
+      'late policy: the board paints before the policy answers, and the rating card never shows under its rating lock',
+      gSeen.atPaint.at > 0 && gSeen.atPaint.at < 2600 && gSeen.atPaint.now < 3000 && !gSeen.rating,
+      JSON.stringify(gSeen),
+    )
+    check(
+      'late policy: the answer reaches the board when it lands (no Export, no Tidy), nothing asked the AI server, and the locks are kept for the next paint',
+      gSeen.atPaint.exportButton && !gSeen.after.exportButton && !gSeen.after.tidy && !gSeen.after.calls.length && !!keptLocks && JSON.parse(keptLocks).ai && JSON.parse(keptLocks).rating && JSON.parse(keptLocks).importExport,
+      JSON.stringify({ after: gSeen.after, keptLocks }),
+    )
+    // The same late policy, now kept from the last answer: locked buttons are gone from the first frame.
+    const h = await open()
+    const hSeen = await lateBoard(h)
+    await h.close()
+    check(
+      'late policy: with the locks kept from the last answer, the next paint hides Export from its first frame, before the policy answers, and still no rating card',
+      hSeen.atPaint.at > 0 && hSeen.atPaint.at < 2600 && hSeen.atPaint.now < 3000 && !hSeen.atPaint.exportButton && !hSeen.rating,
+      JSON.stringify(hSeen),
+    )
+    // No policy at all: the same board does ask, so it was the lock that kept the card away.
+    await control.evaluate(() => {
+      localStorage.removeItem('stackable:managedOverride')
+      localStorage.removeItem('stackable:managedDelayMs')
+    })
+    const ctl = await open()
+    const ctlAsked = await until(ctl, () => !!document.querySelector('[data-rating-prompt]'), null, 6000)
+    await ctl.evaluate(() => [...document.querySelectorAll('[data-rating-prompt] button')].find((x) => x.textContent.trim() === 'No thanks')?.click())
+    await ctl.close()
+    check('late policy: with no policy the same board asks for a rating, as its rule says', ctlAsked)
+
+    // The coach mark: only the ai lock, nothing kept, and an import right after the board paints. The
+    // policy answers 6 s late here, so the import lands well before it does (an import takes 1 to 2 s).
+    await emptyBoard()
+    await late({ lock: { ai: true } }, 6000)
+    await control.evaluate(() => localStorage.removeItem('stackable:tidyCoach'))
+    const lc = await open()
+    await copyIn(lc)
+    const landedAt = await lc.evaluate(() => Math.round(performance.now()))
+    let coachSeen = false
+    while ((await lc.evaluate(() => performance.now())) < 9000) {
+      if (await lc.evaluate(() => !!document.querySelector('[data-tidy-coach]'))) coachSeen = true
+      await sleep(150)
+    }
+    const lcState = await lc.evaluate(() => ({ calls: window.__tidyCalls.slice(), marker: localStorage.getItem('stackable:tidyCoach'), tidy: !!document.querySelector('[data-tidy-button]') }))
+    await lc.close()
+    check(
+      'late policy: an import of 23 links that lands before the policy answers gets no coach mark under its ai lock, and nothing asks the AI server',
+      landedAt < 6000 && !coachSeen && !lcState.calls.length && lcState.marker === null && !lcState.tidy,
+      JSON.stringify({ landedAt, coachSeen, ...lcState }),
+    )
+    await control.evaluate(async () => {
+      localStorage.removeItem('stackable:managedOverride')
+      localStorage.removeItem('stackable:managedDelayMs')
+      await chrome.storage.local.remove('policyLocks')
+    })
+
+    // Back as the block found it: the imported space and the pile go, the spaces come home in order.
+    await control.evaluate(async (s) => {
+      for (const k of await chrome.bookmarks.getChildren(s.held.root)) await chrome.bookmarks.removeTree(k.id)
+      for (const k of await chrome.bookmarks.getChildren(s.held.hold)) await chrome.bookmarks.move(k.id, { parentId: s.held.root })
+      await chrome.bookmarks.removeTree(s.held.hold)
+      await chrome.bookmarks.removeTree(s.pile)
+      // The license first, as above.
+      await chrome.storage.local.remove(s.local)
+      await chrome.storage.sync.remove(s.sync)
+      if (Object.keys(s.was.local).length) await chrome.storage.local.set(s.was.local)
+      if (Object.keys(s.was.sync).length) await chrome.storage.sync.set(s.was.sync)
+      for (const [k, v] of Object.entries(s.was.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, { held, pile, was, sync: SYNC, local: LOCAL })
+    await sleep(400)
+  }
+
   // ---------- 0.7.0: auto-archive (Pro) ----------
   // The service worker saves idle web tabs into today's "Archived" stack, first in the Stash
   // space, and closes them; the tab on screen, pinned tabs and browser pages stay. A 1 ms limit

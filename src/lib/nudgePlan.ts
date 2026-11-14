@@ -351,9 +351,11 @@ export const FOUNDING_NOTE = {
  * so it steps aside for them, and skips a tab where the rating ask is up; "what stopped you?"
  * (0.9.3) decides WHY_NOT_DELAY_MS after load, the same way; the December note (0.9.5) decides
  * FOUNDING_NOTE_DELAY_MS after load and also steps aside for a moment line that's waiting, so it goes
- * last; the moment line waits for a stash or a bankruptcy.
+ * last; the moment line waits for a stash or a bankruptcy. The tidy coach mark (0.9.6) sits on the
+ * Tidy button rather than in the corner, but takes its turn the same way after an import: it waits
+ * for the holder to let go, and the cards wait for it.
  */
-export type CornerCard = 'whatsNew' | 'trialEnd' | 'reverseTrial' | 'whyNot' | 'founding' | 'moment'
+export type CornerCard = 'whatsNew' | 'trialEnd' | 'reverseTrial' | 'whyNot' | 'founding' | 'moment' | 'tidyCoach'
 
 /** The bottom-right corner holds one card at a time; the holder can claim it again. */
 export function claimable(holder: CornerCard | null, card: CornerCard): boolean {

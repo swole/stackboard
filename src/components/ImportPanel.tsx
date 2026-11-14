@@ -3,6 +3,9 @@ import { ArrowRight } from 'lucide-react'
 import { listSources, createPlannedSpace, type ImportSource } from '../lib/importChrome'
 import { deleteSpace } from '../lib/bookmarks'
 import { countPlannedFolders, plural } from '../lib/importPlan'
+import { loadFreeTidy } from '../lib/tidy'
+import { offerTidyCoach } from '../lib/tidyCoach'
+import { tidyInput } from '../lib/tidyPlan'
 import { useStackableStore } from '../store/useStackableStore'
 
 /** Chrome's folders with links in them; null while loading. */
@@ -67,6 +70,8 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
     setError(null)
     setProgress({ done: 0, total: links })
     if (variant === 'welcome') setOnboarding(true)
+    // 0.9.6: the coach mark below needs to know whether the free tidy is used (storage only).
+    loadFreeTidy()
     const created: string[] = []
     try {
       let base = 0
@@ -78,8 +83,14 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
         base += source.plan.links
       }
       await refresh()
-      selectSpace(created[0])
-      flashItem(created[0])
+      // 0.9.6: a new space big enough to tidy gets the coach mark on its Tidy button
+      // (tidyCoachPlan.ts). Of several, the one with the most links, so that's the one to show.
+      const { tree } = useStackableStore.getState()
+      const made = created.flatMap((id) => tree?.spaces.find((s) => s.id === id) ?? [])
+      const coached = offerTidyCoach(made.map((s) => ({ id: s.id, links: tidyInput(s).links.length })))
+      const first = coached ?? created[0]
+      selectSpace(first)
+      flashItem(first)
       showToast({
         verb: 'Copied',
         title: chosen.length === 1 ? chosen[0].label : plural(chosen.length, 'folder'),

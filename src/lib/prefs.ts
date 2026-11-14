@@ -22,6 +22,8 @@ const REVERSE_TRIAL = 'stackable:reverseTrial'
 const WHY_NOT_AT = 'stackable:whyNotAt'
 const WHY_NOT_ASKED = 'stackable:whyNotAsked'
 const FOUNDING_NOTE = 'stackable:foundingNote'
+const TIDY_COACH = 'stackable:tidyCoach'
+const TIDY_WIN = 'stackable:tidyWin'
 
 function read(key: string): string | null {
   try {
@@ -102,6 +104,19 @@ export const prefs = {
     return w === 'december' || w === 'last-days' ? w : null
   },
   setFoundingNote: (w: FoundingWindow) => write(FOUNDING_NOTE, w),
+  /** The tidy coach mark has shown in this Chrome profile on this computer (0.9.6): it shows once. */
+  tidyCoachShown: (): boolean => read(TIDY_COACH) !== null,
+  setTidyCoachShown: (at = Date.now()) => write(TIDY_COACH, String(at)),
+  /**
+   * When a tidy was applied, until the rating ask has taken it as a milestone (0.9.6): a tidy before
+   * the install is a day old waits here for the first new tab after that. Null for none.
+   */
+  tidyWin: (): number | null => {
+    const at = Number(read(TIDY_WIN))
+    return at > 0 ? at : null
+  },
+  setTidyWin: (at: number) => write(TIDY_WIN, String(at)),
+  clearTidyWin: () => write(TIDY_WIN, null),
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1

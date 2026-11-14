@@ -2893,5 +2893,126 @@ import { FOUNDING_LAST_DAYS_FROM, FOUNDING_NOTE, FOUNDING_NOTE_DELAY_MS, FOUNDIN
   eq('0.9.5 copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
 }
 
+// ---------- 0.9.6: the tidy coach mark after an import, and the rating ask after a tidy ----------
+import { TIDY_COACH, TIDY_COACH_DELAY_MS, TIDY_COACH_MIN_LINKS, coachAccess, coachBody, coachSpace, tidyCoach } from '../src/lib/tidyCoachPlan'
+import { RATING_MILESTONE_DAYS, RATING_WIN_DELAY_MS, tidyRatingStep } from '../src/lib/onboarding'
+{
+  // Which space it points at: 15 to 600 links, the most of them, the first of equals.
+  eq("tidy coach: the floor is 15 links and the cap is Tidy's own 600", [TIDY_COACH_MIN_LINKS, TIDY_MAX_LINKS], [15, 600])
+  eq('tidy coach: a space of 15 to 600 links, both included', [
+    coachSpace([{ id: 'a', links: 14 }]),
+    coachSpace([{ id: 'a', links: 15 }]),
+    coachSpace([{ id: 'a', links: 600 }]),
+    coachSpace([{ id: 'a', links: 601 }]),
+    coachSpace([]),
+  ], [null, 'a', 'a', null, null])
+  eq('tidy coach: of several new spaces, the one with the most links within the limits, the first of equals', [
+    coachSpace([{ id: 'a', links: 20 }, { id: 'b', links: 300 }, { id: 'c', links: 900 }]),
+    coachSpace([{ id: 'a', links: 40 }, { id: 'b', links: 40 }]),
+    coachSpace([{ id: 'a', links: 3 }, { id: 'b', links: 650 }, { id: 'c', links: 16 }]),
+    coachSpace([{ id: 'a', links: 12 }, { id: 'b', links: 14 }]),
+  ], ['b', 'a', 'c', null])
+  // The import counts a new space's links as Tidy does: links in folders inside a stack count, a to-do stack doesn't.
+  const bm = (id: string) => ({ id, title: id, url: `https://${id}.example/`, parentStackId: 'K' })
+  const imported: Space = {
+    id: 'N',
+    rawTitle: '⭐ Bookmarks bar',
+    name: 'Bookmarks bar',
+    emoji: '⭐',
+    stacks: [
+      { id: 'T', title: 'To do', parentSpaceId: 'N', bookmarks: [], todo: { id: 'todo-x', anchorId: 'm' } },
+      { id: 'K', title: 'Reading', parentSpaceId: 'N', bookmarks: Array.from({ length: 10 }, (_, i) => bm(`r${i}`)), folders: [{ id: 'F', title: 'Deep', parentId: 'K', bookmarks: Array.from({ length: 5 }, (_, i) => bm(`d${i}`)), folders: [] }] },
+    ],
+  }
+  eq('tidy coach: links in a folder inside a stack count towards the 15, as Tidy sends them', [tidyInput(imported).links.length, coachSpace([{ id: imported.id, links: tidyInput(imported).links.length }])], [15, 'N'])
+
+  // Who sees it.
+  const base = { spaces: [{ id: 'x', links: 20 }], access: 'free' as const, shown: false, lockAi: false, lockPro: false }
+  eq('tidy coach: for the free tidy while it is unused, and for a paid key', [tidyCoach(base), tidyCoach({ ...base, access: 'paid' })], ['x', 'x'])
+  eq("tidy coach: not for someone who can't press Tidy; not known yet still names the space, and the mark waits for it", [tidyCoach({ ...base, access: null }), tidyCoach({ ...base, access: undefined })], [null, 'x'])
+  eq('tidy coach: once per Chrome profile', [tidyCoach({ ...base, shown: true }), tidyCoach({ ...base, access: 'paid', shown: true })], [null, null])
+  eq('tidy coach: never under the company ai or pro lock, a paid key included', [
+    tidyCoach({ ...base, lockAi: true }),
+    tidyCoach({ ...base, access: 'paid', lockAi: true }),
+    tidyCoach({ ...base, lockPro: true }),
+    tidyCoach({ ...base, access: 'paid', lockPro: true }),
+  ], [null, null, null, null])
+  eq('tidy coach: an import under 15 links, or over 600, shows nothing', [tidyCoach({ ...base, spaces: [{ id: 'x', links: 14 }] }), tidyCoach({ ...base, spaces: [{ id: 'x', links: 601 }] })], [null, null])
+
+  // Who can press Tidy, as the import knows it.
+  const know = (p: Partial<Parameters<typeof coachAccess>[0]>) =>
+    coachAccess({ proReady: true, state: { kind: 'free', trialUsed: false }, activated: false, freeUsed: false, lockAi: false, lockPro: false, ...p })
+  eq('tidy coach: once it is known, the same answer as the Tidy button (tidyAccess)', [
+    know({}),
+    know({ state: { kind: 'trial', daysLeft: 12 } }),
+    know({ freeUsed: true }),
+    know({ state: { kind: 'pro' }, activated: true, freeUsed: true }),
+    know({ state: { kind: 'pro' }, activated: false }),
+    know({ state: { kind: 'paused', reason: 'ended' }, activated: true }),
+  ], ['free', 'free', null, 'paid', null, 'free'])
+  eq('tidy coach: not known yet while Pro loads, a key has its first check, or the free tidy is unread (the welcome screen)', [
+    know({ proReady: false }),
+    know({ state: { kind: 'paused', reason: 'checking' } }),
+    know({ freeUsed: null }),
+    know({ state: { kind: 'trial', daysLeft: 14 }, freeUsed: null }),
+  ], [undefined, undefined, undefined, undefined])
+  eq('tidy coach: a paid key, or a lock, needs no free tidy read', [
+    know({ state: { kind: 'pro' }, activated: true, freeUsed: null }),
+    know({ freeUsed: null, lockAi: true }),
+    know({ freeUsed: null, lockPro: true }),
+    know({ proReady: false, lockAi: true }),
+  ], ['paid', null, null, null])
+
+  // What it says, and when.
+  eq('tidy coach: the words', [TIDY_COACH.title, coachBody('free'), coachBody('paid'), TIDY_COACH.sort, TIDY_COACH.later], [
+    'Want these sorted?',
+    'Tidy reads the titles and links in this space and sorts them into stacks. You can undo it. Your first one is free.',
+    'Tidy reads the titles and links in this space and sorts them into stacks. You can undo it.',
+    'Sort them for me',
+    'Not now',
+  ])
+  eq("tidy coach: it shows after the import's toast lands, and after any rating ask the import brings", [TIDY_COACH_DELAY_MS, TIDY_COACH_DELAY_MS > RATING_WIN_DELAY_MS], [2000, true])
+  eq('corner: the coach mark takes its turn like the cards', [
+    claimable(null, 'tidyCoach'),
+    claimable('whatsNew', 'tidyCoach'),
+    claimable('founding', 'tidyCoach'),
+    claimable('tidyCoach', 'moment'),
+    claimable('tidyCoach', 'tidyCoach'),
+  ], [true, false, false, false, true])
+
+  // The rating ask after a tidy that worked.
+  const DAY = 86_400_000
+  const HOUR = 3_600_000
+  const now = 1_800_000_000_000
+  const r = { opens: 2, firstSeen: now - 2 * DAY, now, answered: false, links: 30 }
+  eq('tidy rating: an applied tidy asks once the install is a day old, at any tab count', [RATING_MILESTONE_DAYS, tidyRatingStep(r), tidyRatingStep({ ...r, opens: 1, firstSeen: now - DAY })], [1, 'ask', 'ask'])
+  const early = { ...r, firstSeen: now - 3 * HOUR }
+  eq('tidy rating: before day one it is kept, then asks on the first new tab after the one-day mark', [
+    tidyRatingStep(early),
+    tidyRatingStep({ ...early, now: early.firstSeen + DAY - 1 }),
+    tidyRatingStep({ ...early, now: early.firstSeen + DAY }),
+  ], ['later', 'later', 'ask'])
+  eq('tidy rating: asked once per device, and never if already answered', [tidyRatingStep({ ...r, answered: true }), tidyRatingStep({ ...early, answered: true })], ['drop', 'drop'])
+  eq('tidy rating: never under the company rating lock, kept or not', [tidyRatingStep({ ...r, lockRating: true }), tidyRatingStep({ ...early, lockRating: true }), tidyRatingStep({ ...r, lockRating: false })], ['drop', 'drop', 'ask'])
+  eq('tidy rating: it needs links on the board, like the other milestones', tidyRatingStep({ ...r, links: 0 }), 'later')
+  eq('tidy rating: the same rule as a milestone, which the other triggers keep', [
+    shouldAskForRating({ ...r, trigger: 'milestone' }),
+    shouldAskForRating({ ...r, trigger: 'win' }),
+    shouldAskForRating({ ...r, trigger: 'load' }),
+  ], [true, false, false])
+
+  // A late policy (0.9.6): a paint that can't wait uses the lock set kept from the last answer, as
+  // { lock } in place of the policy. It reads back as the same locks, and on its own it applies.
+  const kept = { ...NO_LOCKS, ai: true, rating: true, importExport: true }
+  const back = parseManagedConfig({ lock: parseLocks(JSON.parse(JSON.stringify(kept))) })
+  eq('late policy: the kept lock set reads back as the same locks, and a policy of locks alone applies', [back.lock, isEmptyConfig(back), anyLock(back.lock), anyLock(NO_LOCKS)], [kept, false, true, false])
+
+  // The copy rules: plain words, no dashes or dots between them, and no "X, not Y".
+  const words = [TIDY_COACH.title, coachBody('free'), coachBody('paid'), TIDY_COACH.sort, TIDY_COACH.later]
+  // Em dash, en dash and middle dot, by code point.
+  eq('0.9.6 copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('0.9.6 copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')
 process.exit(fails ? 1 : 0)

@@ -1,26 +1,36 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { useStackableStore } from '../store/useStackableStore'
-import { REVIEWS_URL, installedAt, linkCount, shouldAskForRating, visit } from '../lib/onboarding'
+import { RATING_WIN_DELAY_MS, REVIEWS_URL, installedAt, linkCount, shouldAskForRating, tidyRatingStep, visit } from '../lib/onboarding'
 import { prefs } from '../lib/prefs'
 import { openInNewTab } from '../lib/tabs'
-import { useCorner } from '../lib/corner'
+import { dialogOnScreen, useCorner } from '../lib/corner'
 
-/** Let the success toast land before the card slides in. */
-const WIN_DELAY_MS = 1800
+/** How often a tidy waiting for its ask looks again for a free screen (0.9.6). */
+const TIDY_POLL_MS = 500
 
-function eligible(trigger: 'load' | 'win' | 'milestone'): boolean {
+/** What the rules read, as of now. */
+function inputs() {
   const { tree } = useStackableStore.getState()
-  return shouldAskForRating({
+  return {
     opens: visit.opens,
     firstSeen: installedAt(visit.firstSeen, tree?.rootDateAdded),
     now: Date.now(),
     answered: prefs.rating() !== null,
     links: linkCount(tree),
-    trigger,
-    // School mode: the company's rating lock.
-    lockRating: !!tree?.company?.lock.rating,
-  })
+    // School mode: the company's rating lock, from the policy's real answer (0.9.6; nothing asks before it).
+    lockRating: !!useCorner.getState().locks?.rating,
+  }
+}
+
+function eligible(trigger: 'load' | 'win' | 'milestone'): boolean {
+  return shouldAskForRating({ ...inputs(), trigger })
+}
+
+/** Nothing else on screen (0.9.6): no toast (a tidy's has its Undo), dialog or card, the tidy coach mark included. */
+function screenFree(): boolean {
+  const s = useStackableStore.getState()
+  return !s.toast && s.modal.kind === 'none' && !useCorner.getState().holder && !dialogOnScreen()
 }
 
 /**
@@ -31,12 +41,21 @@ function eligible(trigger: 'load' | 'win' | 'milestone'): boolean {
  *
  * 0.5.3 (backlog R1): a centred card with no stars on it (nothing preselected, no reward), and a
  * milestone also asks after one day: the first saved bankruptcy certificate or the third stash.
+ *
+ * 0.9.6: an applied tidy is a milestone too (tidyRatingStep). It asks once nothing else is on screen,
+ * so never over the sorted space while the Tidied toast offers Undo, and an Undo takes it back. A tidy
+ * before the install is a day old is kept in localStorage and asks on the first new tab after that.
  */
 export function RatingPrompt() {
   const tree = useStackableStore((s) => s.tree)
   const wins = useStackableStore((s) => s.wins)
   const milestones = useStackableStore((s) => s.milestones)
+  const tidied = useStackableStore((s) => s.tidied)
+  // 0.9.6: the company policy has answered; no trigger asks before that (corner.ts).
+  const settled = useCorner((s) => s.locks !== null)
   const [show, setShow] = useState(false)
+  // A tidy waiting for its ask: applied on this tab, or carried over from an earlier one.
+  const [tidyDue, setTidyDue] = useState(() => prefs.tidyWin() !== null)
   const loaded = !!tree
 
   const answer = (a: 'rated' | 'dismissed') => {
@@ -45,24 +64,54 @@ export function RatingPrompt() {
     if (a === 'rated') void openInNewTab(REVIEWS_URL, true)
   }
 
-  // On a plain new tab, decide once when the board first loads, so it never pops up mid-task.
+  // On a plain new tab, decide once when the board first loads (and the policy has answered), so it
+  // never pops up mid-task.
   useEffect(() => {
-    if (!loaded) return
+    if (!loaded || !settled) return
     setShow(eligible('load'))
-  }, [loaded])
+  }, [loaded, settled])
 
   // Right after a win, ask once the toast has had its moment.
   useEffect(() => {
-    if (!wins || show || !eligible('win')) return
-    const id = window.setTimeout(() => eligible('win') && setShow(true), WIN_DELAY_MS)
+    if (!wins || show || !settled || !eligible('win')) return
+    const id = window.setTimeout(() => eligible('win') && setShow(true), RATING_WIN_DELAY_MS)
     return () => window.clearTimeout(id)
-  }, [wins, show])
+  }, [wins, show, settled])
 
   // At a milestone (the certificate has closed by now), ask straight away.
   useEffect(() => {
-    if (!milestones || show) return
+    if (!milestones || show || !settled) return
     setShow(eligible('milestone'))
-  }, [milestones, show])
+  }, [milestones, show, settled])
+
+  // 0.9.6: a tidy applied on this tab (TidyButton keeps it in prefs.tidyWin first).
+  useEffect(() => {
+    if (tidied) setTidyDue(true)
+  }, [tidied])
+
+  // ...asks once the screen is free: its toast gone, no dialog or card up. Before day one it stays
+  // in localStorage for a later tab; answered or locked, it goes.
+  useEffect(() => {
+    if (!loaded || !tidyDue || show || !settled) return
+    let done = false
+    const tryAsk = () => {
+      if (done) return
+      // Gone already: undone, or another tab asked.
+      if (prefs.tidyWin() === null) {
+        done = true
+        return setTidyDue(false)
+      }
+      if (!screenFree()) return
+      const step = tidyRatingStep(inputs())
+      if (step !== 'later') prefs.clearTidyWin()
+      done = true
+      setTidyDue(false)
+      if (step === 'ask') setShow(true)
+    }
+    tryAsk()
+    const id = window.setInterval(tryAsk, TIDY_POLL_MS)
+    return () => window.clearInterval(id)
+  }, [loaded, tidyDue, show, settled])
 
   // 0.9.0: corner cards (the auto-archive line) wait while the ask is on screen.
   useEffect(() => {

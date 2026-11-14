@@ -6,6 +6,7 @@ import { downloadJson, openInNewTab, pickJsonFile } from '../../lib/tabs'
 import { REVIEWS_URL, SHARE_URL, helpUrl } from '../../lib/onboarding'
 import { prefs } from '../../lib/prefs'
 import { usePro } from '../../lib/pro'
+import { useCorner } from '../../lib/corner'
 import { hasPro } from '../../lib/proPlan'
 import type { BookmarkBackup } from '../../lib/types'
 import { useStackableStore } from '../../store/useStackableStore'
@@ -20,6 +21,8 @@ export function SettingsModal() {
   const refresh = useStackableStore((s) => s.refresh)
   // Teams T8: settings the company's policy has switched off.
   const lock = useStackableStore((s) => s.tree?.company?.lock)
+  // 0.9.6: the pro lock as the policy really answered (corner.ts), for the moment before the board catches up.
+  const settledPro = useCorner((s) => !!s.locks?.pro)
   // School mode: a paid key already active on this computer keeps its Pro card under the pro lock.
   const paidHere = usePro((s) => s.state.kind === 'pro' && !!s.license?.activationId)
   const [status, setStatus] = useState<string | null>(null)
@@ -90,7 +93,7 @@ export function SettingsModal() {
           <AppearanceSettings />
         )}
 
-        {lock?.pro && !paidHere ? (
+        {(lock?.pro || settledPro) && !paidHere ? (
           <Managed title="Stackboard Pro">
             {/* What stays free sits here too: the clean-up scan, and snapshots taken before. */}
             <CleanupScanEntry />
