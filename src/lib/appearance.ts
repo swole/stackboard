@@ -37,6 +37,12 @@ export interface Appearance {
    * so the first board already has it.
    */
   layout: Layout
+  /**
+   * 0.9.7: the bigger search box at the top of the board (components/BoardSearch.tsx). On for a new
+   * install; a board with settings from before 0.9.7 keeps it off (parseSavedAppearance, and
+   * background.ts on the update), the way 0.8.0 kept Rows for boards from before it.
+   */
+  searchBar: boolean
   bg: Background
 }
 
@@ -69,6 +75,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   palette: 'stackboard',
   density: 'comfortable',
   layout: 'packed',
+  searchBar: true,
   bg: { kind: 'solid', gradient: 1, dim: 35, blur: 0, imageRev: 0 },
 }
 
@@ -158,6 +165,7 @@ export function parseAppearance(raw: unknown): Appearance {
     palette: pick(o.palette, PALETTES.map((p) => p.id), d.palette),
     density: pick(o.density, DENSITIES, d.density),
     layout: pick(o.layout, LAYOUTS, d.layout),
+    searchBar: typeof o.searchBar === 'boolean' ? o.searchBar : d.searchBar,
     bg: {
       kind: pick(b.kind, KINDS, d.bg.kind),
       gradient: clampInt(b.gradient, 1, 3, d.bg.gradient) as GradientId,
@@ -176,14 +184,27 @@ function savedBeforeLayout(raw: unknown): boolean {
   return !!raw && typeof raw === 'object' && !Array.isArray(raw) && !('layout' in raw)
 }
 
+/** The board's search bar is on for new installs only: a board updated from before this keeps it off. */
+export const SEARCH_BAR_VERSION = '0.9.7'
+
+/** Saved settings with no searchBar key were saved before 0.9.7. */
+function savedBeforeSearchBar(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && !('searchBar' in raw)
+}
+
 /**
  * Saved settings as they come back from chrome.storage.local or the boot copy. Settings saved
- * before 0.8.0 have no layout, and those boards keep Rows; nothing saved at all is a new board,
- * which gets Packed. A layout someone picked always stands.
+ * before 0.8.0 have no layout, and those boards keep Rows; settings saved before 0.9.7 have no
+ * searchBar, and those boards keep the search bar off. Nothing saved at all is a new board, which
+ * gets Packed and the search bar. A layout or a search bar someone picked always stands.
  */
 export function parseSavedAppearance(raw: unknown): Appearance {
   const a = parseAppearance(raw)
-  return savedBeforeLayout(raw) ? { ...a, layout: 'rows' } : a
+  return {
+    ...a,
+    ...(savedBeforeLayout(raw) ? { layout: 'rows' as const } : {}),
+    ...(savedBeforeSearchBar(raw) ? { searchBar: false } : {}),
+  }
 }
 
 /**
@@ -196,6 +217,24 @@ export function rowsForOldBoard(saved: unknown): Record<string, unknown> | null 
     return savedBeforeLayout(saved) ? { ...(saved as Record<string, unknown>), layout: 'rows' } : null
   }
   return { layout: 'rows' }
+}
+
+/**
+ * What an update writes to chrome.storage.local["appearance"] (background.ts, one read and one write):
+ * a board from before 0.8.0 keeps Rows (rowsForOldBoard), and one from before 0.9.7 keeps the board's
+ * search bar off. A value someone saved stands. With nothing saved, the layout the board had goes in
+ * too (Rows before 0.8.0, Packed after), since saved settings with no layout read as from before 0.8.0.
+ * Null when there's nothing to write.
+ */
+export function settingsAfterUpdate(saved: unknown, from: { beforeRows: boolean; beforeSearchBar: boolean }): Record<string, unknown> | null {
+  const obj = saved && typeof saved === 'object' && !Array.isArray(saved) ? (saved as Record<string, unknown>) : null
+  let next = from.beforeRows ? rowsForOldBoard(saved) : null
+  if (from.beforeSearchBar) {
+    const base = next ?? obj
+    if (!base) next = { layout: DEFAULT_APPEARANCE.layout, searchBar: false }
+    else if (!('searchBar' in base)) next = { ...base, searchBar: false }
+  }
+  return next
 }
 
 /**

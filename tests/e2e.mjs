@@ -127,6 +127,8 @@ try {
   // a background page gets no animation frames, so puppeteer's waits would never poll.
   await control.bringToFront()
   await control.waitForFunction(() => document.body.innerText.includes('Welcome to Stackboard'), { timeout: 10000 })
+  // 0.9.7: a fresh install has the search bar on the board, the welcome screen included.
+  check('search bar: a fresh install shows the search bar on the board', await control.evaluate(() => !!document.querySelector('[data-board-search-input]')))
 
   // ---------- 0.9.2: the reverse trial on install ----------
   // Every run installs fresh, so the service worker starts the Pro trial by itself, a moment after
@@ -144,7 +146,9 @@ try {
     const got = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
     check('reverse trial: a fresh install starts the Pro trial by itself, marked auto', got?.auto === true && typeof got.startedAt === 'number' && Math.abs(Date.now() - got.startedAt) < 5 * 60000, JSON.stringify(got))
     await control.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
-    const inSettings = await until(control, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial')
+    // Pro's state waits for the policy's settled answer (0.9.6), and Chrome for Testing's managed storage
+    // read stalled past 6 s for minutes at a time on 16 Nov, on the 0.9.6 build too: allow 15 s.
+    const inSettings = await until(control, () => document.querySelector('[data-pro]')?.dataset.pro === 'trial', null, 15000)
     const said = await control.evaluate(() => document.querySelector('[data-pro]')?.innerText.replace(/\s+/g, ' ').trim() ?? '')
     check(
       'reverse trial: Settings says the trial started on install, and nothing says it never starts by itself',
@@ -185,6 +189,13 @@ try {
     await sleep(500)
     const afterUpdate = await control.evaluate(async () => (await chrome.storage.sync.get('proTrial')).proTrial ?? null)
     check('reverse trial: the update step starts no trial', replay?.ok === true && afterUpdate === null, JSON.stringify({ replay, afterUpdate }))
+    // 0.9.7: that update step also switched the board's search bar off, as it does for everyone updating
+    // from before 0.9.7. The blocks below run as a fresh install does, with the bar on.
+    await control.evaluate(async () => {
+      const a = (await chrome.storage.local.get('appearance')).appearance
+      if (a) await chrome.storage.local.set({ appearance: { ...a, searchBar: true } })
+    })
+    await sleep(400)
   }
 
   // 0.9.5: the one free tidy would put "Tidy (free once)" on every free board (and Settings would ask
@@ -990,7 +1001,8 @@ try {
   await ntpB.keyboard.press('/')
   await ntpB.keyboard.type('2')
   await sleep(250)
-  const typed = await ntpB.evaluate(() => document.querySelector('aside input')?.value)
+  // 0.9.7: one search box: the board's search bar while it shows (a fresh install), else the sidebar's.
+  const typed = await ntpB.evaluate(() => (document.querySelector('[data-board-search-input]') ?? document.querySelector('aside input'))?.value)
   await ntpB.keyboard.press('Escape')
   await sleep(200)
   const stayed = await ntpB.$eval('main h1', (h) => h.textContent)
@@ -2485,7 +2497,7 @@ try {
     const second = await until(page, () => document.querySelector('main h1')?.textContent === 'Acme Sales')
     check('teams: keys 1-9 count company spaces first', third && second)
 
-    await page.evaluate(() => document.querySelector('input[aria-label="Search all spaces"]').focus())
+    await page.evaluate(() => (document.querySelector('[data-board-search-input]') ?? document.querySelector('input[aria-label="Search all spaces"]')).focus())
     await page.keyboard.type('Acme Example')
     const found = await until(page, () => [...document.querySelectorAll('main [data-readonly-card] a')].some((a) => a.getAttribute('href') === 'https://example.com/'))
     check('teams: search finds company links', found)
@@ -2723,7 +2735,8 @@ try {
     const free = await openNtp()
     await free.bringToFront()
     await ctrlK(free)
-    const toSearch = await until(free, () => document.activeElement?.getAttribute('aria-label') === 'Search all spaces')
+    // 0.9.7: with the board's search bar on (a fresh install), Ctrl+K goes there, like "/".
+    const toSearch = await until(free, () => ['Search all spaces', 'Search your links or the web'].includes(document.activeElement?.getAttribute('aria-label')))
     check('command bar: without Pro, Ctrl+K goes to the search box', toSearch && !(await free.evaluate(() => !!document.querySelector('[data-command-bar]'))))
     await free.close()
 
@@ -4386,7 +4399,7 @@ try {
     const c1 = (await shown(n1)) ? await note(n1) : null
     check(
       'founding note: in December a free board gets "$2.99 a year ends on 31 Dec", its line and See Pro',
-      !!c1 && c1.window === 'december' && c1.title === '$2.99 a year ends on 31 Dec' && c1.text.includes('After that Pro is $4.99 a year. If you join before then, it stays $2.99 while you keep Pro.') && c1.text.includes('See Pro'),
+      !!c1 && c1.window === 'december' && c1.title === '$2.99 a year ends on 31 Dec' && c1.text.includes('After that Pro is $9.99 a year. If you join before then, it stays $2.99 while you keep Pro.') && c1.text.includes('See Pro'),
       JSON.stringify(c1),
     )
     await n1.screenshot({ path: path.join(SHOTS, '095-founding-note.png') })
@@ -5357,7 +5370,7 @@ try {
   }
 
   // ---------- 0.8.0: to-do lists join Pro for early users ----------
-  // the maintainer, 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
   // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
   // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
   {
@@ -5646,7 +5659,7 @@ try {
     check('school: no Get Pro, trial or price anywhere on the board', !board.offers.length && !board.text, JSON.stringify(board.offers))
     await s1.evaluate(() => document.activeElement?.blur())
     await ctrlK(s1)
-    const toSearch = await until(s1, () => document.activeElement?.getAttribute('aria-label') === 'Search all spaces', null, 3000)
+    const toSearch = await until(s1, () => ['Search all spaces', 'Search your links or the web'].includes(document.activeElement?.getAttribute('aria-label')), null, 3000)
     check('school: a running trial counts for nothing, so Ctrl+K goes to the search box', toSearch && !(await s1.evaluate(() => !!document.querySelector('[data-command-bar]'))))
     await s1.evaluate(() => document.activeElement?.blur())
 
@@ -6350,6 +6363,763 @@ try {
       for (const [k, v] of Object.entries(s.was.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
     }, { held, pile, was, sync: SYNC, local: LOCAL })
     await sleep(400)
+  }
+
+  // ---------- 0.9.7: starter packs in the New space dialog (U5) ----------
+  // The dialog offers the five packs under the name field, which stays first and focused, so typing a
+  // name and Enter still makes a blank space (the to-do blocks do that). One click on a pack adds it
+  // as a space, opens it and closes the dialog.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const everyday = () => control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const [sub] = await chrome.bookmarks.getSubTree(root.id)
+      return sub.children.filter((c) => c.title === '🧭 Everyday').map((c) => ({ id: c.id, stacks: c.children.map((st) => `${st.title}:${st.children.length}`).join('|') }))
+    })
+    const before = await everyday()
+    const page = await openNtp()
+    await page.bringToFront()
+    await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
+    await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+    await sleep(300)
+    const offer = await page.evaluate(() => ({
+      packs: [...document.querySelectorAll('[role=dialog] [data-new-space-packs] [data-pack]')].map((b) => b.dataset.pack),
+      heading: document.querySelector('[role=dialog] [data-new-space-packs]')?.innerText.split('\n')[0] ?? '',
+      nameFirst: document.querySelector('[role=dialog] input') === document.activeElement,
+    }))
+    check('new space: the dialog offers the five starter packs under the name field, which keeps the focus', offer.packs.length === 5 && offer.heading === 'Or start from a pack' && offer.nameFirst, JSON.stringify(offer))
+    await page.screenshot({ path: path.join(SHOTS, '97-new-space-packs.png') })
+    await page.evaluate(() => document.querySelector('[role=dialog] [data-pack="everyday"]').click())
+    const opened = await until(page, () => document.querySelector('main h1')?.textContent === 'Everyday' && !document.querySelector('[role=dialog]'), null, 10000)
+    const after = await everyday()
+    const added = after.filter((s) => !before.some((b) => b.id === s.id))
+    check(
+      'new space: a pack from the dialog becomes a space with its stacks, opens, and the dialog closes',
+      opened && added.length === 1 && added[0].stacks === 'Daily:5|Read:4|Handy:4',
+      JSON.stringify({ opened, added }),
+    )
+    await page.close()
+    for (const s of added) await control.evaluate((id) => chrome.bookmarks.removeTree(id), s.id)
+    await sleep(300)
+  }
+
+  // ---------- 0.9.7: fold the sidebar's stack list (U6) ----------
+  // A chevron on the selected space's row folds its stack jump links away; the fold is one setting for
+  // this device (localStorage stackable:stackListFolded), so it stays through a reload and a space switch.
+  {
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🪗 Fold test' })
+      for (const t of ['Alpha', 'Beta', 'Gamma']) {
+        const st = await chrome.bookmarks.create({ parentId: space.id, title: t })
+        await chrome.bookmarks.create({ parentId: st.id, title: `${t} link`, url: `https://${t.toLowerCase()}.fold.example/` })
+      }
+      localStorage.setItem('stackable:lastSpaceId', space.id)
+      localStorage.removeItem('stackable:stackListFolded')
+      return space.id
+    })
+    const page = await openNtp(() => document.querySelector('main h1')?.textContent === 'Fold test')
+    await page.bringToFront()
+    const state = () => page.evaluate(() => ({
+      expanded: document.querySelector('aside [data-stack-list-toggle]')?.getAttribute('aria-expanded') ?? null,
+      links: [...document.querySelectorAll('aside a[href^="#stack-"]')].map((a) => a.textContent),
+      stored: localStorage.getItem('stackable:stackListFolded'),
+    }))
+    const shown = await state()
+    await page.click('aside [data-stack-list-toggle]')
+    await sleep(250)
+    const folded = await state()
+    check(
+      'stack list: the chevron on the selected space folds its stack links away',
+      shown.expanded === 'true' && shown.links.join('|') === 'Alpha|Beta|Gamma' && folded.expanded === 'false' && folded.links.length === 0 && folded.stored === '1',
+      JSON.stringify({ shown, folded }),
+    )
+    await page.reload()
+    await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Fold test', { timeout: 10000 })
+    await sleep(300)
+    const reloaded = await state()
+    check('stack list: the fold survives a reload', reloaded.expanded === 'false' && reloaded.links.length === 0 && reloaded.stored === '1', JSON.stringify(reloaded))
+    await page.click('aside [data-stack-list-toggle]')
+    await sleep(250)
+    const back = await state()
+    check('stack list: the chevron brings the links back, and the fold is forgotten', back.expanded === 'true' && back.links.join('|') === 'Alpha|Beta|Gamma' && back.stored === null, JSON.stringify(back))
+    await page.close()
+    await control.evaluate((id) => chrome.bookmarks.removeTree(id), made)
+    await sleep(300)
+  }
+
+  // ---------- 0.9.7: import from Arc ----------
+  // The welcome screen's import panel (a From Arc tab beside Chrome's bookmarks) and Settings > Copy
+  // from Arc take Arc's sidebar file, StorableSidebar.json, or Arc's export, Arc Data Export.md, picked
+  // with an <input type=file> (filled by puppeteer). Each Arc space becomes a space: loose pinned tabs a
+  // first stack, folders stacks, deeper folders folders inside them, a Split View's tabs in its folder,
+  // unpinned tabs a last stack, the Favorites row a stack first in the first space; Arc notes stay
+  // behind. The copy goes through the Chrome import's path: the same toast, with Undo.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    // Board tabs left open by earlier blocks would react to every write below: close them.
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    const dir = path.join(os.tmpdir(), 'stackable-e2e-arc')
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.mkdirSync(dir, { recursive: true })
+    const tab = (id, parentID, savedTitle, savedURL, title = null) => [id, { id, parentID, title, data: { tab: { savedTitle, savedURL } } }]
+    const items = [
+      'fav', { id: 'fav', childrenIds: ['f1', 'f2'] },
+      ...tab('f1', 'fav', 'Gmail', 'https://mail.google.com/'),
+      ...tab('f2', 'fav', 'Calendar', 'https://calendar.google.com/'),
+      'pin1', { id: 'pin1', childrenIds: ['t1', 'dev', 'note'] },
+      ...tab('t1', 'pin1', 'Linear', 'https://linear.app/'),
+      'dev', { id: 'dev', parentID: 'pin1', title: 'Dev', childrenIds: ['t2', 'split', 'docs'], data: { list: {} } },
+      ...tab('t2', 'dev', 'GitHub', 'https://github.com/', 'Our repo'),
+      'split', { id: 'split', parentID: 'dev', title: null, childrenIds: ['s1', 's2'], data: { splitView: {} } },
+      ...tab('s1', 'split', 'Vercel', 'https://vercel.com/'),
+      ...tab('s2', 'split', 'MDN', 'https://developer.mozilla.org/'),
+      'docs', { id: 'docs', parentID: 'dev', title: 'Docs', childrenIds: ['t3'], data: { list: {} } },
+      ...tab('t3', 'docs', 'React', 'https://react.dev/'),
+      ...tab('note', 'pin1', 'Plan', 'arc://notes/plan'),
+      'unp1', { id: 'unp1', childrenIds: ['t4'] },
+      ...tab('t4', 'unp1', 'Hacker News', 'https://news.ycombinator.com/'),
+      'pin2', { id: 'pin2', childrenIds: ['read'] },
+      'read', { id: 'read', parentID: 'pin2', title: 'Reading', childrenIds: ['t5'], data: { list: {} } },
+      ...tab('t5', 'read', 'Ars Technica', 'https://arstechnica.com/'),
+      'unp2', { id: 'unp2', childrenIds: [] },
+    ]
+    const sidebarFile = path.join(dir, 'StorableSidebar.json')
+    fs.writeFileSync(sidebarFile, JSON.stringify({ sidebar: { containers: [{ global: {} }, {
+      spaces: [
+        'sp1', { id: 'sp1', title: 'Work', customInfo: { iconType: { emoji_v2: '💼' } }, newContainerIDs: [{ pinned: {} }, 'pin1', { unpinned: {} }, 'unp1'] },
+        'sp2', { id: 'sp2', title: 'Personal', newContainerIDs: [{ pinned: {} }, 'pin2', { unpinned: {} }, 'unp2'] },
+      ],
+      topAppsContainerIDs: [{ default: true }, 'fav'],
+      items,
+    }] } }))
+    const mdFile = path.join(dir, 'Arc Data Export.md')
+    fs.writeFileSync(mdFile, [
+      '# Personal', '', '## Favorites', '- https://mail.google.com/', '- https://calendar.google.com/', '- https://news.ycombinator.com/', '- https://example.com/today-tab', '',
+      '## Reading', '- https://arstechnica.com/', '### Long reads', '- https://paulgraham.com/greatwork.html', '', '## Empty folder', '',
+      '# Work', '', '## Favorites', '- https://mail.google.com/', '- https://calendar.google.com/', '- https://linear.app/', '', '## Clients', '- https://acme.example/', '',
+    ].join('\n'))
+    const junkFile = path.join(dir, 'notes.txt')
+    fs.writeFileSync(junkFile, 'Just some notes\n')
+
+    const LS = ['stackable:lastSpaceId', 'stackable:tidyCoach']
+    const was = await control.evaluate((ls) => Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])), LS)
+    // The spaces wait in a folder under Other bookmarks, so the board is empty and the welcome shows.
+    const held = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const hold = await chrome.bookmarks.create({ parentId: '2', title: 'e2e arc hold' })
+      for (const k of await chrome.bookmarks.getChildren(root.id)) await chrome.bookmarks.move(k.id, { parentId: hold.id })
+      // The bookmarks bar keeps its links from the welcome block, so Chrome has bookmarks to offer too.
+      if (!(await chrome.bookmarks.getChildren('1')).some((k) => k.url)) await chrome.bookmarks.create({ parentId: '1', title: 'Example Domain', url: 'https://example.com/' })
+      localStorage.setItem('stackable:tidyCoach', String(Date.now()))
+      return { root: root.id, hold: hold.id }
+    })
+    const board = () => control.evaluate(async (rootId) => {
+      const [sub] = await chrome.bookmarks.getSubTree(rootId)
+      const walk = (n) => (n.url ? n.title : { [n.title]: (n.children ?? []).map(walk) })
+      return (sub.children ?? []).map(walk)
+    }, held.root)
+    const rows = (p, scope) => p.evaluate((scope) => ({
+      rows: [...document.querySelectorAll(`${scope} [data-arc-import] label`)].map((l) => `${l.innerText.replace(/\s+/g, ' ').trim()}:${l.querySelector('input').checked}`),
+      summary: document.querySelector(`${scope} [data-arc-summary]`)?.textContent ?? '',
+      copy: [...document.querySelectorAll(`${scope} [data-arc-import] button`)].map((b) => b.textContent.trim()).find((t) => t.startsWith('Copy')) ?? '',
+      file: document.querySelector(`${scope} [data-arc-file-name]`)?.textContent ?? '',
+    }), scope)
+
+    const page = await openNtp(() => !!document.querySelector('[data-welcome="import"] label'))
+    await page.bringToFront()
+    const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-welcome="import"] [role=radio]')].map((b) => `${b.textContent.trim()}:${b.getAttribute('aria-checked')}`))
+    await page.evaluate(() => [...document.querySelectorAll('[data-welcome="import"] [role=radio]')].find((b) => b.textContent.trim() === 'From Arc')?.click())
+    await until(page, () => !!document.querySelector('[data-welcome="import"] [data-arc-help]'))
+    const help = await page.evaluate(() => document.querySelector('[data-arc-help]')?.innerText ?? '')
+    check(
+      'arc: the welcome screen offers From Arc beside Chrome bookmarks, with where Arc keeps the file',
+      tabs.join('|') === 'From Chrome:true|From Arc:false' &&
+        help.includes('%LOCALAPPDATA%\\Packages\\TheBrowserCompany.Arc_*\\LocalCache\\Local\\Arc\\StorableSidebar.json') &&
+        help.includes('~/Library/Application Support/Arc/StorableSidebar.json') &&
+        help.includes('Arc Data Export.md'),
+      JSON.stringify({ tabs, help: help.slice(0, 400) }),
+    )
+    await sleep(400)
+    await page.screenshot({ path: path.join(SHOTS, '97-welcome-arc.png') })
+
+    await (await page.$('[data-welcome="import"] [data-arc-file]')).uploadFile(junkFile)
+    const junk = (await until(page, () => !!document.querySelector('[data-arc-error]'))) ? await page.evaluate(() => document.querySelector('[data-arc-error]').textContent) : null
+    check("arc: a file that isn't Arc's says so, and lists nothing", junk === "This isn't one of Arc's files. Pick StorableSidebar.json or Arc Data Export.md." && !(await page.evaluate(() => !!document.querySelector('[data-arc-import] label'))), String(junk))
+
+    await (await page.$('[data-welcome="import"] [data-arc-file]')).uploadFile(sidebarFile)
+    await until(page, () => document.querySelectorAll('[data-arc-import] label').length === 2)
+    const listed = await rows(page, '[data-welcome="import"]')
+    check(
+      'arc: the sidebar file lists each Arc space, all ticked, and says where the Favorites go and what stays behind',
+      listed.file === 'StorableSidebar.json' &&
+        listed.rows.length === 2 &&
+        /💼 ?Work.*6 links in 3 stacks:true/.test(listed.rows[0]) &&
+        /🌈 ?Personal.*1 link in 1 stack:true/.test(listed.rows[1]) &&
+        listed.summary === "2 new spaces with 5 stacks, and 1 folder inside them. Your Favorites row (2 links) becomes the first stack in Work. 1 link that isn't a web page stays behind." &&
+        listed.copy === 'Copy 9 links' &&
+        !(await page.evaluate(() => !!document.querySelector('[data-arc-error]'))),
+      JSON.stringify(listed),
+    )
+    await page.screenshot({ path: path.join(SHOTS, '97-welcome-arc-list.png') })
+
+    await page.evaluate(() => [...document.querySelectorAll('[data-arc-import] button')].find((b) => b.textContent.trim().startsWith('Copy'))?.click())
+    const landed = await until(page, () => document.querySelector('main h1')?.textContent === 'Work', null, 15000)
+    await sleep(500)
+    const made = await board()
+    const toast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '')
+    check(
+      'arc: each Arc space becomes a space: Favorites first, loose pinned tabs, folders as stacks with a folder inside, a Split View in its folder, unpinned tabs last; the Arc note stays behind',
+      landed &&
+        JSON.stringify(made) ===
+          JSON.stringify([
+            { '💼 Work': [{ Favorites: ['Gmail', 'Calendar'] }, { 'Pinned tabs': ['Linear'] }, { Dev: ['Our repo', 'Vercel', 'MDN', { Docs: ['React'] }] }, { 'Unpinned tabs': ['Hacker News'] }] },
+            { '🌈 Personal': [{ Reading: ['Ars Technica'] }] },
+          ]),
+      JSON.stringify({ landed, made }),
+    )
+    check('arc: the copy shows the import toast, with Undo', toast.includes('Copied') && toast.includes('2 Arc spaces') && toast.includes('9 links') && toast.includes('Undo'), toast)
+    await page.evaluate(() => [...document.querySelectorAll('.toast button')].find((b) => b.textContent.includes('Undo'))?.click())
+    const undone = await until(page, () => !!document.querySelector('[data-welcome="import"]'), null, 10000)
+    check('arc: Undo takes the Arc spaces away again', undone && (await board()).length === 0, JSON.stringify(await board()))
+
+    // With no Chrome bookmarks to copy (getTree shows only the Stackboard folder), Arc gets a section of
+    // its own where "Bring in your bookmarks" would be.
+    const bare = await browser.newPage()
+    await bare.setViewport({ width: 1400, height: 900 })
+    bare.on('pageerror', (e) => errors.push(`arc bare: ${e.message}`))
+    await bare.evaluateOnNewDocument(() => {
+      const real = chrome.bookmarks.getTree.bind(chrome.bookmarks)
+      Object.defineProperty(chrome.bookmarks, 'getTree', {
+        configurable: true,
+        writable: true,
+        value: async () => {
+          const [tree] = await real()
+          for (const top of tree.children ?? []) top.children = (top.children ?? []).filter((c) => !c.url && (c.title === 'Stackboard' || c.title === 'Stackable'))
+          return [tree]
+        },
+      })
+    })
+    await bare.goto(NTP, { waitUntil: 'load' })
+    await bare.bringToFront()
+    const arcOnly = await until(bare, () => !!document.querySelector('[data-welcome="arc"] [data-arc-help]'))
+    const bareState = await bare.evaluate(() => ({
+      heading: document.querySelector('[data-welcome="arc"] h3')?.textContent ?? null,
+      chrome: !!document.querySelector('[data-welcome="import"]'),
+      packs: document.querySelector('[data-welcome="packs"] h3')?.textContent ?? null,
+    }))
+    check('arc: with no Chrome bookmarks to copy, the welcome screen offers Arc on its own, before the packs', arcOnly && bareState.heading === 'Moving from Arc?' && !bareState.chrome && bareState.packs === 'Or start from a pack', JSON.stringify(bareState))
+    await bare.close()
+    await page.bringToFront()
+
+    // Settings > Copy from Arc, on a board with spaces, with Arc's own export.
+    await control.evaluate(async (s) => {
+      for (const k of await chrome.bookmarks.getChildren(s.hold)) await chrome.bookmarks.move(k.id, { parentId: s.root })
+    }, held)
+    await until(page, () => !!document.querySelector('main h1'), null, 10000)
+    const before = (await board()).map((s) => Object.keys(s)[0])
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(page, () => !!document.querySelector('[data-copy-from-arc]'))
+    await page.evaluate(() => document.querySelector('[data-copy-from-arc]').click())
+    await until(page, () => !!document.querySelector('[role=dialog] [data-arc-help]'))
+    const dialog = await page.evaluate(() => ({
+      title: document.querySelector('[role=dialog]')?.getAttribute('aria-label'),
+      on: [...document.querySelectorAll('[role=dialog] [role=radio]')].find((b) => b.getAttribute('aria-checked') === 'true')?.textContent.trim(),
+    }))
+    await (await page.$('[role=dialog] [data-arc-file]')).uploadFile(mdFile)
+    await until(page, () => document.querySelectorAll('[role=dialog] [data-arc-import] label').length === 2)
+    const mdListed = await rows(page, '[role=dialog]')
+    check(
+      'arc: Settings > Copy from Arc opens on Arc and reads Arc Data Export.md, Favorites kept once',
+      dialog.title === 'Bring in your bookmarks' &&
+        dialog.on === 'From Arc' &&
+        mdListed.file === 'Arc Data Export.md' &&
+        /Personal.*4 links in 2 stacks:true/.test(mdListed.rows[0]) &&
+        /Work.*2 links in 2 stacks:true/.test(mdListed.rows[1]) &&
+        mdListed.summary === '2 new spaces with 5 stacks, and 1 folder inside them. Your Favorites row (2 links) becomes the first stack in Personal.' &&
+        mdListed.copy === 'Copy 8 links',
+      JSON.stringify({ dialog, mdListed }),
+    )
+    await page.evaluate(() => [...document.querySelectorAll('[role=dialog] [data-arc-import] button')].find((b) => b.textContent.trim().startsWith('Copy'))?.click())
+    const closed = await until(page, () => !document.querySelector('[role=dialog]') && document.querySelector('main h1')?.textContent === 'Personal', null, 15000)
+    await sleep(500)
+    const after = await board()
+    const added = after.filter((s) => !before.includes(Object.keys(s)[0]))
+    check(
+      "arc: the export's spaces arrive with their pinned and open tabs first, named from their address, and the dialog closes",
+      closed &&
+        JSON.stringify(added) ===
+          JSON.stringify([
+            { '🌈 Personal': [{ Favorites: ['mail.google.com', 'calendar.google.com'] }, { 'Pinned and open tabs': ['news.ycombinator.com', 'example.com › today tab'] }, { Reading: ['arstechnica.com', { 'Long reads': ['paulgraham.com › greatwork'] }] }] },
+            { '🌈 Work': [{ 'Pinned and open tabs': ['linear.app'] }, { Clients: ['acme.example'] }] },
+          ]),
+      JSON.stringify({ closed, added }),
+    )
+    await page.close()
+
+    // Back as the block found it.
+    await control.evaluate(async (s) => {
+      for (const k of await chrome.bookmarks.getChildren(s.held.root)) {
+        if (k.title === '🌈 Personal' || k.title === '🌈 Work') await chrome.bookmarks.removeTree(k.id)
+      }
+      await chrome.bookmarks.removeTree(s.held.hold)
+      for (const [k, v] of Object.entries(s.was)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, { held, was })
+    fs.rmSync(dir, { recursive: true, force: true })
+    await sleep(400)
+  }
+
+  // ---------- 0.9.7: web search, and the search bar on the board ----------
+  // The search results end with "Search the web for ...", which hands the words to Chrome's default
+  // search engine through chrome.search (stubbed in the page here, so nothing is searched). With no
+  // bookmark match Enter runs it, Ctrl+Enter in a new tab; with a match Enter keeps opening the top hit.
+  // The board's search bar is the same search in a bigger box, on for a fresh install and off after an
+  // update from 0.9.6, from the first frame; Settings > Appearance switches it.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    const made = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🔎 Search test' })
+      const st = await chrome.bookmarks.create({ parentId: space.id, title: 'Docs' })
+      await chrome.bookmarks.create({ parentId: st.id, title: 'Searchable doc', url: 'https://docs.search.example/' })
+      await chrome.bookmarks.create({ parentId: st.id, title: 'Release notes', url: 'https://notes.search.example/' })
+      await chrome.bookmarks.create({ parentId: st.id, title: 'Quokkadoc handbook', url: 'https://handbook.search.example/' })
+      const was = localStorage.getItem('stackable:lastSpaceId')
+      localStorage.setItem('stackable:lastSpaceId', space.id)
+      return { space: space.id, was }
+    })
+    // chrome.search.query records what it was asked and searches nothing.
+    const stubSearch = (pg) => pg.evaluate(() => {
+      window.__searches = []
+      Object.defineProperty(chrome.search, 'query', { configurable: true, writable: true, value: (info) => (window.__searches.push(info), Promise.resolve()) })
+    })
+    const searches = (pg) => pg.evaluate(() => window.__searches.splice(0))
+    const page = await openNtp(() => document.querySelector('main h1')?.textContent === 'Search test')
+    await page.bringToFront()
+    await stubSearch(page)
+    const barBox = await page.evaluate(() => {
+      const r = document.querySelector('[data-board-search-input]')?.getBoundingClientRect()
+      return r ? { top: Math.round(r.top), width: Math.round(r.width) } : null
+    })
+    await page.mouse.click(120, 860)
+    // One search box (0.9.7 follow-up): the sidebar has none while the bar shows, and the bar keeps the "/" hint.
+    const oneBox = await page.evaluate(() => ({
+      sidebarBox: !!document.querySelector('aside input'),
+      hint: [...document.querySelectorAll('[data-board-search] kbd')].filter((k) => getComputedStyle(k).display !== 'none').map((k) => k.textContent.trim()),
+    }))
+    await page.screenshot({ path: path.join(SHOTS, '97-board-search-bar.png') })
+    await page.keyboard.press('/')
+    const slashTo = await page.evaluate(() => document.activeElement?.hasAttribute('data-board-search-input'))
+    check(
+      'search bar: it shows at the top of the board as the one search box, with the "/" hint, and "/" goes to it',
+      !!barBox && barBox.top < 60 && barBox.width > 400 && !oneBox.sidebarBox && oneBox.hint.join() === '/' && slashTo,
+      JSON.stringify({ barBox, oneBox, slashTo }),
+    )
+
+    // A word on the board: the link stays the top hit, and the web is the last row.
+    await page.keyboard.type('searchable')
+    await until(page, () => !!document.querySelector('[data-web-search]'))
+    const withHit = await page.evaluate(() => {
+      const scroller = document.querySelector('main [data-web-row]')?.parentElement
+      return {
+        cards: [...document.querySelectorAll('main section a')].map((a) => a.textContent.trim()),
+        last: scroller?.lastElementChild?.hasAttribute('data-web-row') || scroller?.lastElementChild?.previousElementSibling?.hasAttribute('data-web-row'),
+        row: document.querySelector('[data-web-search]')?.innerText.replace(/\s+/g, ' ').trim(),
+        top: document.querySelector('[data-web-search]')?.hasAttribute('data-top'),
+        focus: document.activeElement?.hasAttribute('data-board-search-input'),
+        sidebarBox: !!document.querySelector('aside input'),
+      }
+    })
+    check(
+      'web search: with a link that matches, the web row comes last, Enter stays on the link, and the board bar is the one search box',
+      withHit.cards.some((c) => c.includes('Searchable doc')) && withHit.last && withHit.row === 'Search the web for “searchable” with your default search engine' && !withHit.top && withHit.focus && !withHit.sidebarBox,
+      JSON.stringify(withHit),
+    )
+
+    // Words that match nothing: Enter and Ctrl+Enter go to the web.
+    await page.evaluate(() => document.querySelector('[data-board-search-input]').select())
+    await page.keyboard.type('qqzz how tall is everest')
+    await until(page, () => document.querySelector('[data-web-search]')?.hasAttribute('data-top'))
+    const noHit = await page.evaluate(() => ({
+      header: document.querySelector('main header p')?.textContent ?? '',
+      row: document.querySelector('[data-web-search]')?.innerText.replace(/\s+/g, ' ').trim(),
+      cards: document.querySelectorAll('main section a').length,
+    }))
+    await page.screenshot({ path: path.join(SHOTS, '97-search-web-row.png') })
+    await page.keyboard.press('Enter')
+    await sleep(200)
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    await sleep(200)
+    const fromBox = await searches(page)
+    check(
+      'web search: with no match, the web row is the top one, Enter searches here and Ctrl+Enter in a new tab, through chrome.search',
+      noHit.cards === 0 && noHit.header.startsWith('No links match. Enter searches the web, Ctrl+Enter in a new tab') && noHit.row?.startsWith('Search the web for “qqzz how tall is everest”') &&
+        JSON.stringify(fromBox) === JSON.stringify([{ text: 'qqzz how tall is everest', disposition: 'CURRENT_TAB' }, { text: 'qqzz how tall is everest', disposition: 'NEW_TAB' }]),
+      JSON.stringify({ noHit, fromBox }),
+    )
+
+    // The row itself: a click, Ctrl+click, a middle click, and Ctrl+Enter on it.
+    await page.click('[data-web-search]')
+    await sleep(150)
+    await page.keyboard.down('Control')
+    await page.click('[data-web-search]')
+    await page.keyboard.up('Control')
+    await sleep(150)
+    await page.click('[data-web-search]', { button: 'middle' })
+    await sleep(150)
+    await page.focus('[data-web-search]')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    await sleep(200)
+    const fromRow = (await searches(page)).map((s) => s.disposition)
+    check('web search: the row searches here on a click, in a new tab with Ctrl, a middle click or Ctrl+Enter', fromRow.join('|') === 'CURRENT_TAB|NEW_TAB|NEW_TAB|NEW_TAB', JSON.stringify(fromRow))
+
+    // A link listed by a weak match (the word only mid-word in its title) leaves Enter to the web: the
+    // web row carries the ↵ mark. The arrow keys still reach every row.
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-board-search-input]')
+      input.focus()
+      input.select()
+    })
+    await page.keyboard.type('okkado')
+    await until(page, () => [...document.querySelectorAll('main section a')].some((a) => a.textContent.includes('Quokkadoc handbook')) && !!document.querySelector('[data-web-search][data-top]'))
+    const weak = await page.evaluate(() => ({
+      cards: [...document.querySelectorAll('main section a')].length,
+      marked: [...document.querySelectorAll('main section [data-card] kbd')].length,
+      webTop: !!document.querySelector('[data-web-search][data-top]'),
+      header: document.querySelector('main header p')?.textContent ?? '',
+    }))
+    await page.screenshot({ path: path.join(SHOTS, '97-weak-match-web-row.png') })
+    await page.keyboard.press('Enter')
+    await sleep(200)
+    const fromWeak = await searches(page)
+    check(
+      'close match: a link listed by a mid-word match leaves Enter to the web, and the web row carries the ↵ mark',
+      weak.cards === 1 && weak.marked === 0 && weak.webTop && weak.header === '1 link. Enter searches the web, Ctrl+Enter in a new tab, Esc clears.' &&
+        JSON.stringify(fromWeak) === JSON.stringify([{ text: 'okkado', disposition: 'CURRENT_TAB' }]),
+      JSON.stringify({ weak, fromWeak }),
+    )
+    const focusedRow = () => page.evaluate(() => {
+      const a = document.activeElement
+      if (a?.hasAttribute('data-board-search-input')) return 'box'
+      if (a?.hasAttribute('data-web-search')) return 'web'
+      return a?.tagName === 'A' && a.textContent.includes('Quokkadoc handbook') ? 'link' : (a?.tagName ?? null)
+    })
+    const walk = []
+    for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) {
+      await page.keyboard.press(key)
+      await sleep(100)
+      walk.push(await focusedRow())
+    }
+    check('close match: the arrow keys reach every row, the link and the web row, and lead back to the box', walk.join('|') === 'link|web|web|link|box', walk.join('|'))
+
+    await page.keyboard.press('Escape')
+    await until(page, () => document.querySelector('main h1')?.textContent === 'Search test')
+
+    // Settings > Appearance > Search bar: Off takes it away and brings the sidebar's box back ("/" goes
+    // there, and Enter with no match searches the web from it too); On puts the bar back in its place.
+    const pickBar = async (label) => {
+      await page.evaluate((label) => [...document.querySelectorAll('[data-search-bar-setting] [role=radio]')].find((b) => b.textContent.trim() === label)?.click(), label)
+      await sleep(400)
+    }
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(page, () => !!document.querySelector('[data-search-bar-setting]'))
+    const shownOn = await page.evaluate(() => [...document.querySelectorAll('[data-search-bar-setting] [role=radio]')].find((b) => b.getAttribute('aria-checked') === 'true')?.textContent.trim())
+    await pickBar('Off')
+    const offState = await page.evaluate(async () => ({ bar: !!document.querySelector('[data-board-search]'), saved: (await chrome.storage.local.get('appearance')).appearance?.searchBar }))
+    await page.keyboard.press('Escape')
+    await until(page, () => !document.querySelector('[role=dialog]'))
+    await page.mouse.click(120, 860)
+    await page.keyboard.press('/')
+    const slashOff = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))
+    await page.keyboard.type('zzqq weather')
+    await page.keyboard.press('Enter')
+    await sleep(200)
+    const fromSidebar = await searches(page)
+    await page.keyboard.press('Escape')
+    await page.evaluate(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+    await until(page, () => !!document.querySelector('[data-search-bar-setting]'))
+    await pickBar('On')
+    const onAgain = await page.evaluate(async () => ({ bar: !!document.querySelector('[data-board-search]'), saved: (await chrome.storage.local.get('appearance')).appearance?.searchBar, sidebarBox: !!document.querySelector('aside input') }))
+    await page.keyboard.press('Escape')
+    check(
+      'search bar: Settings > Appearance switches it off and on, and is saved; with it off the sidebar box is back, takes "/", and Enter there searches the web',
+      shownOn === 'On' && !offState.bar && offState.saved === false && slashOff === 'Search all spaces' &&
+        JSON.stringify(fromSidebar) === JSON.stringify([{ text: 'zzqq weather', disposition: 'CURRENT_TAB' }]) &&
+        onAgain.bar && onAgain.saved === true && !onAgain.sidebarBox,
+      JSON.stringify({ shownOn, offState, slashOff, fromSidebar, onAgain }),
+    )
+    await page.close()
+
+    // New installs get it, updates from 0.9.6 don't, from the first frame (the boot copy decides it).
+    // The control page is a board too: it rewrites the boot copy when the saved settings change, so the
+    // copy is set last, as in the Rows block.
+    const MIRROR = 'stackable:appearance'
+    const was = await control.evaluate(async (k) => ({ mirror: localStorage.getItem(k), stored: (await chrome.storage.local.get('appearance')).appearance ?? null }), MIRROR)
+    const saved = () => control.evaluate(async () => (await chrome.storage.local.get('appearance')).appearance ?? null)
+    const store = async (value) => {
+      await control.evaluate((v) => (v === null ? chrome.storage.local.remove('appearance') : chrome.storage.local.set({ appearance: v })), value)
+      await sleep(400)
+    }
+    const mirror = (value) => control.evaluate((k, v) => (v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)), MIRROR, value)
+    const updatedFrom = (v) => askWorker(control, { type: 'e2e-updated-from', previousVersion: v })
+    // A new tab that notes, from the board's first paint on, whether the search bar shows: ['bar'], ['none'], or a jump.
+    const firstFrames = async () => {
+      const p = await browser.newPage()
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`ntp: ${e.message}`))
+      await p.evaluateOnNewDocument(() => {
+        window.__bars = []
+        const note = () => {
+          if (!document.querySelector('main h1')) return
+          const now = document.querySelector('[data-board-search]') ? 'bar' : 'none'
+          if (window.__bars[window.__bars.length - 1] !== now) window.__bars.push(now)
+        }
+        new MutationObserver(note).observe(document, { childList: true, subtree: true })
+      })
+      await p.goto(NTP)
+      await p.bringToFront()
+      await until(p, () => window.__bars.length > 0)
+      await sleep(1500)
+      const seen = await p.evaluate(() => window.__bars)
+      await p.close()
+      return seen
+    }
+    const settings096 = (() => {
+      const { searchBar, ...rest } = was.stored ?? { mode: 'system', palette: 'stackboard', density: 'comfortable', layout: 'packed' }
+      void searchBar
+      return { ...rest, layout: rest.layout ?? 'packed' }
+    })()
+    const mirror096 = (() => {
+      const m = JSON.parse(was.mirror ?? '{}')
+      if (m.settings) delete m.settings.searchBar
+      return JSON.stringify(m)
+    })()
+
+    // Settings and a boot copy saved by 0.9.6, then the update.
+    await store(settings096)
+    const reply = await updatedFrom('0.9.6')
+    await sleep(300)
+    await mirror(mirror096)
+    const afterUpdate = await saved()
+    const updatedFrames = await firstFrames()
+    check(
+      'search bar: an update from 0.9.6 leaves it off, from the first frame, and writes that into the saved settings',
+      reply?.ok === true && afterUpdate?.searchBar === false && afterUpdate?.layout === settings096.layout && JSON.stringify(updatedFrames) === '["none"]',
+      `${JSON.stringify(reply)} ${JSON.stringify(afterUpdate)} ${JSON.stringify(updatedFrames)}`,
+    )
+
+    // A 0.9.6 board that never saved any settings and has no boot copy: still off, and still Packed.
+    await store(null)
+    await updatedFrom('0.9.6')
+    await sleep(400)
+    await mirror(null)
+    const bare = await saved()
+    const bareFrames = await firstFrames()
+    check('search bar: a 0.9.6 board that never saved settings opens without it after the update, and keeps Packed', bare?.searchBar === false && bare?.layout === 'packed' && JSON.stringify(bareFrames) === '["none"]', `${JSON.stringify(bare)} ${JSON.stringify(bareFrames)}`)
+
+    // A fresh install: nothing saved anywhere.
+    await store(null)
+    await mirror(null)
+    const freshFrames = await firstFrames()
+    check('search bar: a fresh install opens with it, from the first frame', JSON.stringify(freshFrames) === '["bar"]' && (await saved()) === null, JSON.stringify(freshFrames))
+
+    // A choice someone made stays through the update; an update from 0.9.7 on writes nothing.
+    await store({ ...settings096, searchBar: true })
+    await updatedFrom('0.9.6')
+    await sleep(300)
+    const kept = await saved()
+    await store(settings096)
+    await updatedFrom('0.9.7')
+    await sleep(300)
+    const later = await saved()
+    check('search bar: an update never overwrites a choice, and only a version before 0.9.7 writes it off', kept?.searchBar === true && !!later && !('searchBar' in later), `${JSON.stringify(kept)} ${JSON.stringify(later)}`)
+
+    await store(was.stored)
+    await mirror(was.mirror)
+    await control.evaluate(async (m) => {
+      await chrome.bookmarks.removeTree(m.space)
+      if (m.was === null) localStorage.removeItem('stackable:lastSpaceId')
+      else localStorage.setItem('stackable:lastSpaceId', m.was)
+    }, made)
+    await sleep(400)
+  }
+
+  // ---------- 0.9.7: what's new ----------
+  // An update from before 0.9.7 marks the computer (whatsNew097: true plays it through the worker),
+  // and the next new tabs show the 0.9.7 note, on three at most: web search, the search bar with a
+  // button while the bar is off (people updating keep it off), and Arc import. The button turns the bar
+  // on and retires the note, Got it retires it, and without the mark (a fresh install) nothing shows.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    for (const pg of await browser.pages()) {
+      if (pg === control) continue
+      if (pg.url().startsWith(`chrome-extension://${extId}/`) || pg.url().startsWith('chrome://newtab')) await pg.close().catch(() => {})
+    }
+    const card = (page) =>
+      page.evaluate(() => {
+        const c = document.querySelector('[data-whats-new-097]')
+        return c
+          ? { title: c.querySelector('h3')?.innerText.trim(), items: [...c.querySelectorAll('li')].map((li) => li.innerText.replace(/\s+/g, ' ').trim()), button: !!c.querySelector('[data-show-search-bar]') }
+          : null
+      })
+    const LS = ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:whatsNew097', 'stackable:firstSeen']
+    const was = await control.evaluate(async (ls) => ({
+      appearance: (await chrome.storage.local.get('appearance')).appearance ?? null,
+      local: await chrome.storage.local.get(['whatsNew080', 'whatsNew090', 'whatsNew097']),
+      sync: await chrome.storage.sync.get(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey']),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS)
+    // A free board with the older notes answered and no trial (its cards would take the corner), and the
+    // search bar off, as after an update from 0.9.6.
+    await control.evaluate(async () => {
+      localStorage.setItem('stackable:firstSeen', String(Date.now()))
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090']) localStorage.setItem(k, '-1')
+      localStorage.removeItem('stackable:whatsNew097')
+      await chrome.storage.local.remove(['whatsNew080', 'whatsNew090', 'whatsNew097'])
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      const a = (await chrome.storage.local.get('appearance')).appearance ?? {}
+      await chrome.storage.local.set({ appearance: { ...a, searchBar: false } })
+    })
+    await sleep(400)
+    const fresh = await openNtp()
+    await sleep(2500)
+    check("what's new 0.9.7: without the update mark (a fresh install) there's no note", !(await card(fresh)))
+    await fresh.close()
+
+    await askWorker(control, { type: 'e2e-updated-from', previousVersion: '0.9.6', whatsNew097: true })
+    const p1 = await openNtp()
+    const c1 = (await until(p1, () => !!document.querySelector('[data-whats-new-097]'))) ? await card(p1) : null
+    check(
+      "what's new 0.9.7: an update from 0.9.6 shows the note in the CEO's words, with Show the search bar while the bar is off",
+      !!c1 &&
+        c1.title === 'New in 0.9.7' &&
+        JSON.stringify(c1.items) ===
+          JSON.stringify([
+            'Search the web from Stackboard: when no link matches, Enter searches with your default search engine.',
+            'Want a search bar across the top of your board? Show the search bar',
+            'Moving from Arc? Settings > Copy from Arc brings your spaces over.',
+          ]) &&
+        c1.button,
+      JSON.stringify(c1),
+    )
+    await sleep(400)
+    await p1.screenshot({ path: path.join(SHOTS, '97-whats-new.png') })
+    await p1.evaluate(() => document.querySelector('[data-show-search-bar]')?.click())
+    const turnedOn = await until(p1, () => !document.querySelector('[data-whats-new-097]') && !!document.querySelector('[data-board-search]'))
+    const afterButton = await p1.evaluate(async () => ({ shows: localStorage.getItem('stackable:whatsNew097'), saved: (await chrome.storage.local.get('appearance')).appearance?.searchBar ?? null }))
+    check("what's new 0.9.7: Show the search bar turns the bar on, saved, and retires the note", turnedOn && afterButton.shows === '-1' && afterButton.saved === true, JSON.stringify(afterButton))
+    await p1.close()
+
+    // With the bar on there's no bar line; the note shows on three new tabs at most.
+    await control.evaluate(() => localStorage.removeItem('stackable:whatsNew097'))
+    const seen = []
+    for (let i = 0; i < 4; i++) {
+      const p = await openNtp()
+      const c = (await until(p, () => !!document.querySelector('[data-whats-new-097]'), null, i < 3 ? 8000 : 3000)) ? await card(p) : null
+      seen.push(c ? `${c.items.length}${c.button ? '+button' : ''}` : 'none')
+      await p.close()
+    }
+    const shows = await control.evaluate(() => localStorage.getItem('stackable:whatsNew097'))
+    check("what's new 0.9.7: with the bar already on it drops the bar line, and it shows on three new tabs at most", seen.join('|') === '2|2|2|none' && shows === '3', JSON.stringify({ seen, shows }))
+
+    await control.evaluate(() => localStorage.setItem('stackable:whatsNew097', '1'))
+    const p5 = await openNtp()
+    await until(p5, () => !!document.querySelector('[data-whats-new-097]'))
+    await p5.evaluate(() => [...document.querySelectorAll('[data-whats-new-097] button')].find((b) => b.textContent.trim() === 'Got it')?.click())
+    await sleep(400)
+    check("what's new 0.9.7: Got it retires it", await p5.evaluate(() => !document.querySelector('[data-whats-new-097]') && localStorage.getItem('stackable:whatsNew097') === '-1'))
+    await p5.close()
+
+    await control.evaluate(async (w) => {
+      await chrome.storage.local.remove(['whatsNew080', 'whatsNew090', 'whatsNew097'])
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (w.appearance) await chrome.storage.local.set({ appearance: w.appearance })
+      else await chrome.storage.local.remove('appearance')
+      await chrome.storage.sync.remove(['proEarly', 'proEarlyTodo', 'proTrial', 'proKey'])
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was)
+    await sleep(400)
+  }
+
+  // ---------- 0.9.7: the emoji picker loads nothing from outside the extension ----------
+  // emoji-picker-react draws its default (Apple) emoji as images from cdn.jsdelivr.net, so opening the
+  // space icon picker used to request them. Since 0.9.7 it draws the system's own emoji: opening it and
+  // scrolling through every category requests nothing beyond the extension's own files.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const page = await openNtp()
+    await page.bringToFront()
+    const outside = []
+    page.on('request', (r) => {
+      const u = r.url()
+      if (!/^(chrome-extension|data|blob):/i.test(u)) outside.push(u)
+    })
+    await page.evaluate(() => document.querySelector('button[aria-label="Add space"]').click())
+    await page.waitForSelector('[role=dialog] input', { timeout: 5000 })
+    // The icon button is the form's first button; it opens the picker.
+    await page.evaluate(() => document.querySelector('[role=dialog] form button[type=button]').click())
+    const opened = await until(page, () => document.querySelectorAll('[role=dialog] .EmojiPickerReact .epr-emoji').length > 20, null, 10000)
+    await page.evaluate(async () => {
+      const body = document.querySelector('[role=dialog] .EmojiPickerReact .epr-body')
+      for (let i = 0; i < 12 && body; i++) {
+        body.scrollTop += 1500
+        await new Promise((r) => setTimeout(r, 150))
+      }
+    })
+    await sleep(1000)
+    const drawn = await page.evaluate(() => ({
+      native: document.querySelectorAll('[role=dialog] .EmojiPickerReact .epr-emoji-native').length,
+      images: document.querySelectorAll('[role=dialog] .EmojiPickerReact img').length,
+    }))
+    check(
+      'emoji picker: opening it and scrolling through it requests nothing outside the extension; it draws the system emoji',
+      opened && outside.length === 0 && drawn.native > 20 && drawn.images === 0,
+      JSON.stringify({ opened, outside: outside.slice(0, 4), outsideCount: outside.length, drawn }),
+    )
+    await page.keyboard.press('Escape')
+    await page.close()
   }
 
   // ---------- 0.7.0: auto-archive (Pro) ----------

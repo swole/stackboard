@@ -35,7 +35,8 @@ type ModalState =
   | { kind: 'bookmark-edit'; id: string; title: string; url: string; stackId: string }
   | { kind: 'confirm-delete'; targetKind: 'space' | 'stack' | 'bookmark'; id: string; name: string; childCount: number }
   | { kind: 'settings' }
-  | { kind: 'import' }
+  /** 0.9.7: `from: 'arc'` opens the importer on Arc's tab (Settings > Copy from Arc). */
+  | { kind: 'import'; from?: 'chrome' | 'arc' }
   | { kind: 'packs' }
   | { kind: 'cleanup' }
 
@@ -69,6 +70,8 @@ interface StackableState {
   search: string
   modal: ModalState
   sidebarCollapsed: boolean
+  /** 0.9.7 (U6): the stack jump links under the selected space are folded away, on this device. */
+  stackListFolded: boolean
   /** Folders inside stacks that are open on this device (0.8.0); every other folder shows folded. */
   openFolders: ReadonlySet<string>
   toast: ToastState | null
@@ -102,6 +105,7 @@ interface StackableState {
   openModal: (m: ModalState) => void
   closeModal: () => void
   toggleSidebar: () => void
+  toggleStackList: () => void
   toggleFolder: (id: string) => void
   /** Opens these folders (a link landing in one, a search hit inside one). */
   unfoldFolders: (ids: string[]) => void
@@ -136,6 +140,7 @@ export const useStackableStore = create<StackableState>((set, get) => ({
   search: '',
   modal: { kind: 'none' },
   sidebarCollapsed: prefs.sidebarCollapsed(),
+  stackListFolded: prefs.stackListFolded(),
   openFolders: new Set(prefs.openFolders()),
   toast: null,
   flash: null,
@@ -200,6 +205,11 @@ export const useStackableStore = create<StackableState>((set, get) => ({
     set((s) => {
       prefs.setSidebarCollapsed(!s.sidebarCollapsed)
       return { sidebarCollapsed: !s.sidebarCollapsed }
+    }),
+  toggleStackList: () =>
+    set((s) => {
+      prefs.setStackListFolded(!s.stackListFolded)
+      return { stackListFolded: !s.stackListFolded }
     }),
   toggleFolder: (id) =>
     set((s) => {

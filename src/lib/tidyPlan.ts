@@ -86,7 +86,7 @@ export function tidyBody(spaceName: string, input: TidyInput, license: TidyLicen
 }
 
 // ---------- One free tidy per person (0.9.5) ----------
-// the maintainer, 10 Nov 2026: Tidy needs a paid key, so the trial can't use it and almost nobody had seen
+// 10 Nov 2026: Tidy needs a paid key, so the trial can't use it and almost nobody had seen
 // it. Free and trial users, and a key that's paused, now get one tidy per Chrome profile. It sends
 // the same space with `free: true` and no key, and the server runs it within a daily budget all
 // free runs share (site/api/_lib/freeTidy.js). Once used (sync storage, lib/tidy.ts) only a paid key

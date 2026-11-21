@@ -7,7 +7,7 @@ import { readTree } from './lib/bookmarks'
 import { readCompany, readLocks, watchCompany } from './lib/company'
 import { goEntries, goSuggestions, looksLikeUrl, rankGo, searchDisposition, type GoEntry } from './lib/goLinks'
 import { forgetTab, noteActivated, startTabSeen } from './lib/tabSeen'
-import { PACKED_VERSION, rowsForOldBoard } from './lib/appearance'
+import { PACKED_VERSION, SEARCH_BAR_VERSION, settingsAfterUpdate } from './lib/appearance'
 
 // Service worker (0.4.0).
 // 1. On a fresh install, open a new tab so people land on Stackboard straight away: the welcome
@@ -33,17 +33,23 @@ const APPEARANCE_KEY = 'appearance'
  *    0.8.0 keeps Rows: the saved settings get layout Rows (or just that, when none were saved),
  *    and a layout someone picked stays. The page's boot copy can't be written from here, but one
  *    from before 0.8.0 has no layout and reads as Rows too (parseSavedAppearance).
+ *    (0.9.7) The same for the board's search bar: on for new installs, off for a board updated from
+ *    before 0.9.7 (a boot copy from before has no searchBar and reads as off). One read and one write
+ *    for both, so neither change can overwrite the other.
  */
-async function keepRows(previousVersion: string): Promise<void> {
-  if (compareVersions(previousVersion, PACKED_VERSION) >= 0) return
+async function keepOldBoardLooks(previousVersion: string): Promise<void> {
+  const beforeRows = compareVersions(previousVersion, PACKED_VERSION) < 0
+  const beforeSearchBar = compareVersions(previousVersion, SEARCH_BAR_VERSION) < 0
+  if (!beforeRows && !beforeSearchBar) return
   const saved = (await chrome.storage.local.get(APPEARANCE_KEY))[APPEARANCE_KEY]
-  const next = rowsForOldBoard(saved)
+  const next = settingsAfterUpdate(saved, { beforeRows, beforeSearchBar })
   if (next) await chrome.storage.local.set({ [APPEARANCE_KEY]: next })
 }
 
-// Keep in sync with WHATS_NEW_080_KEY and WHATS_NEW_090_KEY in src/components/WhatsNew.tsx.
+// Keep in sync with WHATS_NEW_080_KEY, WHATS_NEW_090_KEY and WHATS_NEW_097_KEY in src/components/WhatsNew.tsx.
 const WHATS_NEW_080_KEY = 'whatsNew080'
 const WHATS_NEW_090_KEY = 'whatsNew090'
+const WHATS_NEW_097_KEY = 'whatsNew097'
 
 /** 8. (0.8.0) An update from before 0.8.0 marks this computer for the 0.8.0 what's-new note. */
 async function markWhatsNew080(previousVersion: string): Promise<void> {
@@ -55,6 +61,12 @@ async function markWhatsNew080(previousVersion: string): Promise<void> {
 async function markWhatsNew090(previousVersion: string): Promise<void> {
   if (compareVersions(previousVersion, '0.9.0') >= 0) return
   await chrome.storage.local.set({ [WHATS_NEW_090_KEY]: { from: previousVersion, at: Date.now() } })
+}
+
+/** 11. (0.9.7) An update from before 0.9.7 marks this computer for the 0.9.7 what's-new note. */
+async function markWhatsNew097(previousVersion: string): Promise<void> {
+  if (compareVersions(previousVersion, '0.9.7') >= 0) return
+  await chrome.storage.local.set({ [WHATS_NEW_097_KEY]: { from: previousVersion, at: Date.now() } })
 }
 
 // Keep in sync with TRIAL and KEY in src/lib/pro.ts.
@@ -87,9 +99,10 @@ chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
     if (previousVersion && compareVersions(previousVersion, PRO_VERSION) < 0) {
       void chrome.storage.sync.set({ [EARLY_KEY]: { from: previousVersion, at: Date.now() } }).catch(() => {})
     }
-    if (previousVersion) void keepRows(previousVersion).catch(() => {})
+    if (previousVersion) void keepOldBoardLooks(previousVersion).catch(() => {})
     if (previousVersion) void markWhatsNew080(previousVersion).catch(() => {})
     if (previousVersion) void markWhatsNew090(previousVersion).catch(() => {})
+    if (previousVersion) void markWhatsNew097(previousVersion).catch(() => {})
     return
   }
   if (reason !== chrome.runtime.OnInstalledReason.INSTALL) return
@@ -119,12 +132,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
   // 7. (0.8.0) The e2e suite plays an update from an older version here: the same step the
   //    update runs. Unpacked builds only (a store build always has an update_url).
-  //    `whatsNew: true` also plays the what's-new mark, which the other update tests leave out.
+  //    `whatsNew: true` also plays the what's-new mark, which the other update tests leave out
+  //    (`whatsNew090` and, since 0.9.7, `whatsNew097` play those notes' marks).
   if (msg?.type === 'e2e-updated-from' && typeof msg.previousVersion === 'string' && !('update_url' in chrome.runtime.getManifest())) {
     Promise.all([
-      keepRows(msg.previousVersion),
+      keepOldBoardLooks(msg.previousVersion),
       msg.whatsNew === true ? markWhatsNew080(msg.previousVersion) : null,
       msg.whatsNew090 === true ? markWhatsNew090(msg.previousVersion) : null,
+      msg.whatsNew097 === true ? markWhatsNew097(msg.previousVersion) : null,
     ])
       .then(() => reply({ ok: true }), (err) => reply({ error: String(err) }))
     return true

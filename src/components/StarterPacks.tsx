@@ -6,11 +6,16 @@ import { countPlanned, plural } from '../lib/importPlan'
 import { useStackableStore } from '../store/useStackableStore'
 
 interface Props {
-  /** 'chips' on the welcome screen (adding one opens it); 'list' in Settings (add several). */
-  variant: 'chips' | 'list'
+  /**
+   * 'chips' on the welcome screen (adding one opens it); 'list' in Settings (add several);
+   * 'dialog' in the New space dialog (0.9.7): chips again, and adding one closes the dialog (onAdded).
+   */
+  variant: 'chips' | 'list' | 'dialog'
+  /** Called with the new space's id once a pack is on the board. */
+  onAdded?: (spaceId: string) => void
 }
 
-export function StarterPacks({ variant }: Props) {
+export function StarterPacks({ variant, onAdded }: Props) {
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
   const flashItem = useStackableStore((s) => s.flashItem)
@@ -23,7 +28,11 @@ export function StarterPacks({ variant }: Props) {
   const add = async (pack: StarterPack) => {
     if (busy) return
     setBusy(pack.id)
-    if (variant === 'chips') setOnboarding(true)
+    // The welcome screen stays up while its pack fills the board. From the New space dialog that only
+    // applies on an empty board: on one with spaces, holding the welcome would flash it behind the dialog.
+    const ownSpaces = useStackableStore.getState().tree?.spaces.filter((s) => !s.company).length ?? 0
+    const hold = variant === 'chips' || (variant === 'dialog' && ownSpaces === 0)
+    if (hold) setOnboarding(true)
     try {
       const id = await createPlannedSpace(pack)
       await refresh()
@@ -31,22 +40,25 @@ export function StarterPacks({ variant }: Props) {
       flashItem(id)
       setAdded((prev) => new Set(prev).add(pack.id))
       celebrate()
+      onAdded?.(id)
     } catch (err) {
       reportError(`add ${pack.name}`, err)
     } finally {
       setBusy(null)
-      if (variant === 'chips') setOnboarding(false)
+      if (hold) setOnboarding(false)
     }
   }
 
-  if (variant === 'chips') {
+  if (variant === 'chips' || variant === 'dialog') {
     return (
       <div className="flex flex-wrap gap-2">
         {STARTER_PACKS.map((p) => (
           <button
             key={p.id}
+            type="button"
             onClick={() => void add(p)}
             disabled={!!busy}
+            data-pack={p.id}
             title={`${p.blurb} (${plural(countPlanned(p), 'link')})`}
             className="group/pack inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3 py-1.5 text-sm text-fg shadow-xs transition hover:-translate-y-px hover:border-accent-line hover:text-strong hover:shadow-chip disabled:opacity-60"
           >
@@ -73,6 +85,7 @@ export function StarterPacks({ variant }: Props) {
               </div>
             </div>
             <button
+              type="button"
               onClick={() => void add(p)}
               disabled={!!busy || done}
               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-card px-2.5 py-1 text-xs font-medium text-fg hover:border-accent-line hover:bg-accent-soft disabled:opacity-60"

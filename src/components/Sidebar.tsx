@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   CalendarCheck,
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Crown,
@@ -20,12 +21,11 @@ import {
 } from 'lucide-react'
 import type { Space, Stack } from '../lib/types'
 import { useStackableStore } from '../store/useStackableStore'
+import { useAppearance } from '../store/useAppearance'
 import { glow } from '../lib/motion'
-import { topHit } from '../lib/search'
 import { allLinks, walkFolders } from '../lib/folderPlan'
-import { openHere, openInNewTab } from '../lib/tabs'
-import { recordOpen } from '../lib/opens'
 import { spaceIndexForKey, typingInField } from '../lib/shortcuts'
+import { focusBoardSearch, onSearchKeyDown } from './searchKeys'
 import { usePro } from '../lib/pro'
 import { hasPro } from '../lib/proPlan'
 import { refreshTidyReady } from '../lib/tidy'
@@ -45,9 +45,36 @@ interface SortableSpaceProps {
   space: Space
   active: boolean
   onClick: () => void
+  /** The selected space's row, while its stack list shows under it: the chevron that folds it (0.9.7, U6). */
+  fold?: StackListFold
 }
 
-function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
+interface StackListFold {
+  folded: boolean
+  onToggle: () => void
+}
+
+/** Folds the stack jump links under the selected space, or brings them back (0.9.7, U6). */
+function FoldButton({ fold }: { fold: StackListFold }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        fold.onToggle()
+      }}
+      data-stack-list-toggle
+      aria-expanded={!fold.folded}
+      aria-label={fold.folded ? "Show this space's stack list" : "Fold this space's stack list"}
+      title={fold.folded ? 'Show the stack list' : 'Fold the stack list'}
+      className="shrink-0 rounded p-0.5 text-faint hover:bg-hover hover:text-fg"
+    >
+      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${fold.folded ? '-rotate-90' : ''}`} />
+    </button>
+  )
+}
+
+function SortableSpaceRow({ space, active, onClick, fold }: SortableSpaceProps) {
   const openModal = useStackableStore((s) => s.openModal)
   // A stack dropped onto this row glows it, so the move has somewhere visible to go.
   const flashSeq = useStackableStore((s) => (s.flash?.id === space.id ? s.flash.seq : 0))
@@ -171,6 +198,7 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
           {space.name || 'Untitled'}
         </span>
       </button>
+      {fold && <FoldButton fold={fold} />}
       <div className="relative">
         <button
           onClick={(e) => {
@@ -212,7 +240,7 @@ function SortableSpaceRow({ space, active, onClick }: SortableSpaceProps) {
  * A space from the company's Chrome policy (Teams, 0.8.0): selectable like any space, never
  * dragged, renamed or deleted. The spacer keeps it in line with the drag handles below.
  */
-function CompanySpaceRow({ space, active, onClick }: SortableSpaceProps) {
+function CompanySpaceRow({ space, active, onClick, fold }: SortableSpaceProps) {
   return (
     <div className="flex items-center rounded-md" data-company-space={space.name}>
       <span aria-hidden className="w-3.5 shrink-0" />
@@ -235,6 +263,7 @@ function CompanySpaceRow({ space, active, onClick }: SortableSpaceProps) {
         )}
         <Lock aria-label="Read-only" className="ml-auto h-3 w-3 shrink-0 text-faint" />
       </button>
+      {fold && <FoldButton fold={fold} />}
     </div>
   )
 }
@@ -270,6 +299,10 @@ export function Sidebar() {
   const openModal = useStackableStore((s) => s.openModal)
   const collapsed = useStackableStore((s) => s.sidebarCollapsed)
   const toggle = useStackableStore((s) => s.toggleSidebar)
+  const stackListFolded = useStackableStore((s) => s.stackListFolded)
+  const toggleStackList = useStackableStore((s) => s.toggleStackList)
+  // 0.9.7: the board's search bar (Settings > Appearance) takes the sidebar box's place while it shows.
+  const boardSearch = useAppearance((s) => s.appearance.searchBar)
   const todayView = useStackableStore((s) => s.todayView)
   const showToday = useStackableStore((s) => s.showToday)
   // Today (Pro, 0.7.1) sits above the spaces while Pro or the trial is on.
@@ -309,6 +342,8 @@ export function Sidebar() {
       if (e.ctrlKey || e.metaKey || e.altKey || typingInField()) return
       if (e.key === '/') {
         e.preventDefault()
+        // 0.9.7: the board's search bar, when it shows, is the box "/" goes to.
+        if (focusBoardSearch()) return
         if (collapsed) toggle()
         setFocusSearch(true)
         return
@@ -337,20 +372,11 @@ export function Sidebar() {
     selectSpace(id)
   }
 
-  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      setSearch('')
-      e.currentTarget.blur()
-      return
-    }
-    if (e.key !== 'Enter') return
-    const hit = topHit(tree, search)
-    if (!hit) return
-    e.preventDefault()
-    recordOpen(hit.url)
-    if (e.ctrlKey || e.metaKey) void openInNewTab(hit.url, e.shiftKey)
-    else void openHere(hit.url, useStackableStore.getState().openTabs)
-  }
+  // 0.9.7 (U6): the selected space's row folds its stack list away, remembered on this device. The
+  // chevron shows only while there is a list to fold.
+  const stackList = (id: string) => id === selectedId && !onToday && filteredStacks.length > 0
+  const foldFor = (id: string): StackListFold | undefined =>
+    stackList(id) ? { folded: stackListFolded, onToggle: toggleStackList } : undefined
 
   if (collapsed) {
     return (
@@ -426,6 +452,9 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* 0.9.7: one search box. While the board's search bar shows, it is the box ("/" and the free
+          Ctrl+K go there), so the sidebar's steps aside. */}
+      {!boardSearch && (
       <div className="px-3 pb-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
@@ -434,7 +463,7 @@ export function Sidebar() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={onSearchKey}
+            onKeyDown={onSearchKeyDown}
             placeholder="Search all spaces"
             aria-label="Search all spaces"
             className="peer w-full rounded-md border border-line bg-sunken py-1.5 pl-7 pr-7 text-sm text-fg placeholder:text-faint focus:border-focus focus:bg-card focus:outline-none"
@@ -457,6 +486,7 @@ export function Sidebar() {
           )}
         </div>
       </div>
+      )}
 
       <div className="px-3 pb-2">
         <button
@@ -503,8 +533,13 @@ export function Sidebar() {
           <div className="flex flex-col gap-0.5">
             {companySpaces.map((s) => (
               <div key={s.id}>
-                <CompanySpaceRow space={s} active={s.id === selectedId && !search.trim() && !onToday} onClick={() => goToSpace(s.id)} />
-                {s.id === selectedId && !onToday && <StackJumpList spaceId={s.id} stacks={filteredStacks} />}
+                <CompanySpaceRow
+                  space={s}
+                  active={s.id === selectedId && !search.trim() && !onToday}
+                  onClick={() => goToSpace(s.id)}
+                  fold={foldFor(s.id)}
+                />
+                {stackList(s.id) && !stackListFolded && <StackJumpList spaceId={s.id} stacks={filteredStacks} />}
               </div>
             ))}
           </div>
@@ -539,8 +574,9 @@ export function Sidebar() {
                   space={s}
                   active={s.id === selectedId && !search.trim() && !onToday}
                   onClick={() => goToSpace(s.id)}
+                  fold={foldFor(s.id)}
                 />
-                {s.id === selectedId && !onToday && <StackJumpList spaceId={s.id} stacks={filteredStacks} />}
+                {stackList(s.id) && !stackListFolded && <StackJumpList spaceId={s.id} stacks={filteredStacks} />}
               </div>
             ))}
             {ownSpaces.length === 0 && (

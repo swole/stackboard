@@ -62,3 +62,44 @@ export function topHit(tree: StackableTree | null, query: string): Bookmark | nu
   if (!tree) return null
   return searchTree(tree, query)[0]?.hits[0] ?? null
 }
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 0.9.7: a listed link is a close match when every typed word matches it closely: at the start of a
+ * word in its title, at the start of a label in its hostname (git: github.com, mail:
+ * mail.google.com), or anywhere in its hostname for a word of 3 or more characters (hub:
+ * github.com). A word found only in the path or query, only mid-word in the title, or only in a
+ * stack, folder or space name still lists the link, but doesn't make it close.
+ */
+export function isCloseMatch(bookmark: Pick<Bookmark, 'title' | 'url'>, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return false
+  const title = bookmark.title.toLowerCase()
+  const host = hostOf(bookmark.url)
+  const labels = host.split('.')
+  return terms.every(
+    (t) =>
+      new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(t)}`, 'u').test(title) ||
+      labels.some((l) => l.startsWith(t)) ||
+      (t.length >= 3 && host.includes(t)),
+  )
+}
+
+/**
+ * What Enter opens (0.9.7): the highest-ranked close match among the listed links, or null, and then
+ * Enter searches the web. Listed links that aren't close stay reachable with the arrow keys.
+ */
+export function enterHit(tree: StackableTree | null, query: string): Bookmark | null {
+  if (!tree) return null
+  for (const group of searchTree(tree, query)) {
+    for (const bookmark of group.hits) if (isCloseMatch(bookmark, query)) return bookmark
+  }
+  return null
+}

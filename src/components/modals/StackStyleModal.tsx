@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Check } from 'lucide-react'
-import type { Theme } from 'emoji-picker-react'
+import type { EmojiStyle, Theme } from 'emoji-picker-react'
 import { Modal, PrimaryButton, SecondaryButton, Label } from './Modal'
 import { renameStack } from '../../lib/bookmarks'
 import { usePro } from '../../lib/pro'
@@ -12,6 +12,9 @@ import { useStackableStore } from '../../store/useStackableStore'
 import { KeepWithPro } from '../KeepWithPro'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
+// The system's own emoji (0.9.7), so opening the picker fetches nothing: the default Apple set loads
+// its images from cdn.jsdelivr.net.
+const PICKER_STYLE = { emojiStyle: 'native' as EmojiStyle }
 
 interface Props {
   stackId: string
@@ -130,6 +133,7 @@ export function StackStyleModal({ stackId, title, color: savedColor }: Props) {
                   width="100%"
                   height={300}
                   theme={scheme as Theme}
+                  {...PICKER_STYLE}
                 />
               </Suspense>
             </div>

@@ -2,7 +2,7 @@ import { ARCHIVE_AFTER } from './archivePlan'
 import { FOUNDING_ENDS, LIFETIME_OFFER_PRICE, LIFETIME_PRICE, TRIAL_DAYS, checkoutPlan, type CheckoutPlan, type ProState } from './proPlan'
 import { joinList } from './statsPlan'
 
-// The trial-end recap and the moment-of-need line (0.9.0, the maintainer: "seamlessly convert free users
+// The trial-end recap and the moment-of-need line (0.9.0, "seamlessly convert free users
 // to pro"): who sees which, and what it says. Pure, so tests/unit.test.ts covers the rules. The
 // cards live in components/TrialEndCard.tsx and components/MomentLine.tsx; the corner they share
 // with the what's-new notes is lib/corner.ts.
@@ -191,7 +191,7 @@ export function trialSwitches(p: { archiveAfter: number | null; stripOn: boolean
 }
 
 // ---------- "What stopped you?" (0.9.3) ----------
-// the maintainer, 8 Nov 2026: one optional question for someone who opened the checkout on this computer and
+// 8 Nov 2026: one optional question for someone who opened the checkout on this computer and
 // came back without buying, to learn why checkouts don't turn into purchases. Five one-tap answers,
 // and a line to type with Something else. site/api/why.js keeps the answer with nothing that
 // identifies the person.
@@ -275,7 +275,7 @@ export function whyNotOffersTrial(p: { reason: WhyReason; trialStartedAt: number
 }
 
 /**
- * After The price (0.9.4; the maintainer, 10 Nov 2026: only someone who marks price as the issue sees the
+ * After The price (0.9.4; 10 Nov 2026: only someone who marks price as the issue sees the
  * discounted price): the founding offer, Pro for life for $9.99 on its own checkout link
  * (CHECKOUT.lifetimeOffer), until the founding price ends and never under the company's pro lock.
  * Nothing else offers it: Settings, the trial-end recap and the website keep $19.
@@ -291,8 +291,8 @@ export const WHY_PRICE_OFFER = {
 } as const
 
 // ---------- The December founding-price note (0.9.5) ----------
-// the maintainer, 10 Nov 2026: $2.99 a year is the founding price for new buyers until 31 Dec 2026, 23:59
-// Singapore time (FOUNDING_ENDS), and $4.99 after. A free or trial user who isn't an early user (they
+// 10 Nov 2026: $2.99 a year is the founding price for new buyers until 31 Dec 2026, 23:59
+// Singapore time (FOUNDING_ENDS), and $9.99 after. A free or trial user who isn't an early user (they
 // keep $2.99 whenever they buy, so never see it) gets one corner card from 1 Dec and one more in the
 // last four days, on one new tab each, answered or not. Not on the welcome screen, not before a new
 // install has settled in (the reverse-trial card's wait, so that card comes first), not while a
@@ -341,7 +341,7 @@ export function foundingNote(p: {
 /** What the note says; See Pro opens Settings at Stackboard Pro. */
 export const FOUNDING_NOTE = {
   title: '$2.99 a year ends on 31 Dec',
-  line: 'After that Pro is $4.99 a year. If you join before then, it stays $2.99 while you keep Pro.',
+  line: 'After that Pro is $9.99 a year. If you join before then, it stays $2.99 while you keep Pro.',
   button: 'See Pro',
 } as const
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Modal, PrimaryButton, SecondaryButton } from './Modal'
-import { Check, Download, FolderInput, LifeBuoy, Link2, Package, Star, Upload } from 'lucide-react'
+import { Check, Download, FileUp, FolderInput, LifeBuoy, Link2, Package, Star, Upload } from 'lucide-react'
 import { IS_EXTENSION, exportBackup, importBackup } from '../../lib/bookmarks'
 import { downloadJson, openInNewTab, pickJsonFile } from '../../lib/tabs'
 import { REVIEWS_URL, SHARE_URL, helpUrl } from '../../lib/onboarding'
@@ -86,7 +86,7 @@ export function SettingsModal() {
         {lock?.appearance ? (
           <section data-managed-setting="Appearance">
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Appearance</h3>
-            <p className="mb-2.5 text-xs text-muted">Your company manages the look of your board. The layout is still yours.</p>
+            <p className="mb-2.5 text-xs text-muted">Your company manages the look of your board. The layout and the search bar are still yours.</p>
             <LayoutSetting />
           </section>
         ) : (
@@ -116,6 +116,15 @@ export function SettingsModal() {
               <span className="inline-flex items-center gap-1.5">
                 <FolderInput className="h-3.5 w-3.5" />
                 Copy from Chrome bookmarks
+              </span>
+            </SecondaryButton>
+            )}
+            {/* 0.9.7: Arc stops working on 22 December 2026; its spaces come in from a file. */}
+            {!lock?.importExport && (
+            <SecondaryButton onClick={() => openModal({ kind: 'import', from: 'arc' })} data-copy-from-arc>
+              <span className="inline-flex items-center gap-1.5">
+                <FileUp className="h-3.5 w-3.5" />
+                Copy from Arc
               </span>
             </SecondaryButton>
             )}

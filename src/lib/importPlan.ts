@@ -130,6 +130,21 @@ export function countPlanned(space: PlannedSpace): number {
   return space.stacks.reduce((n, s) => n + s.links.length + countPlannedFolders(s.folders).links, 0)
 }
 
+/** A stack's links, those in its folders included. */
+export function countPlannedStack(stack: PlannedStack): number {
+  return stack.links.length + countPlannedFolders(stack.folders).links
+}
+
+/**
+ * The spaces to write, with a stack that goes first in the first of them (0.9.7: Arc's Favorites
+ * row, which every Arc space shared). Without one, or with no spaces, nothing changes.
+ */
+export function withLeadStack(spaces: readonly PlannedSpace[], lead: PlannedStack | null): PlannedSpace[] {
+  if (!lead || !spaces.length) return [...spaces]
+  const [first, ...rest] = spaces
+  return [{ ...first, stacks: [lead, ...first.stacks] }, ...rest]
+}
+
 /** "1 link", "42 links" */
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`

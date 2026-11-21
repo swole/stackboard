@@ -423,7 +423,7 @@ export function setProLock(on: boolean): void {
  * labelled with the button, the plan and the version (checkoutUrl). An unpacked build has no
  * update_url in its manifest, so test and development checkouts carry a dev label. `lifetime`
  * (0.9.2) opens the Pro for life checkout instead of the yearly one. `offer` (0.9.4) opens Pro for
- * life at the founding offer while the founding price lasts (the $19 link after it); it counts as a
+ * life at the founding offer while the founding price lasts (the public lifetime link after it: $19, then $29 from 1 Jan 2027); it counts as a
  * Pro for life checkout, so Back to checkout opens the offer again.
  */
 export function openCheckout(surface: CheckoutSurface, opts: { lifetime?: boolean; offer?: boolean } = {}): void {
@@ -434,7 +434,7 @@ export function openCheckout(surface: CheckoutSurface, opts: { lifetime?: boolea
   s.markCheckout(lifetime, offer)
   const manifest = IS_EXTENSION ? chrome.runtime.getManifest() : null
   const from = { surface, plan: checkoutPlan(s.state, s.trialAuto), version: manifest?.version, dev: !manifest?.update_url }
-  void openInNewTab(offer ? lifetimeOfferUrl(from) : lifetime ? lifetimeCheckoutUrl(from) : checkoutUrl(s.early, now, from), true)
+  void openInNewTab(offer ? lifetimeOfferUrl(from) : lifetime ? lifetimeCheckoutUrl(from, now) : checkoutUrl(s.early, now, from), true)
 }
 
 let started = false

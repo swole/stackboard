@@ -31,6 +31,7 @@ import { useAppearance } from '../store/useAppearance'
 import { useStackableStore } from '../store/useStackableStore'
 import { Segmented } from './modals/Modal'
 import { KeepWithPro } from './KeepWithPro'
+import { WEB_SEARCH_COPY } from '../lib/webSearch'
 
 /**
  * Settings > Appearance (0.5.0). Every change applies to the board behind the dialog at once,
@@ -235,10 +236,31 @@ export function AppearanceSettings() {
 
         <RowLabel>Layout</RowLabel>
         <LayoutSwitch value={a.layout} onChange={(layout) => update({ layout })} />
+
+        <RowLabel>Search bar</RowLabel>
+        <SearchBarSwitch value={a.searchBar} onChange={(searchBar) => update({ searchBar })} />
       </div>
 
       {!noTryOn && <ProLooks />}
     </section>
+  )
+}
+
+/** 0.9.7: the bigger search box at the top of the board (components/BoardSearch.tsx). */
+function SearchBarSwitch({ value, onChange }: { value: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div data-search-bar-setting>
+      <Segmented<'off' | 'on'>
+        label="Search bar on the board"
+        value={value ? 'on' : 'off'}
+        onChange={(v) => onChange(v === 'on')}
+        options={[
+          { value: 'off', label: 'Off' },
+          { value: 'on', label: 'On' },
+        ]}
+      />
+      <p className="mt-1.5 text-xs leading-relaxed text-muted">{WEB_SEARCH_COPY.setting}</p>
+    </div>
   )
 }
 
@@ -262,11 +284,17 @@ function LayoutSwitch({ value, onChange }: { value: Layout; onChange: (layout: L
  */
 export function LayoutSetting() {
   const layout = useAppearance((s) => s.appearance.layout)
+  const searchBar = useAppearance((s) => s.appearance.searchBar)
   const update = useAppearance((s) => s.update)
   return (
-    <div data-layout-setting className="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3">
-      <RowLabel>Layout</RowLabel>
-      <LayoutSwitch value={layout} onChange={(next) => update({ layout: next })} />
+    <div className="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-x-3 gap-y-3.5">
+      <div data-layout-setting className="contents">
+        <RowLabel>Layout</RowLabel>
+        <LayoutSwitch value={layout} onChange={(next) => update({ layout: next })} />
+      </div>
+      {/* 0.9.7: the search bar is the person's own choice too. */}
+      <RowLabel>Search bar</RowLabel>
+      <SearchBarSwitch value={searchBar} onChange={(on) => update({ searchBar: on })} />
     </div>
   )
 }

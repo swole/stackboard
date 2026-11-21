@@ -7,7 +7,7 @@ import { useCorner } from '../lib/corner'
 import { pickTrialCard, trialCardTitle, trialStopsLine, type TrialCard } from '../lib/nudgePlan'
 import { prefs } from '../lib/prefs'
 import { openCheckout, usePro } from '../lib/pro'
-import { LIFETIME_PRICE, checkoutPending, priceLabel } from '../lib/proPlan'
+import { checkoutPending, lifetimePrice, priceLabel } from '../lib/proPlan'
 import { loadStats } from '../lib/proStats'
 import { statsLine } from '../lib/statsPlan'
 import { useTodayStrip } from '../lib/todayStrip'
@@ -94,7 +94,7 @@ export function TrialEndCard() {
           Keep Pro for {priceLabel(early, Date.now())}
         </button>
         <button onClick={once} className="text-xs text-muted underline underline-offset-2 hover:text-fg" data-trial-lifetime>
-          or {LIFETIME_PRICE} once
+          or {lifetimePrice(Date.now())} once
         </button>
         {/* System fonts differ in width: when the row is full, Not now drops to the right of the next line. */}
         <button onClick={answer} className={`${QUIET} ml-auto`}>

@@ -4,7 +4,8 @@ import { planFolder, type FolderNode, type Plan, type PlannedFolder, type Planne
 // Chrome's own top-level folders as import sources for the welcome screen and Settings.
 // Everything is copied: the originals are never moved or changed.
 
-export type SourceKind = 'bar' | 'other' | 'mobile' | 'folder'
+/** 'arc': a space from an Arc file (0.9.7, lib/arcImport.ts), listed by the same import panel. */
+export type SourceKind = 'bar' | 'other' | 'mobile' | 'folder' | 'arc'
 
 export interface ImportSource {
   id: string
@@ -13,7 +14,7 @@ export interface ImportSource {
   plan: Plan
 }
 
-const EMOJI: Record<SourceKind, string> = { bar: '⭐', other: '🗂️', mobile: '📱', folder: '📁' }
+const EMOJI: Record<SourceKind, string> = { bar: '⭐', other: '🗂️', mobile: '📱', folder: '📁', arc: '🌈' }
 
 type ChromeNode = chrome.bookmarks.BookmarkTreeNode & { folderType?: string; syncing?: boolean }
 

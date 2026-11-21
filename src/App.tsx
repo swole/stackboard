@@ -16,6 +16,7 @@ import {
 import { Sidebar } from './components/Sidebar'
 import { SpaceView } from './components/SpaceView'
 import { SearchResults } from './components/SearchResults'
+import { BoardSearch } from './components/BoardSearch'
 import { UndoToast } from './components/UndoToast'
 import { Welcome } from './components/Welcome'
 import { KeepItHint } from './components/KeepItHint'
@@ -367,6 +368,9 @@ export default function App() {
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AnnouncementBar />
+          {/* 0.9.7: the board's search bar stays put above the board, the welcome and the results, so
+              typing in it never loses the focus when the results take the board's place. */}
+          {tree && <BoardSearch />}
           <div className="min-h-0 flex-1">
             {loading && !tree && (
               <div className="flex h-full items-center justify-center text-sm text-muted">

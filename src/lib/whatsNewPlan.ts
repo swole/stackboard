@@ -7,7 +7,7 @@
 
 export const WHATS_NEW_SHOWS = 3
 
-export type WhatsNewCard = '070' | '080' | '090'
+export type WhatsNewCard = '070' | '080' | '090' | '097'
 
 /** A note that hasn't been answered and hasn't used up its new tabs. */
 export function stillPending(shows: number): boolean {
@@ -27,14 +27,36 @@ export function pickWhatsNew(p: {
   /** 0.9.0: updated from a version before 0.9.0. Its note takes the place of the 0.8.0 one. */
   updated090?: boolean
   shows090?: number
+  /** 0.9.7: updated from a version before 0.9.7. Its note takes the place of the older two, as 0.9.0's took 0.8.0's. */
+  updated097?: boolean
+  shows097?: number
   /** School mode: the company hides Pro, so the Pro note never comes. */
   lockPro?: boolean
 }): WhatsNewCard | null {
   // The 0.7.0 card announces Pro, so someone who already bought it skips to the next one.
   if (p.early && !p.paid && !p.lockPro && stillPending(p.shows070)) return '070'
-  if (p.updated090 && stillPending(p.shows090 ?? 0)) return '090'
-  if (p.updated080 && !p.updated090 && stillPending(p.shows080)) return '080'
+  if (p.updated097 && stillPending(p.shows097 ?? 0)) return '097'
+  if (p.updated090 && !p.updated097 && stillPending(p.shows090 ?? 0)) return '090'
+  if (p.updated080 && !p.updated090 && !p.updated097 && stillPending(p.shows080)) return '080'
   return null
+}
+
+/** The 0.9.7 note, word for word as the CEO wrote it (16 Nov 2026). */
+export const WHATS_NEW_097 = {
+  title: 'New in 0.9.7',
+  web: 'Search the web from Stackboard: when no link matches, Enter searches with your default search engine.',
+  bar: 'Want a search bar across the top of your board?',
+  showBar: 'Show the search bar',
+  arc: 'Moving from Arc? Settings > Copy from Arc brings your spaces over.',
+  done: 'Got it',
+} as const
+
+/**
+ * Which of the 0.9.7 note's optional lines show: the search bar line (with its button) only while the
+ * bar is off, and the Arc line unless the company locks import, which hides Copy from Arc.
+ */
+export function whatsNew097(p: { searchBarOn: boolean; lockImportExport: boolean }): { bar: boolean; arc: boolean } {
+  return { bar: !p.searchBarOn, arc: !p.lockImportExport }
 }
 
 /** The Pro line goes to people with Pro or the trial, and to early users (they saw the Pro note). */
@@ -49,7 +71,7 @@ function joinList(items: string[]): string {
   return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
 }
 
-/** Offered in the notes while the person can still start it (the maintainer, 3 Nov: say there's a free trial). */
+/** Offered in the notes while the person can still start it (3 Nov: say there's a free trial). */
 const TRIAL_LINE = 'Try it free for 14 days, no card needed.'
 
 /**
@@ -112,7 +134,7 @@ const PRO_090 = 'a Today strip, stack colours, a command bar (Ctrl+K) and looks 
  * What the 0.9.0 note says. Someone whose 0.8.0 note never had its turn (they came from before
  * 0.8.0) also hears the 0.8.0 items, since this note takes its place, and an early user without a
  * to-do list hears that lists moved into Pro. The Pro line goes to everyone and names the trial
- * while it can start (the maintainer, 3 Nov: convert free users without nagging), unless the company hides
+ * while it can start (3 Nov: convert free users without nagging), unless the company hides
  * Pro (school mode).
  */
 export function whatsNew090(p: {

@@ -79,7 +79,7 @@ export function ModalHost() {
         </Suspense>
       )
     case 'import':
-      return <ImportModal />
+      return <ImportModal from={modal.from} />
     case 'packs':
       return <PacksModal />
     case 'cleanup':

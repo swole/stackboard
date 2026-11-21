@@ -3,7 +3,7 @@ import { Check, Crown, KeyRound, Sparkles } from 'lucide-react'
 import { PrimaryButton, SecondaryButton, TextInput } from './modals/Modal'
 import { openCheckout, usePro } from '../lib/pro'
 import { loadReady, refreshTidyReady, useTidy } from '../lib/tidy'
-import { FOUNDING_ENDS, LIFETIME_PRICE, PORTAL_URL, checkoutPending, keepsTodoFree, priceLabel, proCard, type PauseReason } from '../lib/proPlan'
+import { FOUNDING_ENDS, PORTAL_URL, lifetimePrice, checkoutPending, keepsTodoFree, priceLabel, proCard, type PauseReason } from '../lib/proPlan'
 import { openInNewTab } from '../lib/tabs'
 import { ArchiveSetting } from './ArchiveSetting'
 import { TodayStripSetting } from './TodayStripSetting'
@@ -47,8 +47,8 @@ function features(keepsTodo: boolean, tidy: boolean, trial: boolean): string[] {
 function priceNote(early: boolean, keepsTodo: boolean, now: number): string {
   if (early && keepsTodo) return "You've had Stackboard since before Pro, so your to-do lists stay free and Pro is $2.99 a year for as long as you keep it. Thanks for being early!"
   if (early) return "You've had Stackboard since before Pro, so Pro is $2.99 a year for as long as you keep it. Thanks for being early!"
-  if (now <= FOUNDING_ENDS) return "Founding price: $2.99 a year if you join by 31 December, and it stays $2.99 while you keep Pro. After that it's $4.99."
-  return 'Pro is $4.99 a year.'
+  if (now <= FOUNDING_ENDS) return "Founding price: $2.99 a year if you join by 31 December, and it stays $2.99 while you keep Pro. After that it's $9.99."
+  return 'Pro is $9.99 a year.'
 }
 
 export function ProSection() {
@@ -84,10 +84,10 @@ export function ProSection() {
   const removing = useTwoStep(4000)
   const now = Date.now()
   const buy = () => openCheckout('settings')
-  // 0.9.3: Get Pro names the price, $4.99 once the founding price ends (early users keep $2.99).
+  // 0.9.3: Get Pro names the price, $9.99 once the founding price ends (early users keep $2.99).
   const getPro = `Get Pro for ${priceLabel(early, now)}`
   const portal = () => void openInNewTab(PORTAL_URL, true)
-  // 0.9.3 (the maintainer, 8 Nov): how checkout works and the 14-day money-back promise, one quiet line above
+  // 0.9.3 (8 Nov): how checkout works and the 14-day money-back promise, one quiet line above
   // Pro for life and wherever that line shows, so never in the finishing steps or under the pro lock.
   const refundLine = (
     <p className="mt-1.5 text-[11px] text-muted" data-pro-refund>
@@ -105,7 +105,7 @@ export function ProSection() {
       >
         Get Pro for life
       </button>{' '}
-      for {LIFETIME_PRICE}.
+      for {lifetimePrice(now)}.
     </p>
   )
   // Pro switching on while Settings is open (a key pasted here, or one that arrived from another

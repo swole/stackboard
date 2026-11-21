@@ -499,7 +499,7 @@ eq('appearance: blur caps at its maximum', parseAppearance({ bg: { blur: 99 } })
 eq('appearance: gradient choice stays 1-3', [parseAppearance({ bg: { gradient: 0 } }).bg.gradient, parseAppearance({ bg: { gradient: 7 } }).bg.gradient, parseAppearance({ bg: { gradient: 2.4 } }).bg.gradient], [1, 3, 2])
 eq('appearance: numbers stored as text still read', parseAppearance({ bg: { dim: '42', blur: ' 6 ' } }).bg, { ...DEFAULT_APPEARANCE.bg, dim: 42, blur: 6 })
 eq('appearance: NaN and Infinity fall back', parseAppearance({ bg: { dim: NaN, blur: Infinity } }).bg, DEFAULT_APPEARANCE.bg)
-const picked = { mode: 'dark', palette: 'nord', density: 'compact', layout: 'rows', bg: { kind: 'image', gradient: 2, dim: 50, blur: 8, imageRev: 1791200000000 } }
+const picked = { mode: 'dark', palette: 'nord', density: 'compact', layout: 'rows', searchBar: false, bg: { kind: 'image', gradient: 2, dim: 50, blur: 8, imageRev: 1791200000000 } }
 eq('appearance: a full image setup survives a round trip', parseAppearance(JSON.parse(JSON.stringify(picked))), picked)
 eq('appearance: merging a slider keeps the rest of the background', mergeAppearance(parseAppearance(picked), { bg: { dim: 20 } }).bg, { ...picked.bg, dim: 20 })
 eq('appearance: merging clamps too', mergeAppearance(DEFAULT_APPEARANCE, { bg: { dim: 999 } }).bg.dim, DIM_MAX)
@@ -682,7 +682,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   )
   eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
   eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
-  // 0.8.0 (the maintainer, 3 Nov): to-do lists join Pro for early users too, unless they already had a list.
+  // 0.8.0 (3 Nov): to-do lists join Pro for early users too, unless they already had a list.
   eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
   eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
   eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
@@ -703,6 +703,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
 
   eq('pro: early users always get the early link', [checkoutUrl(true, now), checkoutUrl(true, FOUNDING_ENDS + DAY)], [CHECKOUT.early, CHECKOUT.early])
   eq('pro: founding link until 31 Dec, regular after', [checkoutUrl(false, FOUNDING_ENDS), checkoutUrl(false, FOUNDING_ENDS + 1)], [CHECKOUT.founding, CHECKOUT.regular])
+  eq('pro: the regular link is the $9.99 product (21 Nov)', CHECKOUT.regular, 'https://buy.polar.sh/polar_cl_wtVBUAu3fcgiZiAUNiTgiu8V1iLk4fg9JYUqQ37ToDl')
   {
     // 0.9.1: buy buttons label the link with the button, the plan and the version, nothing else.
     const u = new URL(checkoutUrl(false, now, { surface: 'trial-end', plan: 'trial', version: '0.9.1' }))
@@ -714,7 +715,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
     // 0.9.2: a trial that started by itself on install says so; a paused key and a never-tried board read as before.
     eq('pro: an auto trial reads auto-trial, and auto-trial-ended once over', [checkoutPlan({ kind: 'trial', daysLeft: 9 }, true), checkoutPlan({ kind: 'free', trialUsed: true }, true), checkoutPlan({ kind: 'paused', reason: 'ended' }, true), checkoutPlan({ kind: 'free', trialUsed: false }, true)], ['auto-trial', 'auto-trial-ended', 'paused', 'free'])
   }
-  eq('pro: price labels', [priceLabel(true, FOUNDING_ENDS + DAY), priceLabel(false, now), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$2.99 a year', '$4.99 a year'])
+  eq('pro: price labels', [priceLabel(true, FOUNDING_ENDS + DAY), priceLabel(false, now), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$2.99 a year', '$9.99 a year'])
 
   eq('pro: cleanKey trims spaces, quotes and line breaks', cleanKey(' "SB-1A2B3C4D-AAAA-BBBB"\n'), 'SB-1A2B3C4D-AAAA-BBBB')
   eq('pro: cleanKey refuses junk', [cleanKey(''), cleanKey('short'), cleanKey('SB-<script>')], [null, null, null])
@@ -2319,7 +2320,7 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
   eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
   eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
-  // 0.8.0 (the maintainer, 3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  // 0.8.0 (3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
   eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
   eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
   eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
@@ -2481,7 +2482,7 @@ import managedSchema from '../public/managed_schema.json'
 }
 
 // ---------- 0.9.2: Pro for life, and the reverse trial for new installs ----------
-import { LIFETIME_PRICE, REVERSE_TRIAL, lifetimeCheckoutUrl, olderTrialWins, readTrial, reverseTrialOnInstall } from '../src/lib/proPlan'
+import { LIFETIME_PRICE, LIFETIME_PRICE_2027, REVERSE_TRIAL, lifetimeCheckoutUrl, lifetimePrice, olderTrialWins, readTrial, reverseTrialOnInstall } from '../src/lib/proPlan'
 import { REVERSE_CARD_DAYS, REVERSE_CARD_OPENS, REVERSE_CARD_SHOWS, REVERSE_CARD_WAIT_MS, reverseCardLine, reverseCardTitle, showReverseCard } from '../src/lib/nudgePlan'
 {
   const DAY = 86_400_000
@@ -2490,6 +2491,9 @@ import { REVERSE_CARD_DAYS, REVERSE_CARD_OPENS, REVERSE_CARD_SHOWS, REVERSE_CARD
 
   // Pro for life: its own checkout, labelled like the yearly one.
   eq('lifetime: the checkout link and the price', [lifetimeCheckoutUrl(), LIFETIME_PRICE], [CHECKOUT.lifetime, '$19'])
+  eq('lifetime: $19 through 31 Dec, $29 and its own link from 1 Jan 2027',
+    [lifetimePrice(FOUNDING_ENDS), lifetimePrice(FOUNDING_ENDS + 1), LIFETIME_PRICE_2027, lifetimeCheckoutUrl(undefined, FOUNDING_ENDS), lifetimeCheckoutUrl(undefined, FOUNDING_ENDS + 1)],
+    ['$19', '$29', '$29', CHECKOUT.lifetime, 'https://buy.polar.sh/polar_cl_w9g0NA5cAMkaVmDeFzBjStjz2p2c1deiSxK4k3ot4TN'])
   const life = new URL(lifetimeCheckoutUrl({ surface: 'settings-lifetime', plan: 'auto-trial', version: '0.9.2' }))
   eq('lifetime: a labelled link keeps its checkout and carries four labels', [life.origin + life.pathname, [...life.searchParams.keys()].sort().join(',')], [CHECKOUT.lifetime, 'utm_campaign,utm_content,utm_medium,utm_source'])
   eq('lifetime: the labels say button, plan and version', [life.searchParams.get('utm_source'), life.searchParams.get('utm_medium'), life.searchParams.get('utm_content'), life.searchParams.get('utm_campaign')], ['extension', 'settings-lifetime', 'auto-trial', 'v0.9.2'])
@@ -2875,10 +2879,10 @@ import { FOUNDING_LAST_DAYS_FROM, FOUNDING_NOTE, FOUNDING_NOTE_DELAY_MS, FOUNDIN
   ], [null, 'december', null, 'december'])
   eq('founding note: the words', [FOUNDING_NOTE.title, FOUNDING_NOTE.line, FOUNDING_NOTE.button], [
     '$2.99 a year ends on 31 Dec',
-    'After that Pro is $4.99 a year. If you join before then, it stays $2.99 while you keep Pro.',
+    'After that Pro is $9.99 a year. If you join before then, it stays $2.99 while you keep Pro.',
     'See Pro',
   ])
-  eq('founding note: the prices are the ones Settings shows either side of the deadline', [priceLabel(false, FOUNDING_ENDS), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$4.99 a year'])
+  eq('founding note: the prices are the ones Settings shows either side of the deadline', [priceLabel(false, FOUNDING_ENDS), priceLabel(false, FOUNDING_ENDS + 1)], ['$2.99 a year', '$9.99 a year'])
   eq('founding note: it decides after "what stopped you?" and takes its turn in the corner', [
     FOUNDING_NOTE_DELAY_MS > WHY_NOT_DELAY_MS,
     claimable(null, 'founding'),
@@ -3012,6 +3016,420 @@ import { RATING_MILESTONE_DAYS, RATING_WIN_DELAY_MS, tidyRatingStep } from '../s
   // Em dash, en dash and middle dot, by code point.
   eq('0.9.6 copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
   eq('0.9.6 copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
+// ---------- 0.9.7: import from Arc ----------
+import {
+  ARC_COPY,
+  ARC_EMOJI,
+  ARC_FAVORITES_SPACE,
+  ARC_PATHS,
+  ARC_STACKS,
+  ArcFileError,
+  arcSummary,
+  isArcMarkdown,
+  leadingEmoji,
+  planArc,
+  prettyTitle,
+  readArcFile,
+  readSidebarFile,
+  type ArcNode,
+  type ArcPlan,
+} from '../src/lib/arcImport'
+import { countPlannedStack, withLeadStack, type PlannedFolder, type PlannedStack } from '../src/lib/importPlan'
+{
+  // A stack as one line: "Title:link,link+Folder[link]".
+  const folderLine = (f: PlannedFolder): string => `${f.title}[${[...f.links.map((l) => l.title), ...f.folders.map(folderLine)].join(',')}]`
+  const stackLine = (st: PlannedStack) => `${st.title}:${st.links.map((l) => l.title).join(',')}${st.folders?.length ? `+${st.folders.map(folderLine).join(',')}` : ''}`
+  const stacksOf = (p: ArcPlan, i = 0) => p.spaces[i].space.stacks.map(stackLine)
+  const nodeLine = (n: ArcNode): string => (n.kind === 'link' ? n.title : `${n.title}[${n.children.map(nodeLine).join(',')}]`)
+  const threw = (fn: () => unknown): string | null => {
+    try {
+      fn()
+      return null
+    } catch (e) {
+      return e instanceof ArcFileError ? e.message : `not an ArcFileError: ${String(e)}`
+    }
+  }
+
+  // The website's sidebar fixture (scripts/seo/test_bm.mjs): a folder, a renamed tab, an unpinned tab.
+  const site = { sidebar: { containers: [{ global: {} }, {
+    spaces: ['sp1', { id: 'sp1', title: 'Home', newContainerIDs: [{ pinned: {} }, 'pin1', { unpinned: {} }, 'unp1'] }],
+    items: ['pin1', { id: 'pin1', childrenIds: ['f1', 't1'] }, 'f1', { id: 'f1', parentID: 'pin1', title: 'Dev', childrenIds: ['t2'], data: { list: {} } },
+      't1', { id: 't1', parentID: 'pin1', title: null, data: { tab: { savedTitle: 'Mail', savedURL: 'https://mail.test/' } } },
+      't2', { id: 't2', parentID: 'f1', title: 'Renamed', data: { tab: { savedTitle: 'GitHub', savedURL: 'https://github.test/' } } },
+      'unp1', { id: 'unp1', childrenIds: ['t3'] }, 't3', { id: 't3', parentID: 'unp1', data: { tab: { savedTitle: 'Today', savedURL: 'https://today.test/' } } }] }] } }
+  const siteRead = readArcFile(JSON.stringify(site))
+  eq('arc: the sidebar file is read by its content', [siteRead.format, siteRead.spaces.map((s) => s.title), siteRead.favorites], ['sidebar', ['Home'], []])
+  eq("arc: pinned tabs and folders keep Arc's order, a renamed tab keeps its name, unpinned tabs stay apart", [siteRead.spaces[0].pinned.map(nodeLine), siteRead.spaces[0].unpinned.map(nodeLine)], [['Dev[Renamed]', 'Mail'], ['Today']])
+  const sitePlan = planArc(siteRead)
+  eq('arc: loose pinned tabs make the first stack, each folder a stack, unpinned tabs the last', stacksOf(sitePlan), ['Pinned tabs:Mail', 'Dev:Renamed', 'Unpinned tabs:Today'])
+  eq('arc: a space with no emoji of its own gets the Arc one', [sitePlan.spaces[0].space.name, sitePlan.spaces[0].space.emoji, sitePlan.spaces[0].links, ARC_EMOJI], ['Home', ARC_EMOJI, 3, '🌈'])
+
+  // A fuller sidebar: Favorites, a Split View inside a folder, a folder in a folder, an Arc note, emoji.
+  type Item = Record<string, unknown>
+  const tab = (id: string, parentID: string, savedTitle: string, savedURL: string, title: string | null = null): [string, Item] => [id, { id, parentID, title, data: { tab: { savedTitle, savedURL } } }]
+  const container = (id: string, childrenIds: string[], extra: Item = {}): [string, Item] => [id, { id, childrenIds, ...extra }]
+  const sidebar = (p: { spaces: Item[]; items: Array<[string, Item]>; topApps?: unknown[]; globalTopApps?: unknown[]; noGlobal?: boolean }) => ({
+    sidebar: {
+      containers: [
+        ...(p.noGlobal ? [] : [{ global: p.globalTopApps ? { topAppsContainerIDs: p.globalTopApps } : {} }]),
+        { spaces: p.spaces.flatMap((s) => [s.id, s]), items: p.items.flat(), ...(p.topApps ? { topAppsContainerIDs: p.topApps } : {}) },
+      ],
+    },
+  })
+  const full = sidebar({
+    spaces: [
+      { id: 'sp1', title: 'Work', customInfo: { iconType: { emoji_v2: '💼' } }, newContainerIDs: [{ pinned: {} }, 'pin1', { unpinned: {} }, 'unp1'] },
+      { id: 'sp2', title: '📚 Reading list', newContainerIDs: [{ pinned: {} }, 'pin2', { unpinned: {} }, 'unp2'] },
+      { id: 'sp3', newContainerIDs: [{ pinned: {} }, 'pin3'] },
+      { id: 'sp4', title: 'Notes only', containerIDs: [{ pinned: {} }, 'pin4'] },
+    ],
+    topApps: [{ default: true }, 'fav'],
+    items: [
+      container('fav', ['f1', 'f2', 'f3']),
+      tab('f1', 'fav', 'Gmail', 'https://mail.google.com/'),
+      tab('f2', 'fav', 'Calendar', 'https://calendar.google.com/'),
+      tab('f3', 'fav', 'Settings', 'chrome://settings/'),
+      container('pin1', ['t1', 'dev', 'note', 'empty']),
+      tab('t1', 'pin1', 'Linear', 'https://linear.app/'),
+      container('dev', ['t2', 'split', 'docs'], { parentID: 'pin1', title: 'Dev', data: { list: {} } }),
+      tab('t2', 'dev', 'GitHub', 'https://github.com/', 'Our repo'),
+      container('split', ['s1', 's2'], { parentID: 'dev', title: null, data: { splitView: {} } }),
+      tab('s1', 'split', 'Vercel', 'https://vercel.com/'),
+      tab('s2', 'split', 'MDN', 'https://developer.mozilla.org/'),
+      container('docs', ['t3'], { parentID: 'dev', title: 'Docs', data: { list: {} } }),
+      tab('t3', 'docs', 'React', 'https://react.dev/'),
+      tab('note', 'pin1', 'Plan', 'arc://notes/plan'),
+      container('empty', [], { parentID: 'pin1', title: 'Empty', data: { list: {} } }),
+      container('unp1', ['t4']),
+      tab('t4', 'unp1', 'Hacker News', 'https://news.ycombinator.com/'),
+      container('pin2', ['read']),
+      container('read', ['t5'], { parentID: 'pin2', title: 'Long reads', data: { list: {} } }),
+      tab('t5', 'read', 'Ars Technica', 'https://arstechnica.com/'),
+      container('unp2', []),
+      container('pin3', ['t6']),
+      tab('t6', 'pin3', 'Example', 'https://example.com/'),
+      container('pin4', ['t7']),
+      tab('t7', 'pin4', 'A note', 'arc://notes/x'),
+    ],
+  })
+  const plan = planArc(readSidebarFile(full))
+  eq('arc: every Arc space with a web link becomes a space, in order; one with none is left out', plan.spaces.map((s) => `${s.space.emoji} ${s.space.name}`), ['💼 Work', '📚 Reading list', `${ARC_EMOJI} Space 1`])
+  eq('arc: a Split View hands its tabs to its folder, a folder inside a folder stays one, an empty folder goes', stacksOf(plan, 0), ['Pinned tabs:Linear', 'Dev:Our repo,Vercel,MDN+Docs[React]', 'Unpinned tabs:Hacker News'])
+  eq('arc: links that are not web pages stay behind, counted', [plan.spaces[0].links, plan.spaces[0].skipped, plan.favoritesSkipped], [6, 1, 1])
+  eq('arc: the Favorites row becomes a stack, web links only', [plan.favorites && stackLine(plan.favorites), ARC_STACKS.favorites], ['Favorites:Gmail,Calendar', 'Favorites'])
+  eq('arc: an emoji the title starts with is the space emoji; untitled spaces are numbered', [plan.spaces[1].space.name, plan.spaces[1].space.emoji, plan.spaces[2].space.name], ['Reading list', '📚', 'Space 1'])
+  eq('arc: the older containerIDs key is read too', readSidebarFile(full).spaces[3].pinned.map(nodeLine), ['A note'])
+
+  // Favorites: on the main container, on the global one (where the website looked), both, a code point emoji.
+  const favs = (p: Parameters<typeof sidebar>[0]) => readSidebarFile(sidebar(p)).favorites.map((l) => l.title)
+  const favItems: Array<[string, Item]> = [container('fav', ['f1']), tab('f1', 'fav', 'Gmail', 'https://mail.google.com/'), container('fav2', ['f2']), tab('f2', 'fav2', 'Docs', 'https://docs.google.com/')]
+  const oneSpace = [{ id: 'sp1', title: 'A', newContainerIDs: [{ pinned: {} }, 'p'] }]
+  eq('arc: Favorites are found on the main container and on the global one, each link once', [
+    favs({ spaces: oneSpace, items: favItems, topApps: [{ default: true }, 'fav'] }),
+    favs({ spaces: oneSpace, items: favItems, globalTopApps: [{ default: true }, 'fav'] }),
+    favs({ spaces: oneSpace, items: favItems, topApps: [{ default: true }, 'fav', { custom: {} }, 'fav2'], globalTopApps: ['fav'] }),
+  ], [['Gmail'], ['Gmail'], ['Gmail', 'Docs']])
+  const onlyFavs = planArc(readSidebarFile(sidebar({ spaces: oneSpace, items: favItems, topApps: ['fav'] })))
+  eq('arc: a sidebar of Favorites alone gets a space of its own for them', [onlyFavs.spaces.map((s) => `${s.space.emoji} ${s.space.name}`), stacksOf(onlyFavs), onlyFavs.favorites, ARC_FAVORITES_SPACE.name], [['⭐ Arc favorites'], ['Favorites:Gmail'], null, 'Arc favorites'])
+  const iconCode = readSidebarFile(sidebar({ spaces: [{ id: 'sp1', title: 'Home', customInfo: { iconType: { emoji: 0x1f3e0 } }, newContainerIDs: [{ pinned: {} }, 'p'] }], items: [container('p', ['t']), tab('t', 'p', 'X', 'https://x.test/')] }))
+  eq('arc: a space icon stored as a code point is read too', iconCode.spaces[0].emoji, '🏠')
+
+  // Files that were written oddly: no childrenIds (parents only), no global container, a loop.
+  const parentsOnly = readSidebarFile(sidebar({ noGlobal: true, spaces: oneSpace, items: [['p', { id: 'p' }], tab('a', 'p', 'A', 'https://a.test/'), tab('b', 'p', 'B', 'https://b.test/')] }))
+  eq('arc: children found by parentID when a container lists none, and the spaces without a global container', parentsOnly.spaces[0].pinned.map(nodeLine), ['A', 'B'])
+  const looped = readSidebarFile(sidebar({ spaces: oneSpace, items: [container('p', ['x']), container('x', ['y', 'l'], { title: 'X' }), container('y', ['x', 'p'], { title: 'Y' }), tab('l', 'x', 'L', 'https://l.test/')] }))
+  eq('arc: a file whose folders loop finishes, with each folder once on the way down', looped.spaces[0].pinned.map(nodeLine), ['X[L]'])
+  let deep: Array<[string, Item]> = [container('p', ['d0'])]
+  for (let i = 0; i < 60; i++) deep.push(container(`d${i}`, [`d${i + 1}`, `l${i}`], { title: `D${i}` }), tab(`l${i}`, `d${i}`, `L${i}`, `https://l${i}.test/`))
+  const deepPlan = planArc(readSidebarFile(sidebar({ spaces: oneSpace, items: deep })))
+  eq('arc: folders deeper than 40 levels stop there', deepPlan.spaces[0].links, 39)
+  deep = []
+
+  // What isn't Arc's says so.
+  eq('arc: other files are refused with a sentence', [
+    threw(() => readArcFile('{"roots":{"bookmark_bar":{}}}')),
+    threw(() => readArcFile('{"sidebar":{"containers":[{"global":{}}]}}')),
+    threw(() => readArcFile('{"sidebar":{"containers":[{"glo')),
+    threw(() => readArcFile('Just some notes\n')),
+    threw(() => readArcFile('# Heading only\n\nSome text\n')),
+  ], [ARC_COPY.notSidebar, ARC_COPY.noSpaces, ARC_COPY.brokenJson, ARC_COPY.notArc, ARC_COPY.notArc])
+  eq('arc: a byte order mark in front of the sidebar file is fine', readArcFile('﻿' + JSON.stringify(site)).spaces.length, 1)
+
+  // Arc's own export (the website's fixture): spaces as "#", folders as deeper headings, bare links, a mixed Favorites list.
+  const arcMd = [
+    '# Personal', '', '## Favorites', '- https://mail.google.com/', '- https://calendar.google.com/', '- https://news.ycombinator.com/', '- https://example.com/today-tab', '',
+    '## Reading', '- https://arstechnica.com/', '### Long reads', '- https://paulgraham.com/greatwork.html', '', '## Empty folder', '',
+    '# Work', '', '## Favorites', '- https://mail.google.com/', '- https://calendar.google.com/', '- https://linear.app/', '', '## Clients', '- https://acme.example/', '',
+  ].join('\n')
+  const md = readArcFile(arcMd)
+  eq('arc md: detected by content, spaces in order', [isArcMarkdown(arcMd), md.format, md.spaces.map((s) => s.title)], [true, 'export', ['Personal', 'Work']])
+  eq('arc md: the run of links that opens every Favorites list is the Favorites row, kept once', md.favorites.map((l) => l.url), ['https://mail.google.com/', 'https://calendar.google.com/'])
+  const mdPlan = planArc(md)
+  eq('arc md: each space keeps its own pinned and open tabs as its first stack; ### nests in ##; an empty folder goes', [stacksOf(mdPlan, 0), stacksOf(mdPlan, 1)], [
+    ['Pinned and open tabs:news.ycombinator.com,example.com › today tab', 'Reading:arstechnica.com+Long reads[paulgraham.com › greatwork]'],
+    ['Pinned and open tabs:linear.app', 'Clients:acme.example'],
+  ])
+  eq('arc md: every link once (Favorites not repeated), each with a name', [mdPlan.spaces.reduce((n, s) => n + s.links, 0) + (mdPlan.favorites ? countPlannedStack(mdPlan.favorites) : 0), mdPlan.spaces.every((s) => s.space.stacks.every((st) => st.links.every((l) => !!l.title)))], [8, true])
+  eq('arc md: a byte order mark and Windows line endings', planArc(readArcFile('﻿' + arcMd.replace(/\n/g, '\r\n'))).spaces.map((s) => s.links), [4, 2])
+  const solo = planArc(readArcFile('# Solo\n## Favorites\n- https://a.test/\n- https://b.test/\n'))
+  eq('arc md: a single space keeps its whole list (no second space to compare)', [solo.favorites, stacksOf(solo)], [null, ['Pinned and open tabs:a.test,b.test']])
+  const titledMd = planArc(readArcFile('# Mine\n## Favorites\n- [Docs](https://docs.test/)\n- <https://plain.test/>\n# Yours\n## Favorites\n- [Docs](https://docs.test/)\n'))
+  eq('arc md: [title](url) and <url> items are read, and titled lists keep their own links', [stacksOf(titledMd, 0), stacksOf(titledMd, 1), titledMd.favorites], [['Pinned and open tabs:Docs,plain.test'], ['Pinned and open tabs:Docs'], null])
+  eq('arc md: names from the address', [prettyTitle('https://www.example.com/some-page_name.html'), prettyTitle('https://news.ycombinator.com/'), prettyTitle('not a url')], ['example.com › some page name', 'news.ycombinator.com', 'not a url'])
+  const blanks = planArc(readArcFile('# Home\n- https://a.test/\n#\n- https://b.test/\n## \n- https://c.test/\n'))
+  eq('arc md: a space heading with no name is numbered, a folder with none is Untitled', [blanks.spaces.map((s) => s.space.name), stacksOf(blanks, 1)], [['Home', 'Space 1'], ['Pinned and open tabs:b.test', 'Untitled:c.test']])
+
+  // Favorites go first in the first space copied in; the panel's line says where.
+  const two = [{ name: 'A', emoji: '🅰️', stacks: [{ title: 'S', links: [] }] }, { name: 'B', emoji: '🅱️', stacks: [] }]
+  const lead: PlannedStack = { title: 'Favorites', links: [{ title: 'G', url: 'https://g.test/' }] }
+  eq('arc: the Favorites stack goes first in the first space, and nowhere else', withLeadStack(two, lead).map((s) => s.stacks.map((st) => st.title)), [['Favorites', 'S'], []])
+  eq('arc: with no Favorites, or no spaces, nothing changes', [withLeadStack(two, null), withLeadStack([], lead)], [two, []])
+  eq('arc: what the panel says', [
+    arcSummary({ spaces: 0, stacks: 0, folders: 0, favorites: 2, firstSpace: null, skipped: 0 }),
+    arcSummary({ spaces: 1, stacks: 3, folders: 0, favorites: 0, firstSpace: 'Work', skipped: 0 }),
+    arcSummary({ spaces: 2, stacks: 5, folders: 1, favorites: 2, firstSpace: 'Work', skipped: 1 }),
+    arcSummary({ spaces: 3, stacks: 9, folders: 2, favorites: 0, firstSpace: 'Home', skipped: 3 }),
+  ], [
+    'Tick a space to copy it in.',
+    'A new space with 3 stacks.',
+    "2 new spaces with 5 stacks, and 1 folder inside them. Your Favorites row (2 links) becomes the first stack in Work. 1 link that isn't a web page stays behind.",
+    "3 new spaces with 9 stacks, and 2 folders inside them. 3 links that aren't web pages stay behind.",
+  ])
+  eq('arc: the help shows where Arc keeps the file', [ARC_PATHS.windows, ARC_PATHS.mac], ['%LOCALAPPDATA%\\Packages\\TheBrowserCompany.Arc_*\\LocalCache\\Local\\Arc\\StorableSidebar.json', '~/Library/Application Support/Arc/StorableSidebar.json'])
+  eq('arc: leading emoji', [leadingEmoji('💼 Work'), leadingEmoji('Work'), leadingEmoji('1 Work'), leadingEmoji('👨‍👩‍👧 Family')], ['💼', null, null, '👨‍👩‍👧'])
+
+  // A file in the layout Arc writes (no real file was available, 16 Nov): sidebar.containers pairs a
+  // { global } key with the container holding spaces, items and topAppsContainerIDs, then Little Arc
+  // pairs; ids alternate with objects; spaces carry newContainerIDs (object markers) and the older
+  // containerIDs (string markers), or only the older one; Favorites per profile on the main container.
+  const t = (id: string, parentID: string, savedTitle: string, savedURL: string, title: string | null = null): [string, Item] => [id, { id, parentID, title, childrenIds: [], createdAt: 790000000, originatingDevice: 'D', data: { tab: { savedTitle, savedURL } } }]
+  const box = (id: string, childrenIds: string[], extra: Item = {}): [string, Item] => [id, { id, parentID: null, title: null, childrenIds, ...extra }]
+  const profile1 = { custom: { _0: { directoryBasename: 'Profile 1', machineID: 'M' } } }
+  const layout = {
+    sidebarSyncState: {},
+    version: 1,
+    sidebar: {
+      containers: [
+        { global: {} },
+        {
+          spaces: [
+            'S1', { id: 'S1', title: 'Work', profile: { default: true }, customInfo: { iconType: { emoji_v2: '💼' } }, containerIDs: ['pinned', 'P1', 'unpinned', 'U1'], newContainerIDs: [{ pinned: {} }, 'P1', { unpinned: { _0: { shared: {} } } }, 'U1'] },
+            'S2', { id: 'S2', title: 'Personal', profile: profile1, customInfo: { iconType: { icon: 'planet' } }, containerIDs: ['pinned', 'P2', 'unpinned', 'U2'] },
+            'S3', { id: 'S3', title: 'Reading', customInfo: { iconType: { emoji: 128218 } }, newContainerIDs: [{ pinned: {} }, 'P3'] },
+          ],
+          topAppsContainerIDs: [{ default: true }, 'TA1', profile1, 'TA2'],
+          items: [
+            box('TA1', ['F1', 'F2'], { data: { itemContainer: { containerType: { topApps: { _0: { default: true } } } } } }),
+            t('F1', 'TA1', 'Mail', 'https://mail.example.com/'),
+            t('F2', 'TA1', 'Calendar', 'https://calendar.example.com/'),
+            box('TA2', ['F3']),
+            t('F3', 'TA2', 'Music', 'https://music.example.com/'),
+            box('P1', ['T1', 'L1', 'SV1', 'E1'], { data: { itemContainer: { containerType: { spaceItems: { _0: 'S1' } } } } }),
+            t('T1', 'P1', 'Issue tracker | Example', 'https://tracker.example.com/', 'Tracker'),
+            box('L1', ['T2', 'L2'], { parentID: 'P1', title: 'Projects', data: { list: {} } }),
+            t('T2', 'L1', 'Spec', 'https://docs.example.com/spec'),
+            box('L2', ['T3'], { parentID: 'L1', title: 'Archive', data: { list: {} } }),
+            t('T3', 'L2', 'Old notes', 'https://old.example.com/'),
+            box('SV1', ['T4', 'T5'], { parentID: 'P1', title: 'Compare', data: { splitView: { layout: 'horizontal' } } }),
+            t('T4', 'SV1', 'Left', 'https://left.example.com/'),
+            t('T5', 'SV1', 'Right', 'https://right.example.com/'),
+            box('E1', [], { parentID: 'P1', title: 'Board', data: { easel: { easelID: 'X' } } }),
+            box('U1', ['T6', 'N1']),
+            t('T6', 'U1', 'News', 'https://news.example.com/'),
+            t('N1', 'U1', 'A note', 'arc://notes/abc'),
+            box('P2', ['LF']),
+            box('LF', ['T7'], { parentID: 'P2', title: 'PRs', data: { list: { automaticLiveFolderData: { source: 'github' } } } }),
+            t('T7', 'LF', 'PR 1', 'https://git.example.com/pr/1'),
+            box('U2', []),
+            box('P3', ['T8']),
+            t('T8', 'P3', 'Long read', 'https://read.example.com/'),
+          ].flat(),
+        },
+        { littleBrowser: { _0: 'little-1' } },
+        { spaces: ['LS', { id: 'LS', title: 'Little', newContainerIDs: [{ unpinned: {} }, 'LU'] }], items: [box('LU', ['LT']), t('LT', 'LU', 'Little', 'https://little.example.com/')].flat(), topAppsContainerIDs: [] },
+      ],
+    },
+    firebaseSyncState: {},
+  }
+  const real = planArc(readArcFile(JSON.stringify(layout)))
+  eq('arc layout: the spaces with their emoji from emoji_v2, a named icon and a code point; Little Arc stays out', real.spaces.map((s) => `${s.space.emoji} ${s.space.name}`), ['💼 Work', '🪐 Personal', '📚 Reading'])
+  eq('arc layout: a renamed tab keeps its name, a named Split View joins its folder, an easel and an Arc note stay out', [stacksOf(real, 0), real.spaces[0].links, real.spaces[0].skipped], [
+    ['Pinned tabs:Tracker,Left,Right', 'Projects:Spec+Archive[Old notes]', 'Unpinned tabs:News'],
+    6,
+    1,
+  ])
+  eq('arc layout: a space with only the older containerIDs comes in, a live folder as the links it holds', stacksOf(real, 1), ['PRs:PR 1'])
+  eq("arc layout: Favorites from every profile, read off the main container", real.favorites && stackLine(real.favorites), 'Favorites:Mail,Calendar,Music')
+  eq('arc layout: container markers as objects or strings, newContainerIDs first', [
+    readSidebarFile(sidebar({ spaces: [{ id: 's', containerIDs: ['pinned', 'old'], newContainerIDs: [{ pinned: {} }, 'new'] }], items: [box('new', ['a']), t('a', 'new', 'New', 'https://new.test/'), box('old', ['b']), t('b', 'old', 'Old', 'https://old.test/')] })).spaces[0].pinned.map(nodeLine),
+    readSidebarFile(sidebar({ spaces: [{ id: 's', containerIDs: ['unpinned', 'u', 'pinned', 'p'] }], items: [box('p', ['a']), t('a', 'p', 'P', 'https://p.test/'), box('u', ['b']), t('b', 'u', 'U', 'https://u.test/')] })).spaces.map((s) => [s.pinned.map(nodeLine), s.unpinned.map(nodeLine)]),
+  ], [['New'], [[['P'], ['U']]]])
+
+  // The copy rules: no dashes or dots between words, and no "X, not Y".
+  const words = [...Object.values(ARC_COPY), arcSummary({ spaces: 2, stacks: 5, folders: 1, favorites: 2, firstSpace: 'Work', skipped: 2 }), ...Object.values(ARC_STACKS), ARC_FAVORITES_SPACE.name]
+  eq('0.9.7 arc copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('0.9.7 arc copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
+// ---------- 0.9.7: web search from the board, and the board's search bar ----------
+import { WEB_SEARCH_COPY, fallbackSearchUrl, searchEnter, webRowDisposition, webRowLabel, webSearchText } from '../src/lib/webSearch'
+import { SEARCH_BAR_VERSION, settingsAfterUpdate } from '../src/lib/appearance'
+import { enterHit, isCloseMatch } from '../src/lib/search'
+{
+  const none = { ctrlKey: false, metaKey: false, shiftKey: false }
+  const ctrl = { ...none, ctrlKey: true }
+  const cmd = { ...none, metaKey: true }
+  const hit = { url: 'https://github.com/' }
+  eq('web search: with a bookmark hit, Enter still opens it, Ctrl/Cmd+Enter in a background tab, Shift in front', [
+    searchEnter(hit, 'git', none),
+    searchEnter(hit, 'git', ctrl),
+    searchEnter(hit, 'git', { ...cmd, shiftKey: true }),
+  ], [
+    { kind: 'link', url: 'https://github.com/', newTab: false, active: false },
+    { kind: 'link', url: 'https://github.com/', newTab: true, active: false },
+    { kind: 'link', url: 'https://github.com/', newTab: true, active: true },
+  ])
+  eq('web search: with no hit, Enter searches the web here, Ctrl/Cmd+Enter in a new tab', [
+    searchEnter(null, '  how tall is   everest ', none),
+    searchEnter(null, 'everest', ctrl),
+    searchEnter(null, 'everest', cmd),
+  ], [
+    { kind: 'web', text: 'how tall is everest', disposition: 'CURRENT_TAB' },
+    { kind: 'web', text: 'everest', disposition: 'NEW_TAB' },
+    { kind: 'web', text: 'everest', disposition: 'NEW_TAB' },
+  ])
+  eq('web search: nothing typed, nothing searched', [searchEnter(null, '', none), searchEnter(null, '   ', ctrl), webSearchText(' \n ')], [null, null, ''])
+  // Enter opens a link only on a close match (0.9.7 follow-up): every typed word at the start of a word
+  // in its title, at the start of a label in its hostname, or (3+ characters) anywhere in its hostname.
+  const stack = (id: string, title: string, links: Array<[string, string, string]>) => ({ id, title, parentSpaceId: 'S', bookmarks: links.map(([bid, t, url]) => ({ id: bid, title: t, url, parentStackId: id })) })
+  const board: SaveTree = {
+    rootId: 'R',
+    spaces: [{
+      id: 'S', rawTitle: '🧪 Test', name: 'Test', emoji: '🧪',
+      stacks: [
+        stack('K1', 'Inbox', [['B1', 'Gmail', 'https://mail.google.com/mail/u/0/']]),
+        stack('K2', 'Code', [['B2', 'GitHub', 'https://github.com/']]),
+        stack('K3', 'Files', [['B3', 'Google Drive', 'https://drive.google.com/drive/my-drive']]),
+        stack('K4', 'Japan', [['B4', 'Kyoto ryokan', 'https://www.ryokan.example/kyoto']]),
+        stack('K5', 'Work', [['B5', 'File', 'https://www.figma.com/design/abc/File']]),
+      ],
+    }],
+  } as unknown as SaveTree
+  const listed = (q: string) => searchTree(board, q).flatMap((g) => g.hits.map((b) => b.id))
+  const enter = (q: string) => {
+    const a = searchEnter(enterHit(board, q), q, none)
+    return a?.kind === 'link' ? a.url : a?.kind ?? null
+  }
+  eq('close match: "ai" lists Gmail (mid-word) but Enter searches the web', [listed('ai'), enter('ai')], [['B1'], 'web'])
+  eq('close match: "git" (start of the title and of github.com) and "hub" (3+ letters in github.com) open GitHub', [enter('git'), enter('hub')], ['https://github.com/', 'https://github.com/'])
+  eq('close match: "mail" (a label of mail.google.com) opens Gmail; "drive" opens the link titled Google Drive', [enter('mail'), enter('drive'), enter('google drive')], ['https://mail.google.com/mail/u/0/', 'https://drive.google.com/drive/my-drive', 'https://drive.google.com/drive/my-drive'])
+  eq('close match: "japan" lists the Japan stack but matches only its name, so Enter searches the web', [listed('japan'), enter('japan')], [['B4'], 'web'])
+  eq('close match: "design" is only in the path, so Enter searches the web', [listed('design'), enter('design')], [['B5'], 'web'])
+  eq('close match: "how tall is everest" lists nothing and searches the web', [listed('how tall is everest'), enter('how tall is everest')], [[], 'web'])
+  eq('close match: every word must be close; 2-letter words only at the start of a host label', [
+    isCloseMatch({ title: 'GitHub', url: 'https://github.com/' }, 'git japan'),
+    isCloseMatch({ title: 'Docs', url: 'https://gi.example/' }, 'gi'),
+    isCloseMatch({ title: 'Docs', url: 'https://example.gi.com/' }, 'gi'),
+    isCloseMatch({ title: 'Docs', url: 'https://agi.example/' }, 'gi'),
+    isCloseMatch({ title: 'Docs', url: 'not a url' }, 'docs'),
+  ], [false, true, true, false, true])
+  eq('close match: Ctrl+Enter opens the close match in a background tab, or searches the web in a new tab', [
+    searchEnter(enterHit(board, 'git'), 'git', ctrl),
+    searchEnter(enterHit(board, 'ai'), 'ai', ctrl),
+  ], [{ kind: 'link', url: 'https://github.com/', newTab: true, active: false }, { kind: 'web', text: 'ai', disposition: 'NEW_TAB' }])
+  eq('web search: the row says what it searches', webRowLabel('  cheap   flights '), 'Search the web for “cheap flights”')
+  eq('web search: a click on the row searches here, Ctrl/Cmd or a middle click in a new tab', [
+    webRowDisposition({ ctrlKey: false, metaKey: false, button: 0 }),
+    webRowDisposition({ ctrlKey: true, metaKey: false, button: 0 }),
+    webRowDisposition({ ctrlKey: false, metaKey: true }),
+    webRowDisposition({ ctrlKey: false, metaKey: false, button: 1 }),
+  ], ['CURRENT_TAB', 'NEW_TAB', 'NEW_TAB', 'NEW_TAB'])
+  eq('web search: outside the extension, a Google search by address', fallbackSearchUrl(' a&b  c '), 'https://www.google.com/search?q=a%26b%20c')
+
+  // The search bar on the board: on for new installs, off for boards from before 0.9.7, as 0.8.0 did Packed.
+  eq('search bar: on by default; a saved choice survives storage, anything else reads as the default', [
+    DEFAULT_APPEARANCE.searchBar,
+    parseAppearance(undefined).searchBar,
+    parseAppearance({ searchBar: false }).searchBar,
+    parseAppearance({ searchBar: 'no' }).searchBar,
+    SEARCH_BAR_VERSION,
+  ], [true, true, false, true, '0.9.7'])
+  const old096 = { mode: 'dark', palette: 'nord', density: 'compact', layout: 'packed', bg: { kind: 'solid', gradient: 1, dim: 35, blur: 0, imageRev: 0 } }
+  eq('search bar: settings saved before 0.9.7 come back with it off; nothing saved is a new board, with it on; a pick stands', [
+    parseSavedAppearance(old096).searchBar,
+    parseSavedAppearance(old096).layout,
+    parseSavedAppearance(undefined).searchBar,
+    parseSavedAppearance({ ...old096, searchBar: true }).searchBar,
+    parseSavedAppearance({ layout: 'rows', searchBar: true }).layout,
+  ], [false, 'packed', true, true, 'rows'])
+  const mirror096 = JSON.stringify({ ...bootMirror(parseAppearance(old096)), settings: old096 })
+  eq('search bar: a boot copy from 0.9.6 opens without it from the first frame, no copy opens with it', [settingsFromMirror(mirror096).searchBar, settingsFromMirror(mirror096).layout, settingsFromMirror(null).searchBar], [false, 'packed', true])
+  eq('search bar: an update from 0.8.0 on writes it off into the saved settings, never over a pick', [
+    settingsAfterUpdate(undefined, { beforeRows: false, beforeSearchBar: true }),
+    settingsAfterUpdate(old096, { beforeRows: false, beforeSearchBar: true }),
+    settingsAfterUpdate({ ...old096, searchBar: true }, { beforeRows: false, beforeSearchBar: true }),
+    settingsAfterUpdate(old096, { beforeRows: false, beforeSearchBar: false }),
+  ], [{ layout: 'packed', searchBar: false }, { ...old096, searchBar: false }, null, null])
+  const old070 = { mode: 'dark', palette: 'nord' }
+  eq('search bar: an update from before 0.8.0 writes Rows and the bar off in one go, a picked layout kept', [
+    settingsAfterUpdate(undefined, { beforeRows: true, beforeSearchBar: true }),
+    settingsAfterUpdate(old070, { beforeRows: true, beforeSearchBar: true }),
+    settingsAfterUpdate({ ...old070, layout: 'packed' }, { beforeRows: true, beforeSearchBar: true }),
+  ], [{ layout: 'rows', searchBar: false }, { ...old070, layout: 'rows', searchBar: false }, { ...old070, layout: 'packed', searchBar: false }])
+  const readBack = (saved: unknown, beforeRows: boolean) => {
+    const a = parseSavedAppearance(settingsAfterUpdate(saved, { beforeRows, beforeSearchBar: true }))
+    return `${a.layout}/${a.searchBar}`
+  }
+  eq('search bar: what the update writes reads back as the board had it, minus the bar', [readBack(undefined, false), readBack(undefined, true), readBack(old096, false), readBack(old070, true)], ['packed/false', 'rows/false', 'packed/false', 'rows/false'])
+  eq('search bar: rides along in the boot copy, and merging another setting keeps it', [
+    settingsFromMirror(JSON.stringify(bootMirror(parseAppearance({ layout: 'packed', searchBar: false })))).searchBar,
+    mergeAppearance(parseAppearance({ searchBar: false }), { density: 'compact' }).searchBar,
+    mergeAppearance(parseAppearance({ searchBar: false }), { searchBar: true }).searchBar,
+  ], [false, false, true])
+
+  const words = [WEB_SEARCH_COPY.engine, WEB_SEARCH_COPY.placeholder, WEB_SEARCH_COPY.setting, WEB_SEARCH_COPY.noMatch('Ctrl+'), WEB_SEARCH_COPY.linkHeader('3 links', 'Ctrl+'), WEB_SEARCH_COPY.webHeader('3 links', 'Ctrl+'), webRowLabel('x')]
+  eq('0.9.7 web copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('0.9.7 web copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
+// ---------- 0.9.7: the what's-new note ----------
+import { WHATS_NEW_097, whatsNew097 } from '../src/lib/whatsNewPlan'
+{
+  const base = { early: false, shows070: -1, updated080: false, shows080: 0 }
+  eq("what's new 0.9.7: an update from before 0.9.7 shows it; without the update mark (a fresh install) nothing", [
+    pickWhatsNew({ ...base, updated097: true, shows097: 0 }),
+    pickWhatsNew({ ...base }),
+    pickWhatsNew({ ...base, updated097: false, shows097: 0 }),
+  ], ['097', null, null])
+  eq("what's new 0.9.7: on at most three new tabs, and gone once answered", [
+    pickWhatsNew({ ...base, updated097: true, shows097: 2 }),
+    pickWhatsNew({ ...base, updated097: true, shows097: 3 }),
+    pickWhatsNew({ ...base, updated097: true, shows097: -1 }),
+  ], ['097', null, null])
+  eq("what's new 0.9.7: it takes the place of the 0.9.0 and 0.8.0 notes; the 0.7.0 Pro note still goes first", [
+    pickWhatsNew({ ...base, updated080: true, updated090: true, shows090: 0, updated097: true, shows097: 0 }),
+    pickWhatsNew({ ...base, updated080: true, updated090: true, shows090: 0, updated097: true, shows097: -1 }),
+    pickWhatsNew({ ...base, early: true, shows070: 0, updated097: true, shows097: 0 }),
+    pickWhatsNew({ ...base, updated090: true, shows090: 0 }),
+  ], ['097', null, '070', '090'])
+  eq("what's new 0.9.7: the copy, word for word", Object.values(WHATS_NEW_097), [
+    'New in 0.9.7',
+    'Search the web from Stackboard: when no link matches, Enter searches with your default search engine.',
+    'Want a search bar across the top of your board?',
+    'Show the search bar',
+    'Moving from Arc? Settings > Copy from Arc brings your spaces over.',
+    'Got it',
+  ])
+  eq("what's new 0.9.7: the search bar line only while the bar is off; the Arc line not under the company's import lock", [
+    whatsNew097({ searchBarOn: false, lockImportExport: false }),
+    whatsNew097({ searchBarOn: true, lockImportExport: false }),
+    whatsNew097({ searchBarOn: false, lockImportExport: true }),
+  ], [{ bar: true, arc: true }, { bar: false, arc: true }, { bar: true, arc: false }])
+  const words = Object.values(WHATS_NEW_097) as string[]
+  eq("0.9.7 note copy: no em dashes or middle dots", words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('0.9.7 note copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

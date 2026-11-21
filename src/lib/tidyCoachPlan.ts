@@ -1,7 +1,7 @@
 import type { ProState } from './proPlan'
 import { TIDY_MAX_LINKS, tidyAccess, type TidyAccess } from './tidyPlan'
 
-// The tidy coach mark (0.9.6). The maintainer, 12 Nov 2026: hardly anyone finds the free tidy, so right after
+// The tidy coach mark (0.9.6). 12 Nov 2026: hardly anyone finds the free tidy, so right after
 // people bring their bookmarks in, point them at it, and the first minute shows a messy pile sorting
 // itself. Pure, so tests/unit.test.ts covers the rules; the mark is components/TidyCoach.tsx, which
 // TidyButton renders beside its button, and its page state is lib/tidyCoach.ts.

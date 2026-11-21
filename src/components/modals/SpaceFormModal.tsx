@@ -1,12 +1,16 @@
 import { useState, lazy, Suspense } from 'react'
-import type { Theme } from 'emoji-picker-react'
+import type { EmojiStyle, Theme } from 'emoji-picker-react'
 import { Modal, PrimaryButton, SecondaryButton, TextInput, Label } from './Modal'
 import { createSpace, renameSpace } from '../../lib/bookmarks'
 import { useStackableStore } from '../../store/useStackableStore'
 import { DEFAULT_EMOJI } from '../../lib/icon'
 import { useAppearance } from '../../store/useAppearance'
+import { StarterPacks } from '../StarterPacks'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
+// The system's own emoji (0.9.7), so opening the picker fetches nothing: the default Apple set loads
+// its images from cdn.jsdelivr.net.
+const PICKER_STYLE = { emojiStyle: 'native' as EmojiStyle }
 
 interface Props {
   mode: 'add' | 'edit'
@@ -21,6 +25,8 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
   const reportError = useStackableStore((s) => s.reportError)
+  // 0.9.7 (U5): a new space can start from a starter pack, unless the company switched packs off (Teams T8).
+  const packsLocked = useStackableStore((s) => !!s.tree?.company?.lock.starterPacks)
   // The picker's own light/dark set picks its category icons; index.css maps its colours.
   const scheme = useAppearance((s) => s.scheme)
 
@@ -84,6 +90,7 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
                   width="100%"
                   height={320}
                   theme={scheme as Theme}
+                  {...PICKER_STYLE}
                 />
               </Suspense>
             </div>
@@ -99,6 +106,14 @@ export function SpaceFormModal({ mode, initialName = '', initialEmoji = DEFAULT_
           />
         </div>
       </form>
+      {/* Outside the form, so a pack chip can never submit it. A pack is a whole space with its
+          stacks; adding one opens it and closes this dialog. */}
+      {mode === 'add' && !packsLocked && (
+        <div data-new-space-packs className="mt-4 border-t border-line pt-3">
+          <div className="mb-2 text-xs font-medium text-soft">Or start from a pack</div>
+          <StarterPacks variant="dialog" onAdded={close} />
+        </div>
+      )}
     </Modal>
   )
 }

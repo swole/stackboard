@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { listSources, createPlannedSpace, type ImportSource } from '../lib/importChrome'
 import { deleteSpace } from '../lib/bookmarks'
-import { countPlannedFolders, plural } from '../lib/importPlan'
+import { countPlanned, countPlannedFolders, countPlannedStack, plural, withLeadStack, type PlannedStack } from '../lib/importPlan'
 import { loadFreeTidy } from '../lib/tidy'
 import { offerTidyCoach } from '../lib/tidyCoach'
 import { tidyInput } from '../lib/tidyPlan'
@@ -32,9 +32,28 @@ interface Props {
   /** 'welcome' keeps the welcome screen up until the copy finishes. */
   variant: 'welcome' | 'modal'
   onDone?: () => void
+  /** 0.9.7: Arc spaces (components/ArcImport.tsx) start all ticked, and the summary speaks of Arc. */
+  from?: 'chrome' | 'arc'
+  /** 0.9.7: Arc's Favorites row, a stack that goes first in the first space copied. */
+  lead?: PlannedStack | null
+  /**
+   * 0.9.7: the line under an Arc list (arcSummary, passed in by the Arc importer so lib/arcImport.ts
+   * loads only with it, outside the new tab's main bundle).
+   */
+  describe?: (p: ImportCounts) => string
 }
 
-export function ImportPanel({ sources, variant, onDone }: Props) {
+/** What a copy would make, for the line under the list. */
+export interface ImportCounts {
+  spaces: number
+  stacks: number
+  folders: number
+  favorites: number
+  firstSpace: string | null
+  skipped: number
+}
+
+export function ImportPanel({ sources, variant, onDone, from = 'chrome', lead = null, describe }: Props) {
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
   const flashItem = useStackableStore((s) => s.flashItem)
@@ -42,8 +61,10 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
   const celebrate = useStackableStore((s) => s.celebrate)
   const setOnboarding = useStackableStore((s) => s.setOnboarding)
 
-  // The bookmarks bar is where people keep what they use; start with just that ticked.
+  // The bookmarks bar is where people keep what they use; start with just that ticked. Someone moving
+  // from Arc is moving all of it: every Arc space starts ticked.
   const [picked, setPicked] = useState<Set<string>>(() => {
+    if (from === 'arc') return new Set(sources.map((s) => s.id))
     const bar = sources.find((s) => s.kind === 'bar') ?? sources[0]
     return new Set(bar ? [bar.id] : [])
   })
@@ -51,8 +72,11 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const chosen = useMemo(() => sources.filter((s) => picked.has(s.id)), [sources, picked])
-  const links = chosen.reduce((n, s) => n + s.plan.links, 0)
-  const stacks = chosen.reduce((n, s) => n + s.plan.space.stacks.length, 0)
+  // Arc's Favorites ride with the first space copied, as its first stack.
+  const leadOn = !!lead && chosen.length > 0
+  const leadLinks = lead && leadOn ? countPlannedStack(lead) : 0
+  const links = chosen.reduce((n, s) => n + s.plan.links, 0) + leadLinks
+  const stacks = chosen.reduce((n, s) => n + s.plan.space.stacks.length, 0) + (leadOn ? 1 : 0)
   // Folders deeper down stay folders inside their stack (0.8.0).
   const nested = chosen.reduce((n, s) => n + s.plan.space.stacks.reduce((m, st) => m + countPlannedFolders(st.folders).folders, 0), 0)
   const skipped = chosen.reduce((n, s) => n + s.plan.skipped, 0)
@@ -75,12 +99,12 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
     const created: string[] = []
     try {
       let base = 0
-      for (const source of chosen) {
-        const id = await createPlannedSpace(source.plan.space, (n) =>
+      for (const space of withLeadStack(chosen.map((s) => s.plan.space), leadOn ? lead : null)) {
+        const id = await createPlannedSpace(space, (n) =>
           setProgress({ done: base + n, total: links }),
         )
         created.push(id)
-        base += source.plan.links
+        base += countPlanned(space)
       }
       await refresh()
       // 0.9.6: a new space big enough to tidy gets the coach mark on its Tidy button
@@ -93,7 +117,7 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
       flashItem(first)
       showToast({
         verb: 'Copied',
-        title: chosen.length === 1 ? chosen[0].label : plural(chosen.length, 'folder'),
+        title: chosen.length === 1 ? chosen[0].label : plural(chosen.length, from === 'arc' ? 'Arc space' : 'folder'),
         detail: plural(links, 'link'),
         duration: 7000,
         undo: async () => {
@@ -143,15 +167,28 @@ export function ImportPanel({ sources, variant, onDone }: Props) {
         })}
       </ul>
 
-      <p className="mt-3 text-xs leading-relaxed text-muted">
-        {links
-          ? `${chosen.length === 1 ? 'A new space' : `${chosen.length} new spaces`} with ${plural(stacks, 'stack')}, one per folder${
-              nested ? `, and ${plural(nested, 'folder')} inside them` : ''
-            }. Your originals stay where they are.`
-          : 'Tick a folder to copy it into a space.'}
-        {skipped > 0 &&
-          ` ${plural(skipped, 'bookmarklet or browser page', 'bookmarklets or browser pages')} ${skipped === 1 ? 'stays' : 'stay'} behind: a new tab can't open ${skipped === 1 ? 'it' : 'them'}.`}
-      </p>
+      {describe ? (
+        <p data-arc-summary className="mt-3 text-xs leading-relaxed text-muted">
+          {describe({
+            spaces: chosen.length,
+            stacks,
+            folders: nested,
+            favorites: leadLinks,
+            firstSpace: chosen[0]?.label ?? null,
+            skipped,
+          })}
+        </p>
+      ) : (
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          {links
+            ? `${chosen.length === 1 ? 'A new space' : `${chosen.length} new spaces`} with ${plural(stacks, 'stack')}, one per folder${
+                nested ? `, and ${plural(nested, 'folder')} inside them` : ''
+              }. Your originals stay where they are.`
+            : 'Tick a folder to copy it into a space.'}
+          {skipped > 0 &&
+            ` ${plural(skipped, 'bookmarklet or browser page', 'bookmarklets or browser pages')} ${skipped === 1 ? 'stays' : 'stay'} behind: a new tab can't open ${skipped === 1 ? 'it' : 'them'}.`}
+        </p>
+      )}
 
       {error && <p className="mt-2 text-xs text-danger">Copy failed: {error}</p>}
 

@@ -7,6 +7,7 @@ import type { FoundingWindow } from './nudgePlan'
 const LAST_SPACE = 'stackable:lastSpaceId'
 const OPEN_FOLDERS = 'stackable:openFolders'
 const SIDEBAR_COLLAPSED = 'stackable:sidebarCollapsed'
+const STACK_LIST_FOLDED = 'stackable:stackListFolded'
 const OPENS = 'stackable:opens'
 const FIRST_SEEN = 'stackable:firstSeen'
 const RATING = 'stackable:rating'
@@ -15,6 +16,7 @@ const STASHES = 'stackable:stashes'
 const WHATS_NEW = 'stackable:whatsNew070'
 const WHATS_NEW_080 = 'stackable:whatsNew080'
 const WHATS_NEW_090 = 'stackable:whatsNew090'
+const WHATS_NEW_097 = 'stackable:whatsNew097'
 const TRIAL_ENDING = 'stackable:trialEnding'
 const TRIAL_ENDED = 'stackable:trialEnded'
 const MOMENTS = 'stackable:proMoments'
@@ -47,6 +49,9 @@ export const prefs = {
   setLastSpaceId: (id: string | null) => write(LAST_SPACE, id),
   sidebarCollapsed: () => read(SIDEBAR_COLLAPSED) === '1',
   setSidebarCollapsed: (collapsed: boolean) => write(SIDEBAR_COLLAPSED, collapsed ? '1' : null),
+  /** The selected space's stack list in the sidebar is folded away (0.9.7, U6), for every space. */
+  stackListFolded: () => read(STACK_LIST_FOLDED) === '1',
+  setStackListFolded: (folded: boolean) => write(STACK_LIST_FOLDED, folded ? '1' : null),
   /** Folders inside stacks that are open on this device, by id (0.8.0); the rest show folded. */
   openFolders: (): string[] => parseOpenFolders(read(OPEN_FOLDERS)),
   setOpenFolders: (ids: string[]) => write(OPEN_FOLDERS, ids.length ? JSON.stringify(ids.slice(-OPEN_FOLDERS_MAX)) : null),
@@ -80,6 +85,9 @@ export const prefs = {
   setWhatsNew080Shows: (n: number) => write(WHATS_NEW_080, String(n)),
   whatsNew090Shows: (): number => Number(read(WHATS_NEW_090)) || 0,
   setWhatsNew090Shows: (n: number) => write(WHATS_NEW_090, String(n)),
+  /** The same for the 0.9.7 note (0.9.7). */
+  whatsNew097Shows: (): number => Number(read(WHATS_NEW_097)) || 0,
+  setWhatsNew097Shows: (n: number) => write(WHATS_NEW_097, String(n)),
   /** New tabs that showed the trial-end recap, ending and ended; -1 once answered (0.9.0). */
   trialCardShows: (card: 'ending' | 'ended'): number => Number(read(card === 'ending' ? TRIAL_ENDING : TRIAL_ENDED)) || 0,
   setTrialCardShows: (card: 'ending' | 'ended', n: number) => write(card === 'ending' ? TRIAL_ENDING : TRIAL_ENDED, String(n)),

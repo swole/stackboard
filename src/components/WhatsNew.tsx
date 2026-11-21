@@ -6,16 +6,18 @@ import { usePro } from '../lib/pro'
 import { hasPro, keepsTodoFree } from '../lib/proPlan'
 import { IS_EXTENSION } from '../lib/bookmarks'
 import { prefs } from '../lib/prefs'
-import { pickWhatsNew, proNoteText, showProLine, stillPending, whatsNew080, whatsNew090, type WhatsNewCard } from '../lib/whatsNewPlan'
+import { WHATS_NEW_097, pickWhatsNew, proNoteText, showProLine, stillPending, whatsNew080, whatsNew090, whatsNew097, type WhatsNewCard } from '../lib/whatsNewPlan'
 import { useCorner } from '../lib/corner'
 
 /** chrome.storage.local, set by background.ts on an update from before 0.8.0. */
 const WHATS_NEW_080_KEY = 'whatsNew080'
 /** chrome.storage.local, set by background.ts on an update from before 0.9.0. */
 const WHATS_NEW_090_KEY = 'whatsNew090'
+/** chrome.storage.local, set by background.ts on an update from before 0.9.7. */
+const WHATS_NEW_097_KEY = 'whatsNew097'
 
 /**
- * The what's-new notes: the Pro note (0.7.0, "Pro launch rules": Pro lives in Settings plus
+ * The what's-new notes: the Pro note (0.7.0, the Pro launch rules: Pro lives in Settings plus
  * one note) for people who had Stackboard before Pro, and the 0.8.0 note for people who updated
  * from an older version. A corner card on at most three new tabs, retired when answered. A tab
  * shows one note at most; the Pro note goes first and the 0.8.0 note waits for a later tab.
@@ -28,7 +30,7 @@ export function WhatsNew() {
   // 0.9.6: the company policy has answered (corner.ts); no note decides before that.
   const settled = useCorner((s) => s.locks !== null)
   const [card, setCard] = useState<WhatsNewCard | null>(null)
-  const [updated, setUpdated] = useState<{ u080: boolean; u090: boolean } | null>(IS_EXTENSION ? null : { u080: false, u090: false })
+  const [updated, setUpdated] = useState<{ u080: boolean; u090: boolean; u097: boolean } | null>(IS_EXTENSION ? null : { u080: false, u090: false, u097: false })
   // 0.9.0: whether this person's 0.8.0 note was still waiting when the 0.9.0 one took its place.
   const [missed080, setMissed080] = useState(false)
   const shownHere = useRef(false)
@@ -37,9 +39,9 @@ export function WhatsNew() {
     if (!IS_EXTENSION) return
     let live = true
     chrome.storage.local
-      .get([WHATS_NEW_080_KEY, WHATS_NEW_090_KEY])
-      .then((got) => live && setUpdated({ u080: !!got[WHATS_NEW_080_KEY], u090: !!got[WHATS_NEW_090_KEY] }))
-      .catch(() => live && setUpdated({ u080: false, u090: false }))
+      .get([WHATS_NEW_080_KEY, WHATS_NEW_090_KEY, WHATS_NEW_097_KEY])
+      .then((got) => live && setUpdated({ u080: !!got[WHATS_NEW_080_KEY], u090: !!got[WHATS_NEW_090_KEY], u097: !!got[WHATS_NEW_097_KEY] }))
+      .catch(() => live && setUpdated({ u080: false, u090: false, u097: false }))
     return () => {
       live = false
     }
@@ -54,6 +56,8 @@ export function WhatsNew() {
       shows080: prefs.whatsNew080Shows(),
       updated090: updated.u090,
       shows090: prefs.whatsNew090Shows(),
+      updated097: updated.u097,
+      shows097: prefs.whatsNew097Shows(),
       paid,
       // School mode: the company's pro lock, from the policy's real answer (0.9.6).
       lockPro: !!useCorner.getState().locks?.pro,
@@ -63,6 +67,7 @@ export function WhatsNew() {
     // 0.9.0: one corner card at a time; the trial-end recap may have it on this tab.
     if (!useCorner.getState().claim('whatsNew')) return
     if (pick === '070') prefs.setWhatsNewShows(prefs.whatsNewShows() + 1)
+    else if (pick === '097') prefs.setWhatsNew097Shows(prefs.whatsNew097Shows() + 1)
     else if (pick === '090') {
       setMissed080(updated.u080 && stillPending(prefs.whatsNew080Shows()))
       prefs.setWhatsNew090Shows(prefs.whatsNew090Shows() + 1)
@@ -77,6 +82,7 @@ export function WhatsNew() {
   if (card === '070') return <ProNote onClose={done} />
   if (card === '080') return <Note080 onClose={done} />
   if (card === '090') return <Note090 onClose={done} missed080={missed080} />
+  if (card === '097') return <Note097 onClose={done} />
   return null
 }
 
@@ -190,6 +196,51 @@ function Note080({ onClose }: { onClose: () => void }) {
         )}
         <button onClick={close} className={text.tryPacked ? QUIET : PRIMARY}>
           Got it
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * 0.9.7: web search, the search bar (offered with a button while it's off, since people updating keep
+ * it off) and Arc import, in the CEO's words. Updates from before 0.9.7 only; it takes the place of
+ * the older notes.
+ */
+function Note097({ onClose }: { onClose: () => void }) {
+  // 0.9.6: the locks the note was decided with: the policy's real answer.
+  const lock = useCorner((s) => s.locks)
+  const searchBarOn = useAppearance((s) => s.appearance.searchBar)
+  const show = whatsNew097({ searchBarOn, lockImportExport: !!lock?.importExport })
+  const close = () => {
+    prefs.setWhatsNew097Shows(-1)
+    onClose()
+  }
+  const showBar = () => {
+    useAppearance.getState().update({ searchBar: true })
+    close()
+  }
+  return (
+    <Card data="data-whats-new-097" title={WHATS_NEW_097.title} onClose={close}>
+      <ul className="mt-1.5 list-disc space-y-1.5 pl-4 leading-relaxed text-muted marker:text-faint">
+        <li>{WHATS_NEW_097.web}</li>
+        {show.bar && (
+          <li data-whats-new-bar>
+            {WHATS_NEW_097.bar}
+            <button
+              onClick={showBar}
+              data-show-search-bar
+              className="mt-1.5 block rounded-lg border border-line-strong bg-card px-2.5 py-1 text-xs font-medium text-fg hover:bg-hover"
+            >
+              {WHATS_NEW_097.showBar}
+            </button>
+          </li>
+        )}
+        {show.arc && <li data-whats-new-arc>{WHATS_NEW_097.arc}</li>}
+      </ul>
+      <div className="mt-3 flex gap-2">
+        <button onClick={close} className={PRIMARY}>
+          {WHATS_NEW_097.done}
         </button>
       </div>
     </Card>

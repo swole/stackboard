@@ -1,14 +1,35 @@
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { Plus } from 'lucide-react'
 import { useStackableStore } from '../store/useStackableStore'
 import { ImportPanel, useImportSources } from './ImportPanel'
+import { LazyArcImport as ArcImport } from './ArcImportLazy'
 import { StarterPacks } from './StarterPacks'
+import { Segmented } from './modals/Modal'
 
 const delay = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` })
+
+export type ImportFrom = 'chrome' | 'arc'
+
+/** Chrome bookmarks or an Arc file (0.9.7), on the welcome screen and in Settings' import dialog. */
+export function ImportFromSwitch({ value, onChange }: { value: ImportFrom; onChange: (from: ImportFrom) => void }) {
+  return (
+    <Segmented<ImportFrom>
+      label="Bring in from"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: 'chrome', label: 'From Chrome' },
+        { value: 'arc', label: 'From Arc' },
+      ]}
+    />
+  )
+}
 
 /**
  * The empty board (0.4.0). Leads with the user's own bookmarks when Chrome has any, then
  * starter packs, then a blank space. Stays up while an import runs (store.onboarding).
+ * 0.9.7: Arc's spaces can come in too (Arc stops working on 22 December 2026): a second tab beside
+ * Chrome's bookmarks, or, when Chrome has none to copy, a section of its own in the same place.
  */
 export function Welcome() {
   const openModal = useStackableStore((s) => s.openModal)
@@ -16,6 +37,9 @@ export function Welcome() {
   const lock = useStackableStore((s) => s.tree?.company?.lock)
   const sources = useImportSources()
   const hasSources = !!sources && sources.length > 0 && !lock?.importExport
+  const arcOnly = sources !== null && !hasSources && !lock?.importExport
+  const importShown = hasSources || arcOnly
+  const [from, setFrom] = useState<ImportFrom>('chrome')
 
   return (
     <div className="h-full overflow-y-auto">
@@ -37,23 +61,40 @@ export function Welcome() {
             className="rise mt-8 rounded-2xl border border-accent-line/50 bg-card p-5 shadow-panel"
             style={delay(210)}
           >
-            <h3 className="text-base font-semibold text-strong">Bring in your bookmarks</h3>
-            <p className="mb-3 mt-0.5 text-sm text-muted">Start with the links you already use.</p>
-            <ImportPanel sources={sources} variant="welcome" />
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+              <div>
+                <h3 className="text-base font-semibold text-strong">Bring in your bookmarks</h3>
+                <p className="mb-3 mt-0.5 text-sm text-muted">Start with the links you already use.</p>
+              </div>
+              <ImportFromSwitch value={from} onChange={setFrom} />
+            </div>
+            {from === 'arc' ? <ArcImport variant="welcome" /> : <ImportPanel sources={sources} variant="welcome" />}
+          </section>
+        )}
+
+        {arcOnly && (
+          <section
+            data-welcome="arc"
+            className="rise mt-8 rounded-2xl border border-accent-line/50 bg-card p-5 shadow-panel"
+            style={delay(210)}
+          >
+            <h3 className="text-base font-semibold text-strong">Moving from Arc?</h3>
+            <p className="mb-3 mt-0.5 text-sm text-muted">Bring your Arc spaces, with their folders and pinned tabs.</p>
+            <ArcImport variant="welcome" />
           </section>
         )}
 
         {sources !== null && !lock?.starterPacks && (
-          <section data-welcome="packs" className="rise mt-7" style={delay(hasSources ? 270 : 210)}>
+          <section data-welcome="packs" className="rise mt-7" style={delay(importShown ? 270 : 210)}>
             <h3 className="on-wallpaper mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">
-              {hasSources ? 'Or start from a pack' : 'Start from a pack'}
+              {importShown ? 'Or start from a pack' : 'Start from a pack'}
             </h3>
             <StarterPacks variant="chips" />
           </section>
         )}
 
         {sources !== null && (
-          <div className="rise on-wallpaper mt-6 flex items-center gap-2 text-sm text-muted" style={delay(hasSources ? 330 : 270)}>
+          <div className="rise on-wallpaper mt-6 flex items-center gap-2 text-sm text-muted" style={delay(importShown ? 330 : 270)}>
             Or start with a blank space:
             <button
               onClick={() => openModal({ kind: 'space-add' })}

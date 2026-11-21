@@ -1,15 +1,17 @@
 // Stackboard Pro (0.7.0): who gets what. Pure: no chrome.*, no DOM, so tests/unit.test.ts covers
 // every rule. Storage and the calls to Polar live in lib/pro.ts.
 //
-// The rules ("Pro launch rules", the maintainer 31 Oct and 1 Nov 2026):
+// The rules (the Pro launch rules, 31 Oct and 1 Nov 2026):
 // - Nothing free moves behind Pro for anyone who already uses it. To-do lists are Pro for installs
-//   from 0.7.0 on, and since 0.8.0 (the maintainer, 3 Nov) for earlier installs ("early users") too, except
+//   from 0.7.0 on, and since 0.8.0 (3 Nov) for earlier installs ("early users") too, except
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
 //   "everything you use today stays free". Lists that exist keep working for everyone.
 // - Lists that already exist keep working for everyone; Pro only gates making a new one.
 // - Early users get $2.99 a year whenever they buy; new buyers get it until 31 Dec 2026. Pro for
-//   life is $19 once, for anyone (0.9.2). 0.9.4 (the maintainer, 10 Nov): $9.99 once at the founding offer,
+//   life is $19 once, for anyone (0.9.2). 0.9.4 (10 Nov): $9.99 once at the founding offer,
 //   shown only to someone who says the price stopped them ("Didn't get Pro?"), until the same date.
+// - From 1 Jan 2027 (21 Nov 2026): new buyers pay $9.99 a year or $29 for life, through
+//   new Polar products, so founding and early subscribers keep $2.99 and early users still buy at $2.99.
 // - The trial is 14 days with no card. Since 0.9.2 a new install starts it by itself (the reverse
 //   trial, REVERSE_TRIAL); everyone else starts it with a click, as before.
 // - A failed license check pauses Pro and never touches free features. When Polar can't be
@@ -39,12 +41,18 @@ export const CHECKOUT = {
   early: 'https://buy.polar.sh/polar_cl_NX5SjiL0XB6AEG3vraI1lde39D7ATiG6Pxe8w3co9QD',
   /** FOUNDING applied: the same price, for anyone who buys by 31 Dec 2026. */
   founding: 'https://buy.polar.sh/polar_cl_KKWvL022nIO1YdYyJeqsjC6l6TsLOqrmMcSSf14U77l',
-  regular: 'https://buy.polar.sh/polar_cl_8DtGJumyRoQioLiBclasbnNcpj5n1vIdpiBHu2KkNoF',
+  /**
+   * After the founding price ends: $9.99 a year (21 Nov 2026), its own Polar product
+   * e2b1a643 with the same license-key benefit. The $4.99 link (polar_cl_8DtG...) is retired.
+   */
+  regular: 'https://buy.polar.sh/polar_cl_wtVBUAu3fcgiZiAUNiTgiu8V1iLk4fg9JYUqQ37ToDl',
   /**
    * 0.9.2: Pro for life, $19 once ("Stackboard Pro Lifetime" in Polar). It grants the same license-key
    * benefit as the yearly plan, so its keys check exactly like yearly ones.
    */
   lifetime: 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W',
+  /** Pro for life from 1 Jan 2027: $29 once, Polar product 71afe9e6 (21 Nov 2026). */
+  lifetime2027: 'https://buy.polar.sh/polar_cl_w9g0NA5cAMkaVmDeFzBjStjz2p2c1deiSxK4k3ot4TN',
   /**
    * 0.9.4: the founding offer, Pro for life for $9.99 until the founding price ends (FOUNDING_ENDS): its
    * own link, with a $9.01 discount and no code, so the public lifetime link stays $19. Only "Didn't get
@@ -53,8 +61,14 @@ export const CHECKOUT = {
   lifetimeOffer: 'https://buy.polar.sh/polar_cl_fdIwiaHAZZJmWaP3q3P2nywkOuzRrtaC5wyPh1cbRTo',
 } as const
 
-/** What Pro for life costs, once (0.9.2). */
+/** What Pro for life costs, once, until the founding price ends (0.9.2). */
 export const LIFETIME_PRICE = '$19'
+/** ...and from 1 Jan 2027 (21 Nov 2026). */
+export const LIFETIME_PRICE_2027 = '$29'
+/** Pro for life's price at `now`. */
+export function lifetimePrice(now: number): string {
+  return now <= FOUNDING_ENDS ? LIFETIME_PRICE : LIFETIME_PRICE_2027
+}
 /** ...and at the founding offer, until the founding price ends (0.9.4). */
 export const LIFETIME_OFFER_PRICE = '$9.99'
 
@@ -182,7 +196,7 @@ export function isEarlyUser(p: { updatedFrom?: string | null; installedAt?: numb
 }
 
 // ---------- The reverse trial (0.9.2) ----------
-// the maintainer, 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
+// 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
 // features pause and everything they made stays (the usual trial end). Updates never start one,
 // so everyone who had Stackboard before keeps the opt-in trial.
 
@@ -250,9 +264,9 @@ export function checkoutUrl(early: boolean, now: number, from?: CheckoutFrom): s
   return labelled(early ? CHECKOUT.early : now <= FOUNDING_ENDS ? CHECKOUT.founding : CHECKOUT.regular, from)
 }
 
-/** 0.9.2: the Pro for life checkout, with the same labels. */
-export function lifetimeCheckoutUrl(from?: CheckoutFrom): string {
-  return labelled(CHECKOUT.lifetime, from)
+/** 0.9.2: the Pro for life checkout, with the same labels; the $29 one after the founding price ends. */
+export function lifetimeCheckoutUrl(from?: CheckoutFrom, now = Date.now()): string {
+  return labelled(now <= FOUNDING_ENDS ? CHECKOUT.lifetime : CHECKOUT.lifetime2027, from)
 }
 
 /** 0.9.4: the founding offer on Pro for life, with the same labels. */
@@ -275,9 +289,9 @@ export function checkoutPlan(state: ProState, trialAuto = false): CheckoutPlan {
   return 'free'
 }
 
-/** "$2.99 a year" for early users and founding buyers, "$4.99 a year" after. */
+/** "$2.99 a year" for early users and founding buyers, "$9.99 a year" after (21 Nov 2026). */
 export function priceLabel(early: boolean, now: number): string {
-  return early || now <= FOUNDING_ENDS ? '$2.99 a year' : '$4.99 a year'
+  return early || now <= FOUNDING_ENDS ? '$2.99 a year' : '$9.99 a year'
 }
 
 /** What someone pasted, minus spaces, line breaks and quotes; null when it can't be a key. */
