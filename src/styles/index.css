@@ -541,6 +541,54 @@
   }
 }
 
+/* ---------- First-run reveal (0.9.9) ----------
+   The preview's stacks deal in column by column and their links drop into place; the "Make it
+   yours" sheet slides up once the board is written. `backwards` holds the start state only during
+   each delay, so anywhere animations don't run everything is simply there. */
+.reveal-col {
+  animation: reveal-col 560ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes reveal-col {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+}
+.reveal-card {
+  animation: reveal-card 420ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes reveal-card {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+.sheet-up {
+  animation: sheet-up 440ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+/* The loading logo waits 400 ms, so a quick new tab never flashes it. */
+.load-in {
+  animation: load-in 320ms ease-out 400ms backwards;
+}
+@keyframes load-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-col,
+  .reveal-card,
+  .sheet-up {
+    animation: none;
+  }
+}
+
 /* ---------- Tidy coach mark (0.9.6) ----------
    The card drops in from the button it points at, and the button wears a soft ring in the
    palette's accent that breathes twice while the card is up. Reduced motion: both simply there. */

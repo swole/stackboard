@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from 'react'
 import { Plus } from 'lucide-react'
 import { useStackableStore } from '../store/useStackableStore'
 import { ImportPanel, useImportSources } from './ImportPanel'
+import type { ImportSource } from '../lib/importChrome'
 import { LazyArcImport as ArcImport } from './ArcImportLazy'
 import { StarterPacks } from './StarterPacks'
 import { Segmented } from './modals/Modal'
@@ -31,11 +32,13 @@ export function ImportFromSwitch({ value, onChange }: { value: ImportFrom; onCha
  * 0.9.7: Arc's spaces can come in too (Arc stops working on 22 December 2026): a second tab beside
  * Chrome's bookmarks, or, when Chrome has none to copy, a section of its own in the same place.
  */
-export function Welcome() {
+export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
   const openModal = useStackableStore((s) => s.openModal)
   // Teams T8: a company can switch off copying bookmarks in and the starter packs.
   const lock = useStackableStore((s) => s.tree?.company?.lock)
-  const sources = useImportSources()
+  // 0.9.9: the first-run reveal (Reveal.tsx) has read the sources already when it hands over.
+  const read = useImportSources(!!given)
+  const sources = given ?? read
   const hasSources = !!sources && sources.length > 0 && !lock?.importExport
   const arcOnly = sources !== null && !hasSources && !lock?.importExport
   const importShown = hasSources || arcOnly
@@ -115,7 +118,7 @@ export function Welcome() {
 }
 
 /** The brand mark as a small board whose cards deal in, column by column. Colours follow the palette. */
-function StackArt() {
+export function StackArt({ size = 92 }: { size?: number }) {
   const cards: Array<[number, number, number, number, number]> = [
     // x, y, h, opacity, column
     [22, 20, 30, 1, 0],
@@ -126,7 +129,7 @@ function StackArt() {
     [76, 20, 37, 1, 2],
   ]
   return (
-    <svg viewBox="0 0 118 112" width="92" height="87" className="stack-art rise" aria-hidden>
+    <svg viewBox="0 0 118 112" width={size} height={Math.round((size * 112) / 118)} className="stack-art rise" aria-hidden>
       <defs>
         <linearGradient id="sb-tile" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" style={{ stopColor: 'var(--sb-brand-from)' }} />

@@ -36,12 +36,15 @@ export async function planWindow(windowId: number, label = stashLabel()): Promis
   return planStash(tabs, titles, label)
 }
 
-/** Every normal window's plan, last-focused window first, for "Declare tab bankruptcy". */
-export async function planAllWindows(): Promise<{ windowId: number; plan: StashPlan }[]> {
+/**
+ * Every normal window's plan, last-focused window first, for "Declare tab bankruptcy". 0.9.9: the
+ * first-run reveal names its stacks "Open tabs <date>" (`prefix`).
+ */
+export async function planAllWindows(prefix = 'Tab bankruptcy'): Promise<{ windowId: number; plan: StashPlan }[]> {
   const focused = await chrome.windows.getLastFocused().catch(() => null)
   const wins = (await chrome.windows.getAll({ windowTypes: ['normal'] })).filter((w) => typeof w.id === 'number')
   wins.sort((a, b) => Number(b.id === focused?.id) - Number(a.id === focused?.id))
-  const label = `Tab bankruptcy ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date())}`
+  const label = `${prefix} ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date())}`
   const out: { windowId: number; plan: StashPlan }[] = []
   for (const w of wins) {
     const plan = await planWindow(w.id!, bankruptcyStackTitle(label, out.length))
@@ -93,9 +96,9 @@ export async function stashWindow(windowId: number, opts: { close: boolean }): P
  * "Declare tab bankruptcy" (0.5.1): every tab in every window into the Stash space, then all of
  * them close and one new tab opens on the certificate. Pinned tabs and browser pages stay.
  */
-export async function declareBankruptcy(): Promise<Bankruptcy | null> {
+export async function declareBankruptcy(opts: { keepTabId?: number } = {}): Promise<Bankruptcy | null> {
   const all = await planAllWindows()
-  const tabIds = all.flatMap((w) => w.plan.tabIds)
+  const tabIds = all.flatMap((w) => w.plan.tabIds).filter((id) => id !== opts.keepTabId)
   if (!tabIds.length) return null
   const spaceId = await stashSpaceId()
   await saveStacks(spaceId, all.map((w) => w.plan))
@@ -103,9 +106,33 @@ export async function declareBankruptcy(): Promise<Bankruptcy | null> {
   const bankruptcy: Bankruptcy = { tabs: tabIds.length, windows: all.length, saved, at: Date.now() }
   const note: OpenSpaceNote = { spaceId, saved, at: bankruptcy.at, bankruptcy }
   await chrome.storage.local.set({ [OPEN_SPACE_KEY]: note })
-  await chrome.tabs.create({ windowId: all[0].windowId, active: true })
+  // 0.9.9: asked from a Stackboard tab (the first-run reveal), that tab stays and shows the
+  // certificate itself, so no second new tab opens.
+  if (opts.keepTabId === undefined) await chrome.tabs.create({ windowId: all[0].windowId, active: true })
   await chrome.tabs.remove(tabIds)
   return bankruptcy
+}
+
+/**
+ * 0.9.9, the first-run reveal: every tab in every window saved into the Stash space, one stack per
+ * window, and left open. Pinned tabs and browser pages are skipped, as in a bankruptcy.
+ */
+export async function saveAllWindows(): Promise<{ saved: number; spaceId: string } | null> {
+  const all = await planAllWindows('Open tabs')
+  const saved = all.reduce((n, w) => n + w.plan.links, 0)
+  if (!saved) return null
+  const spaceId = await stashSpaceId()
+  await saveStacks(spaceId, all.map((w) => w.plan))
+  return { saved, spaceId }
+}
+
+/**
+ * 0.9.9: how many tabs a stash of every window would take, and from how many windows. Tabs, the
+ * number a bankruptcy certificate reports; two tabs on one page save as one link.
+ */
+export async function countOpenTabs(): Promise<{ tabs: number; windows: number }> {
+  const all = await planAllWindows()
+  return { tabs: all.reduce((n, w) => n + w.plan.tabIds.length, 0), windows: all.length }
 }
 
 /** When this computer last ran auto-archive (storage.local, ms). */

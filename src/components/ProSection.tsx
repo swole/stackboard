@@ -87,7 +87,7 @@ export function ProSection() {
   // 0.9.3: Get Pro names the price, $9.99 once the founding price ends (early users keep $2.99).
   const getPro = `Get Pro for ${priceLabel(early, now)}`
   const portal = () => void openInNewTab(PORTAL_URL, true)
-  // 0.9.3 (8 Nov): how checkout works and the 14-day money-back promise, one quiet line above
+  // 0.9.3: how checkout works and the 14-day money-back promise, one quiet line above
   // Pro for life and wherever that line shows, so never in the finishing steps or under the pro lock.
   const refundLine = (
     <p className="mt-1.5 text-[11px] text-muted" data-pro-refund>

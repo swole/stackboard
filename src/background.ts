@@ -16,8 +16,9 @@ import { PACKED_VERSION, SEARCH_BAR_VERSION, settingsAfterUpdate } from './lib/a
 // 2. "Stash this window" runs here, from the popup (a message) or the keyboard shortcut, because
 //    the popup closes itself as soon as the new tab takes focus and would cut the stash short.
 
-// Keep in sync with FRESH_KEY in src/lib/onboarding.ts.
+// Keep in sync with FRESH_KEY in src/lib/onboarding.ts and REVEAL_KEY in src/lib/revealPlan.ts.
 const FRESH_KEY = 'stackboardFresh'
+const REVEAL_KEY = 'stackboardReveal'
 
 // 3. (0.5.5) If the extension is removed, Chrome opens getstackboard.com/bye with our version, so
 //    people learn their bookmarks are safe and can say why they left. Set on every worker start.
@@ -106,14 +107,19 @@ chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
     return
   }
   if (reason !== chrome.runtime.OnInstalledReason.INSTALL) return
-  void chrome.storage.local.set({ [FRESH_KEY]: Date.now() }).then(() => chrome.tabs.create({}))
+  // 0.9.9: REVEAL_KEY opens the first new tabs on the reveal, a preview of the board the person's
+  // own bookmarks make (lib/revealPlan.ts).
+  const now = Date.now()
+  void chrome.storage.local.set({ [FRESH_KEY]: now, [REVEAL_KEY]: now }).then(() => chrome.tabs.create({}))
   void startReverseTrial().catch(() => {})
 })
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return
   if (msg?.type === 'bankruptcy') {
-    declareBankruptcy().then((b) => reply(b ?? { tabs: 0 }), (err) => reply({ error: String(err) }))
+    // 0.9.9: `keepTab` (the first-run reveal) keeps the asking tab, which shows the certificate itself.
+    const keepTabId = msg.keepTab === true && typeof sender.tab?.id === 'number' ? sender.tab.id : undefined
+    declareBankruptcy({ keepTabId }).then((b) => reply(b ?? { tabs: 0 }), (err) => reply({ error: String(err) }))
     return true
   }
   // 5. (0.7.0) Auto-archive, asked for by a new tab when Pro is on (lib/autoArchive.ts).

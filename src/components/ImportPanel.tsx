@@ -8,10 +8,11 @@ import { offerTidyCoach } from '../lib/tidyCoach'
 import { tidyInput } from '../lib/tidyPlan'
 import { useStackableStore } from '../store/useStackableStore'
 
-/** Chrome's folders with links in them; null while loading. */
-export function useImportSources(): ImportSource[] | null {
+/** Chrome's folders with links in them; null while loading. 0.9.9: `skip` when a parent already read them. */
+export function useImportSources(skip = false): ImportSource[] | null {
   const [sources, setSources] = useState<ImportSource[] | null>(null)
   useEffect(() => {
+    if (skip) return
     let live = true
     listSources()
       .then((s) => live && setSources(s))
@@ -23,7 +24,7 @@ export function useImportSources(): ImportSource[] | null {
     return () => {
       live = false
     }
-  }, [])
+  }, [skip])
   return sources
 }
 

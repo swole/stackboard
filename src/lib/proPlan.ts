@@ -1,16 +1,16 @@
 // Stackboard Pro (0.7.0): who gets what. Pure: no chrome.*, no DOM, so tests/unit.test.ts covers
 // every rule. Storage and the calls to Polar live in lib/pro.ts.
 //
-// The rules (the Pro launch rules, 31 Oct and 1 Nov 2026):
+// The rules:
 // - Nothing free moves behind Pro for anyone who already uses it. To-do lists are Pro for installs
-//   from 0.7.0 on, and since 0.8.0 (3 Nov) for earlier installs ("early users") too, except
+//   from 0.7.0 on, and since 0.8.0 for earlier installs ("early users") too, except
 //   an early user who already had a list when 0.8.0 first ran: the 0.7.0 note told early users
 //   "everything you use today stays free". Lists that exist keep working for everyone.
 // - Lists that already exist keep working for everyone; Pro only gates making a new one.
 // - Early users get $2.99 a year whenever they buy; new buyers get it until 31 Dec 2026. Pro for
-//   life is $19 once, for anyone (0.9.2). 0.9.4 (10 Nov): $9.99 once at the founding offer,
+//   life is $19 once, for anyone (0.9.2). 0.9.4: $9.99 once at the founding offer,
 //   shown only to someone who says the price stopped them ("Didn't get Pro?"), until the same date.
-// - From 1 Jan 2027 (21 Nov 2026): new buyers pay $9.99 a year or $29 for life, through
+// - From 1 Jan 2027: new buyers pay $9.99 a year or $29 for life, through
 //   new Polar products, so founding and early subscribers keep $2.99 and early users still buy at $2.99.
 // - The trial is 14 days with no card. Since 0.9.2 a new install starts it by itself (the reverse
 //   trial, REVERSE_TRIAL); everyone else starts it with a click, as before.
@@ -42,7 +42,7 @@ export const CHECKOUT = {
   /** FOUNDING applied: the same price, for anyone who buys by 31 Dec 2026. */
   founding: 'https://buy.polar.sh/polar_cl_KKWvL022nIO1YdYyJeqsjC6l6TsLOqrmMcSSf14U77l',
   /**
-   * After the founding price ends: $9.99 a year (21 Nov 2026), its own Polar product
+   * After the founding price ends: $9.99 a year, its own Polar product
    * e2b1a643 with the same license-key benefit. The $4.99 link (polar_cl_8DtG...) is retired.
    */
   regular: 'https://buy.polar.sh/polar_cl_wtVBUAu3fcgiZiAUNiTgiu8V1iLk4fg9JYUqQ37ToDl',
@@ -51,7 +51,7 @@ export const CHECKOUT = {
    * benefit as the yearly plan, so its keys check exactly like yearly ones.
    */
   lifetime: 'https://buy.polar.sh/polar_cl_ypdUWh3QdU4DghsZoSm7xcIG6SoBFZaC8Bl9b1Ad37W',
-  /** Pro for life from 1 Jan 2027: $29 once, Polar product 71afe9e6 (21 Nov 2026). */
+  /** Pro for life from 1 Jan 2027: $29 once, Polar product 71afe9e6. */
   lifetime2027: 'https://buy.polar.sh/polar_cl_w9g0NA5cAMkaVmDeFzBjStjz2p2c1deiSxK4k3ot4TN',
   /**
    * 0.9.4: the founding offer, Pro for life for $9.99 until the founding price ends (FOUNDING_ENDS): its
@@ -63,7 +63,7 @@ export const CHECKOUT = {
 
 /** What Pro for life costs, once, until the founding price ends (0.9.2). */
 export const LIFETIME_PRICE = '$19'
-/** ...and from 1 Jan 2027 (21 Nov 2026). */
+/** ...and from 1 Jan 2027. */
 export const LIFETIME_PRICE_2027 = '$29'
 /** Pro for life's price at `now`. */
 export function lifetimePrice(now: number): string {
@@ -196,7 +196,7 @@ export function isEarlyUser(p: { updatedFrom?: string | null; installedAt?: numb
 }
 
 // ---------- The reverse trial (0.9.2) ----------
-// 6 Nov 2026: a new install starts with Pro for 14 days, and when the trial ends Pro
+// a new install starts with Pro for 14 days, and when the trial ends Pro
 // features pause and everything they made stays (the usual trial end). Updates never start one,
 // so everyone who had Stackboard before keeps the opt-in trial.
 
@@ -289,7 +289,7 @@ export function checkoutPlan(state: ProState, trialAuto = false): CheckoutPlan {
   return 'free'
 }
 
-/** "$2.99 a year" for early users and founding buyers, "$9.99 a year" after (21 Nov 2026). */
+/** "$2.99 a year" for early users and founding buyers, "$9.99 a year" after. */
 export function priceLabel(early: boolean, now: number): string {
   return early || now <= FOUNDING_ENDS ? '$2.99 a year' : '$9.99 a year'
 }

@@ -18,7 +18,8 @@ import { SpaceView } from './components/SpaceView'
 import { SearchResults } from './components/SearchResults'
 import { BoardSearch } from './components/BoardSearch'
 import { UndoToast } from './components/UndoToast'
-import { Welcome } from './components/Welcome'
+import { FirstRun, RevealFinish } from './components/Reveal'
+import { StackArt } from './components/Welcome'
 import { KeepItHint } from './components/KeepItHint'
 import { RatingPrompt } from './components/RatingPrompt'
 import { Certificate } from './components/Certificate'
@@ -176,18 +177,23 @@ export default function App() {
   }, [loaded])
   useEffect(() => {
     if (!loaded || !IS_EXTENSION) return
-    void takeOpenSpaceNote().then((note) => {
-      if (!note) return
-      const store = useStackableStore.getState()
-      store.selectSpace(note.spaceId)
-      if (note.bankruptcy) setCertificate(note.bankruptcy)
-      store.showToast({ verb: 'Stashed', title: plural(note.saved, 'tab'), duration: 4000 })
-      store.celebrate()
-      // The third stash is a rating milestone; a bankruptcy waits for its certificate to close.
-      if (prefs.bumpStashes() >= RATING_MILESTONE_STASHES && !note.bankruptcy) store.reachMilestone()
-      // 0.9.0: free users hear once in a while that auto-archive does this by itself.
-      if (!note.bankruptcy) useCorner.getState().requestMoment('stash')
-    })
+    const take = () =>
+      void takeOpenSpaceNote().then((note) => {
+        if (!note) return
+        const store = useStackableStore.getState()
+        store.selectSpace(note.spaceId)
+        if (note.bankruptcy) setCertificate(note.bankruptcy)
+        store.showToast({ verb: 'Stashed', title: plural(note.saved, 'tab'), duration: 4000 })
+        store.celebrate()
+        // The third stash is a rating milestone; a bankruptcy waits for its certificate to close.
+        if (prefs.bumpStashes() >= RATING_MILESTONE_STASHES && !note.bankruptcy) store.reachMilestone()
+        // 0.9.0: free users hear once in a while that auto-archive does this by itself.
+        if (!note.bankruptcy) useCorner.getState().requestMoment('stash')
+      })
+    take()
+    // 0.9.9: the reveal's "Save and close all" keeps this tab, which then reads the note it left.
+    window.addEventListener('stackboard:note', take)
+    return () => window.removeEventListener('stackboard:note', take)
   }, [loaded])
 
   // A board made before Pro (0.7.0) marks an early user, for people the update marker missed.
@@ -370,11 +376,18 @@ export default function App() {
           <AnnouncementBar />
           {/* 0.9.7: the board's search bar stays put above the board, the welcome and the results, so
               typing in it never loses the focus when the results take the board's place. */}
+          {/* 0.9.9: the "Keep it" hint sits in the flow above the search bar; floating, it covered it. */}
+          <KeepItHint />
           {tree && <BoardSearch />}
           <div className="min-h-0 flex-1">
             {loading && !tree && (
-              <div className="flex h-full items-center justify-center text-sm text-muted">
-                Loading…
+              // 0.9.9: nothing for a quick load; a slow one (the very first, while Chrome sets the
+              // extension up) fades in the logo after 400 ms. The words stay for screen readers.
+              <div className="flex h-full items-center justify-center" role="status">
+                <div className="load-in">
+                  <StackArt size={56} />
+                </div>
+                <span className="sr-only">Loading…</span>
               </div>
             )}
             {error && (
@@ -382,7 +395,7 @@ export default function App() {
                 {error}
               </div>
             )}
-            {welcoming && <Welcome />}
+            {welcoming && <FirstRun />}
             {tree && searching && <SearchResults query={search} />}
             {proOn && todayView && !searching && !welcoming && <TodayView />}
             {activeSpace && !searching && !welcoming && !(proOn && todayView) && <SpaceView space={activeSpace} />}
@@ -390,7 +403,7 @@ export default function App() {
         </main>
         <ModalHost />
         <UndoToast />
-        <KeepItHint />
+        <RevealFinish />
         <RatingPrompt />
         <WhatsNew />
         <TrialEndCard />

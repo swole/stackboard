@@ -178,6 +178,7 @@ import {
 } from '../src/lib/managedPlan'
 import { escapeXml, goDescription, goEntries, goSuggestions, looksLikeUrl, rankGo, readSearchHash, searchDisposition, searchHash } from '../src/lib/goLinks'
 import { policyAccentFromMirror } from '../src/lib/appearance'
+import { REVEAL_COPY, REVEAL_LOOKS, REVEAL_SPACE, decorateForReveal, pickRevealSource, previewOf, revealDue, stackEmoji, tabsLine } from '../src/lib/revealPlan'
 import {
   MAX_LINKS as SHARE_MAX_LINKS,
   MAX_SHARE_URL,
@@ -682,7 +683,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   )
   eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
   eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
-  // 0.8.0 (3 Nov): to-do lists join Pro for early users too, unless they already had a list.
+  // 0.8.0: to-do lists join Pro for early users too, unless they already had a list.
   eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
   eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
   eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
@@ -2320,7 +2321,7 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
   eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
   eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
-  // 0.8.0 (3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  // 0.8.0: the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
   eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
   eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
   eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
@@ -3430,6 +3431,90 @@ import { WHATS_NEW_097, whatsNew097 } from '../src/lib/whatsNewPlan'
   const words = Object.values(WHATS_NEW_097) as string[]
   eq("0.9.7 note copy: no em dashes or middle dots", words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
   eq('0.9.7 note copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
+// ---------- 0.9.9: the first-run reveal (revealPlan.ts) ----------
+{
+  const DAY = 86400000
+  const now = Date.UTC(2026, 10, 22)
+  eq('reveal: due for a week after the install, never for a missing or future mark', [
+    revealDue(undefined, now),
+    revealDue(now, now),
+    revealDue(now - 6 * DAY, now),
+    revealDue(now - 8 * DAY, now),
+    revealDue(now + DAY, now),
+    revealDue('junk', now),
+  ], [false, true, true, false, false, false])
+
+  const src = (id: string, kind: 'bar' | 'other' | 'mobile' | 'folder' | 'arc', links: number) =>
+    ({ id, kind, label: id, plan: { links, space: { name: id, emoji: '', stacks: [] } } })
+  eq('reveal: the bookmarks bar when it has links, else the folder with the most; Arc files never', [
+    pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 3)])?.id,
+    pickRevealSource([src('other', 'other', 40), src('mobile', 'mobile', 90)])?.id,
+    pickRevealSource([src('arc', 'arc', 500), src('other', 'other', 2)])?.id,
+    pickRevealSource([src('bar', 'bar', 0)]),
+    pickRevealSource([]),
+  ], ['bar', 'mobile', 'other', null, null])
+
+  eq('reveal: stack icons where the name makes one obvious, nothing for a guess', [
+    'Recipes', 'Japan trip', 'Summer travel', 'Read later', 'Work', 'Workout plan', 'Shopping', 'Class notes',
+    'Dev tools', 'Job hunt', 'Q4 planning', 'Bookmarks', 'Misc',
+  ].map(stackEmoji), ['🍳', '🗾', '✈️', '📚', '💼', '💪', '🛍️', '🎓', '💻', '🧭', null, null, null])
+
+  const bar = {
+    name: 'Bookmarks bar',
+    emoji: '⭐',
+    stacks: [
+      { title: 'On the bar', links: [{ title: 'Gmail', url: 'https://mail.google.com/' }] },
+      { title: 'Recipes', links: [] },
+      { title: '📚 Reading', links: [] },
+      { title: 'Q4 planning', links: [] },
+    ],
+  }
+  const dressed = decorateForReveal(bar, 'bar')
+  eq('reveal: the space is Home; loose links on the bar are a starred stack; an existing icon stays', [
+    dressed.name, dressed.emoji, dressed.stacks.map((s) => s.title),
+  ], [REVEAL_SPACE.name, REVEAL_SPACE.emoji, ['⭐ On the bar', '🍳 Recipes', '📚 Reading', 'Q4 planning']])
+  eq('reveal: loose links elsewhere become a link stack', decorateForReveal({ ...bar, stacks: [{ title: 'Links', links: [] }] }, 'other').stacks[0].title, '🔗 Links')
+  eq('reveal: decorating leaves the plan it was given alone', bar.stacks[1].title, 'Recipes')
+
+  const link = (i: number) => ({ title: `L${i}`, url: `https://example.com/${i}` })
+  const big = {
+    name: 'x',
+    emoji: '',
+    stacks: Array.from({ length: 10 }, (_, s) => ({
+      title: `S${s}`,
+      links: Array.from({ length: s === 0 ? 9 : 2 }, (_, i) => link(i)),
+      ...(s === 1 ? { folders: [{ title: 'F', links: [link(7), link(8)], folders: [{ title: 'G', links: [link(9)], folders: [] }] }] } : {}),
+    })),
+  }
+  const pv = previewOf(big)
+  eq('reveal preview: 8 stacks of 6 links at most, the rest counted, links in folders included', [
+    pv.stacks.length,
+    pv.moreStacks,
+    pv.stacks[0].links.length,
+    pv.stacks[0].more,
+    pv.stacks[1].links.map((l) => l.title),
+    pv.stacks[1].more,
+  ], [8, 2, 6, 3, ['L0', 'L1', 'L7', 'L8', 'L9'], 0])
+
+  eq('reveal: the open-tabs line', [tabsLine(1, 1), tabsLine(23, 1), tabsLine(23, 2)], [
+    'You have 1 tab open.', 'You have 23 tabs open.', 'You have 23 tabs open in 2 windows.',
+  ])
+  eq('reveal: every look is a palette version that exists', REVEAL_LOOKS.filter((l) => {
+    const only = onlyScheme(l.palette)
+    return only !== null && only !== l.scheme
+  }).map((l) => l.name), [])
+  eq('reveal: the made-from line names the bar plainly and any other folder by name', [
+    REVEAL_COPY.made('Bookmarks bar', 41, 6),
+    REVEAL_COPY.made('Other bookmarks', 1, 1),
+  ], [
+    'Made from your bookmarks bar: 41 links in 6 stacks. Your originals stay where they are.',
+    'Made from your “Other bookmarks” folder: 1 link in 1 stack. Your originals stay where they are.',
+  ])
+  const words = Object.values(REVEAL_COPY).map((w) => (typeof w === 'function' ? (w as (...a: unknown[]) => string)('Bookmarks bar', 3, 2) : w))
+  eq('reveal copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('reveal copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

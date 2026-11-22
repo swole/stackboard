@@ -5370,7 +5370,7 @@ try {
   }
 
   // ---------- 0.8.0: to-do lists join Pro for early users ----------
-  // 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // early users (installed before Pro) need Pro or the trial for a new to-do list too,
   // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
   // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
   {
@@ -7184,6 +7184,131 @@ try {
       gone = (await sessionRecord()) === null
     }
     check('archive: switching auto-archive off drops the record', gone)
+  }
+
+  // ---------- 0.9.9: the first-run reveal (backlog K4) ----------
+  // Last on purpose: it empties the board, rewrites the bookmarks bar and closes tabs.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const emptyBoard = () =>
+      control.evaluate(async () => {
+        for (const k of await chrome.bookmarks.getChildren('2')) {
+          if (!k.url && (k.title === 'Stackboard' || k.title === 'Stackable')) await chrome.bookmarks.removeTree(k.id)
+        }
+        await chrome.storage.local.remove('stackableRootId')
+      })
+    const board = () =>
+      control.evaluate(async () => {
+        const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+        if (!root) return []
+        const [sub] = await chrome.bookmarks.getSubTree(root.id)
+        return sub.children.map((sp) => ({ title: sp.title, stacks: (sp.children ?? []).map((st) => ({ title: st.title, urls: (st.children ?? []).map((b) => b.url) })) }))
+      })
+    const press = (page, scope, text) =>
+      page.evaluate((s, t) => {
+        const b = [...document.querySelectorAll(`${s} button`)].find((x) => x.textContent.trim().startsWith(t))
+        b?.click()
+        return !!b
+      }, scope, text)
+
+    // A fresh install's marks, an empty board, and a bookmarks bar with a loose link and a Reading folder.
+    await emptyBoard()
+    await control.evaluate(async () => {
+      for (const k of await chrome.bookmarks.getChildren('1')) await chrome.bookmarks.removeTree(k.id)
+      const mk = (parentId, title, url) => chrome.bookmarks.create({ parentId, title, url })
+      await mk('1', 'Example Domain', 'https://example.com/')
+      const reading = await mk('1', 'Reading')
+      await mk(reading.id, 'Wikipedia', 'https://en.wikipedia.org/')
+      await mk(reading.id, 'MDN', 'https://developer.mozilla.org/')
+      await chrome.storage.local.set({ stackboardReveal: Date.now(), stackboardFresh: Date.now() })
+      localStorage.removeItem('stackable:keepHintShown')
+    })
+    // Tabs already open when Stackboard arrives, in a window of their own.
+    const extra = await control.evaluate(async () =>
+      (await chrome.windows.create({ url: ['https://example.com/?r=1', 'https://example.org/?r=2', 'https://example.net/?r=3', 'https://example.com/?r=4'], focused: false })).id,
+    )
+    await until(control, async (w) => (await chrome.tabs.query({ windowId: w })).filter((t) => /^https:/.test(t.url || t.pendingUrl || '')).length === 4, extra)
+
+    const r1 = await openNtp(() => !!document.querySelector('[data-reveal-stack]') || !!document.querySelector('[data-welcome]'))
+    await sleep(1600) // the stacks deal in
+    await r1.screenshot({ path: path.join(SHOTS, '99-reveal.png') })
+    const seen = await r1.evaluate(() => ({
+      made: document.querySelector('[data-reveal-made]')?.textContent ?? '',
+      stacks: [...document.querySelectorAll('[data-reveal-stack] h3')].map((h) => h.textContent),
+      keep: document.querySelector('[data-reveal-keep]')?.textContent ?? '',
+      pill: !!document.querySelector('[data-keep-hint]'),
+      welcome: !!document.querySelector('[data-welcome]'),
+    }))
+    check('reveal: a fresh install with bookmarks opens on the board they make', !seen.welcome && seen.made === 'Made from your bookmarks bar: 3 links in 2 stacks. Your originals stay where they are.', seen.made)
+    check('reveal: stacks wear an icon where the name makes one obvious', JSON.stringify(seen.stacks) === JSON.stringify(['⭐On the bar', '📚Reading']), JSON.stringify(seen.stacks))
+    check('reveal: it explains Keep it itself, and the floating pill stays away', seen.keep.includes('Keep it') && !seen.pill, JSON.stringify(seen))
+    check('reveal: nothing is written before the person says so', (await board()).length === 0)
+
+    await press(r1, '[data-reveal-actions]', 'Use this board')
+    const finished = await until(r1, () => !!document.querySelector('[data-reveal-finish]') && document.querySelector('main h1')?.textContent === 'Home', null, 15000)
+    const home = (await board()).find((s) => s.title === '🏠 Home')
+    const marks = await control.evaluate(async () => Object.keys(await chrome.storage.local.get(['stackboardReveal', 'stackboardFresh'])))
+    check('reveal: Use this board writes Home with the icons, and the sheet rises over the board', finished && JSON.stringify(home?.stacks.map((s) => `${s.title}:${s.urls.length}`)) === JSON.stringify(['⭐ On the bar:1', '📚 Reading:2']), JSON.stringify(home))
+    check('reveal: keeping the board retires the reveal and the Keep it pill', marks.length === 0 && !(await r1.evaluate(() => !!document.querySelector('[data-keep-hint]'))), JSON.stringify(marks))
+
+    await r1.evaluate(() => document.querySelector('[data-reveal-look="nord-dark"]')?.click())
+    check('reveal: a look applies the moment it is picked', await until(r1, () => document.documentElement.dataset.palette === 'nord' && document.documentElement.dataset.scheme === 'dark'))
+
+    const row = await r1.evaluate(() => document.querySelector('[data-reveal-tabs]')?.innerText.replace(/\s+/g, ' ') ?? '')
+    check('reveal: with tabs open it offers to stack them', /You have \d+ tabs open/.test(row), row)
+    await press(r1, '[data-reveal-tabs]', 'Stack them')
+    await until(r1, () => /Saved \d+ links? in your Stash space/.test(document.querySelector('[data-reveal-tabs]')?.textContent ?? ''), null, 10000)
+    const stash = (await board()).find((s) => s.title === '📥 Stash')
+    const saved = (stash?.stacks ?? []).filter((s) => s.title.startsWith('Open tabs ')).flatMap((s) => s.urls)
+    const stillOpen = await control.evaluate(async (w) => (await chrome.tabs.query({ windowId: w })).length, extra)
+    check('reveal: Stack them saves the open tabs into Stash and leaves them open', ['https://example.com/?r=1', 'https://example.org/?r=2', 'https://example.net/?r=3', 'https://example.com/?r=4'].every((u) => saved.includes(u)) && stillOpen === 4, JSON.stringify({ saved, stillOpen }))
+    await r1.evaluate(() => document.querySelector('[data-reveal-done]')?.click())
+    check('reveal: Done closes the sheet', await until(r1, () => !document.querySelector('[data-reveal-finish]')))
+    await r1.close()
+
+    // Undo after Use this board: the board empties and the reveal comes back.
+    await emptyBoard()
+    await control.evaluate(() => chrome.storage.local.set({ stackboardReveal: Date.now() }))
+    const r2 = await openNtp(() => !!document.querySelector('[data-reveal-stack]'))
+    await press(r2, '[data-reveal-actions]', 'Use this board')
+    await until(r2, () => !!document.querySelector('[data-reveal-finish]'), null, 15000)
+    await press(r2, '[data-reveal-finish]', 'Undo')
+    const back = await until(r2, () => !!document.querySelector('[data-reveal-stack]') && !document.querySelector('[data-reveal-finish]'), null, 10000)
+    check('reveal: Undo deletes the new board and opens the reveal again', back && !(await board()).some((s) => s.title === '🏠 Home'), JSON.stringify(await board()))
+
+    // The full list: the welcome screen, and the reveal is over on this computer.
+    await press(r2, '[data-reveal-actions]', 'Choose what to bring in')
+    const full = await until(r2, () => !!document.querySelector('[data-welcome="import"] label'))
+    const left = await control.evaluate(async () => (await chrome.storage.local.get('stackboardReveal')).stackboardReveal ?? null)
+    check('reveal: Choose what to bring in opens the full list and ends the reveal', full && left === null, String(left))
+    await r2.close()
+
+    // 0.9.9: without a reveal the Keep it pill sits in the flow, above the search bar and clear of it.
+    await control.evaluate(() => {
+      localStorage.removeItem('stackable:keepHintShown')
+      return chrome.storage.local.set({ stackboardFresh: Date.now() })
+    })
+    const r3 = await openNtp(() => !!document.querySelector('[data-keep-hint]') && !!document.querySelector('[data-board-search-input]'))
+    const geo = await r3.evaluate(() => {
+      const a = document.querySelector('[data-keep-hint]')?.getBoundingClientRect()
+      const b = document.querySelector('[data-board-search-input]')?.getBoundingClientRect()
+      return { pill: a ? Math.round(a.bottom) : null, search: b ? Math.round(b.top) : null }
+    })
+    check('keep-it pill: above the search bar, clear of it', geo.pill !== null && geo.search !== null && geo.pill <= geo.search, JSON.stringify(geo))
+
+    // "Save and close all" from a Stackboard tab: that tab stays and no second new tab opens.
+    const ntps = () => browser.targets().filter((t) => t.type() === 'page' && (t.url() === NTP || t.url().startsWith('chrome://newtab'))).length
+    const before = ntps()
+    const cert = await askWorker(r3, { type: 'bankruptcy', keepTab: true }, 15000)
+    await sleep(800)
+    const note = await control.evaluate(async () => (await chrome.storage.local.get('stackboardOpenSpace')).stackboardOpenSpace ?? null)
+    check('reveal: a bankruptcy asked with keepTab closes the web tabs and opens no new tab', cert?.tabs >= 4 && ntps() === before && !!note?.bankruptcy, JSON.stringify({ cert, before, after: ntps() }))
   }
 } catch (e) {
   console.log('ERROR', e.message)
