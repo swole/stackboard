@@ -39,6 +39,8 @@ type ModalState =
   | { kind: 'import'; from?: 'chrome' | 'arc' }
   | { kind: 'packs' }
   | { kind: 'cleanup' }
+  /** "Your 2026 in Stackboard" (0.9.10): the year's picture, from Settings or its corner card. */
+  | { kind: 'wrapped' }
 
 export interface ToastState {
   id: number

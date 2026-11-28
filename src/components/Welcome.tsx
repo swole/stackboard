@@ -11,6 +11,13 @@ const delay = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` })
 
 export type ImportFrom = 'chrome' | 'arc'
 
+/**
+ * What the welcome screen leads with (0.9.11). 'import': the person's bookmarks, then packs (the default).
+ * 'packs': a thin bookmarks folder (under 5 links) puts the starter packs first, the import below them.
+ * 'fresh': "Start fresh" on the reveal, packs and a blank space with no import.
+ */
+export type WelcomeLead = 'import' | 'packs' | 'fresh'
+
 /** Chrome bookmarks or an Arc file (0.9.7), on the welcome screen and in Settings' import dialog. */
 export function ImportFromSwitch({ value, onChange }: { value: ImportFrom; onChange: (from: ImportFrom) => void }) {
   return (
@@ -32,17 +39,21 @@ export function ImportFromSwitch({ value, onChange }: { value: ImportFrom; onCha
  * 0.9.7: Arc's spaces can come in too (Arc stops working on 22 December 2026): a second tab beside
  * Chrome's bookmarks, or, when Chrome has none to copy, a section of its own in the same place.
  */
-export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
+export function Welcome({ sources: given, lead = 'import' }: { sources?: ImportSource[]; lead?: WelcomeLead } = {}) {
   const openModal = useStackableStore((s) => s.openModal)
   // Teams T8: a company can switch off copying bookmarks in and the starter packs.
   const lock = useStackableStore((s) => s.tree?.company?.lock)
   // 0.9.9: the first-run reveal (Reveal.tsx) has read the sources already when it hands over.
   const read = useImportSources(!!given)
   const sources = given ?? read
-  const hasSources = !!sources && sources.length > 0 && !lock?.importExport
-  const arcOnly = sources !== null && !hasSources && !lock?.importExport
+  const fresh = lead === 'fresh'
+  const hasSources = !fresh && !!sources && sources.length > 0 && !lock?.importExport
+  const arcOnly = !fresh && sources !== null && !hasSources && !lock?.importExport
   const importShown = hasSources || arcOnly
   const [from, setFrom] = useState<ImportFrom>('chrome')
+  // The page is a flex column, so packs-first is a matter of order.
+  const packsFirst = lead === 'packs' && importShown
+  const at = (n: number): CSSProperties => (packsFirst ? { order: n } : {})
 
   return (
     <div className="h-full overflow-y-auto">
@@ -62,7 +73,7 @@ export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
           <section
             data-welcome="import"
             className="rise mt-8 rounded-2xl border border-accent-line/50 bg-card p-5 shadow-panel"
-            style={delay(210)}
+            style={{ ...delay(210), ...at(2) }}
           >
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
               <div>
@@ -79,7 +90,7 @@ export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
           <section
             data-welcome="arc"
             className="rise mt-8 rounded-2xl border border-accent-line/50 bg-card p-5 shadow-panel"
-            style={delay(210)}
+            style={{ ...delay(210), ...at(2) }}
           >
             <h3 className="text-base font-semibold text-strong">Moving from Arc?</h3>
             <p className="mb-3 mt-0.5 text-sm text-muted">Bring your Arc spaces, with their folders and pinned tabs.</p>
@@ -88,16 +99,16 @@ export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
         )}
 
         {sources !== null && !lock?.starterPacks && (
-          <section data-welcome="packs" className="rise mt-7" style={delay(importShown ? 270 : 210)}>
+          <section data-welcome="packs" className="rise mt-7" style={{ ...delay(importShown ? 270 : 210), ...at(1) }}>
             <h3 className="on-wallpaper mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">
-              {importShown ? 'Or start from a pack' : 'Start from a pack'}
+              {importShown && !packsFirst ? 'Or start from a pack' : 'Start from a pack'}
             </h3>
             <StarterPacks variant="chips" />
           </section>
         )}
 
         {sources !== null && (
-          <div className="rise on-wallpaper mt-6 flex items-center gap-2 text-sm text-muted" style={delay(importShown ? 330 : 270)}>
+          <div className="rise on-wallpaper mt-6 flex items-center gap-2 text-sm text-muted" style={{ ...delay(importShown ? 330 : 270), ...at(3) }}>
             Or start with a blank space:
             <button
               onClick={() => openModal({ kind: 'space-add' })}
@@ -109,7 +120,7 @@ export function Welcome({ sources: given }: { sources?: ImportSource[] } = {}) {
           </div>
         )}
 
-        <p className="rise on-wallpaper mt-12 text-xs text-muted" style={delay(390)}>
+        <p className="rise on-wallpaper mt-12 text-xs text-muted" style={{ ...delay(390), ...at(4) }}>
           Saved under Other bookmarks › Stackboard. No account, and your bookmarks stay in your browser.
         </p>
       </div>

@@ -201,10 +201,12 @@ try {
   // 0.9.5: the one free tidy would put "Tidy (free once)" on every free board (and Settings would ask
   // getstackboard.com about it), and the December founding-price note goes by the real clock. Their
   // own blocks set both up; for every other block the free tidy counts as used and the note as shown
-  // in both its windows, as on a board that has seen them.
+  // in both its windows, as on a board that has seen them. 0.9.10: the same for the card about the
+  // year (Your 2026 in Stackboard), which counts as answered.
   await control.evaluate(async () => {
     await chrome.storage.sync.set({ freeTidy: { at: Date.now() } })
     localStorage.setItem('stackable:foundingNote', 'last-days')
+    localStorage.setItem('stackable:wrapped2026', JSON.stringify({ shown: 0, retired: true }))
   })
 
   await control.evaluate(async () => {
@@ -2272,7 +2274,9 @@ try {
     await click(p1, '[data-looks-keep] button')
     const started = await until(p1, () => document.querySelector('[data-pro-looks]')?.dataset.proLooks === 'on')
     await escape(p1)
-    await sleep(500)
+    // The boot copy follows a moment after Pro switches on: wait for it in place of a fixed pause
+    // (22 Nov, the 0.9.9 release kit: 500 ms missed it once on a busy machine).
+    await until(p1, () => JSON.parse(localStorage.getItem('stackable:appearance') || 'null')?.look?.font === 'serif', null, 6000)
     const kept = await look(p1)
     const s2 = await stored()
     check('looks try-on: starting the trial from it keeps the look', started && kept.font === 'serif' && s2.looks?.font === 'serif' && s2.mirror?.font === 'serif', JSON.stringify({ started, kept, s2 }))
@@ -5370,7 +5374,7 @@ try {
   }
 
   // ---------- 0.8.0: to-do lists join Pro for early users ----------
-  // early users (installed before Pro) need Pro or the trial for a new to-do list too,
+  // 3 Nov: early users (installed before Pro) need Pro or the trial for a new to-do list too,
   // unless they already had a list when 0.8.0 first ran. The first board 0.8.0 loads decides, once
   // per Chrome profile ({ keep } in sync); a stored decision stands; lists that exist keep working.
   {
@@ -7186,6 +7190,252 @@ try {
     check('archive: switching auto-archive off drops the record', gone)
   }
 
+  // ---------- 0.9.10: Your 2026 in Stackboard (bet B1) ----------
+  // A year in review worked out on the device from the board, with a picture to share. Settings has a
+  // row from 1 Dec to 15 Jan; a corner card shows from 4 Dec on two new tabs at most (never twice in a
+  // day), never on a day the December note shows and never under a company lock. Each page has its own
+  // clock (Date.now, moved before the app loads); the dates and the other rules are unit-tested. The
+  // board's links carry the real day Chrome made them, so the year needs this run to be in 2026; in a
+  // later year the block only checks that the row stays away.
+  {
+    const until = async (page, fn, arg, ms = 8000) => {
+      for (let t = 0; t < ms; t += 150) {
+        if (await page.evaluate(fn, arg).catch(() => false)) return true
+        await sleep(150)
+      }
+      return false
+    }
+    const local = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime()
+    const LS = ['stackable:wrapped2026', 'stackable:foundingNote', 'stackable:opens', 'stackable:firstSeen', 'stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:whatsNew097', 'stackable:rating', 'stackable:managedOverride']
+    const LOCAL = ['proLicense', 'proCheckout', 'whatsNew080', 'whatsNew090', 'whatsNew097']
+    const SYNC = ['proTrial', 'proKey', 'proSub', 'proEarly', 'proEarlyTodo']
+    const was = await control.evaluate(async (ls, lk, sk) => ({
+      sync: await chrome.storage.sync.get(sk),
+      local: await chrome.storage.local.get(lk),
+      ls: Object.fromEntries(ls.map((k) => [k, localStorage.getItem(k)])),
+    }), LS, LOCAL, SYNC)
+    // A space whose one stack holds 160 links from one site: the busiest stack and the most-saved site.
+    const seeded = await control.evaluate(async () => {
+      const root = (await chrome.bookmarks.getChildren('2')).find((k) => k.title === 'Stackboard' && !k.url)
+      const space = await chrome.bookmarks.create({ parentId: root.id, title: '🎁 Year test' })
+      const stack = await chrome.bookmarks.create({ parentId: space.id, title: 'Wrapped busiest' })
+      for (let i = 0; i < 160; i++) await chrome.bookmarks.create({ parentId: stack.id, title: `Wrapped link ${i}`, url: `https://www.wrapped-test.example/${i}` })
+      return space.id
+    })
+    // A quiet board that has settled in, nothing else due in the corner. `note`: the December note's
+    // marker (it has shown in both windows unless said otherwise); `seen`: the card's marker starts
+    // having seen that note on 1 Dec (a card that first finds the note's marker set counts that day as
+    // the note's own, to be safe); `lock`: a company policy lock.
+    const setup = (s = {}) => control.evaluate(async (s, lk, sk) => {
+      await chrome.storage.local.remove(lk)
+      await chrome.storage.sync.remove(sk)
+      for (const k of ['stackable:whatsNew070', 'stackable:whatsNew080', 'stackable:whatsNew090', 'stackable:whatsNew097']) localStorage.setItem(k, '-1')
+      localStorage.setItem('stackable:rating', 'dismissed')
+      localStorage.setItem('stackable:opens', '10')
+      localStorage.setItem('stackable:firstSeen', String(Date.now() - 5 * 86400000))
+      localStorage.removeItem('stackable:wrapped2026')
+      if (s.seen) localStorage.setItem('stackable:wrapped2026', JSON.stringify({ shown: 0, noteSeen: 'last-days', noteDay: '2026-12-01' }))
+      localStorage.removeItem('stackable:managedOverride')
+      if (s.note === null) localStorage.removeItem('stackable:foundingNote')
+      else localStorage.setItem('stackable:foundingNote', s.note ?? 'last-days')
+      if (s.lock) localStorage.setItem('stackable:managedOverride', JSON.stringify({ lock: s.lock }))
+    }, s, LOCAL, SYNC)
+    const marker = () => control.evaluate(() => JSON.parse(localStorage.getItem('stackable:wrapped2026') ?? 'null'))
+    const pages = []
+    // A new tab whose clock reads `at`; `outside` collects any request that leaves the browser.
+    const openAt = async (at) => {
+      const p = await browser.newPage()
+      pages.push(p)
+      await p.setViewport({ width: 1400, height: 900 })
+      p.on('pageerror', (e) => errors.push(`wrapped: ${e.message}`))
+      p.outside = []
+      p.on('request', (r) => {
+        if (!/^(chrome-extension|data|blob):/i.test(r.url())) p.outside.push(r.url())
+      })
+      await p.evaluateOnNewDocument((at) => {
+        const real = Date.now.bind(Date)
+        const shift = at - real()
+        Date.now = () => real() + shift
+      }, at)
+      await p.goto(NTP, { waitUntil: 'load' })
+      await p.bringToFront()
+      await p.waitForFunction(() => !!document.querySelector('main h1'), { timeout: 10000 })
+      return p
+    }
+    const card = (p) => p.evaluate(() => {
+      const c = document.querySelector('[data-wrapped-card]')
+      return c ? { title: c.querySelector('h3')?.textContent.trim() ?? '', line: c.querySelector('p')?.textContent.trim() ?? '', open: !!c.querySelector('[data-wrapped-card-open]'), notNow: c.querySelector('[data-wrapped-card-not-now]')?.textContent.trim() ?? '' } : null
+    })
+    const shown = (p) => until(p, () => !!document.querySelector('[data-wrapped-card]'), null, 12000)
+    // The card decides 3 s after the board, Pro and the policy are ready.
+    const none = async (p) => {
+      await sleep(5000)
+      return p.evaluate(() => !document.querySelector('[data-wrapped-card]'))
+    }
+    const openSettings = async (p) => {
+      await p.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Settings')?.click())
+      await until(p, () => !!document.querySelector('[role=dialog] [data-keys]'))
+      return p.evaluate(() => {
+        const row = document.querySelector('[data-wrapped-setting]')
+        return row ? { title: row.querySelector('h3')?.textContent.trim() ?? '', button: row.querySelector('[data-wrapped-open]')?.textContent.trim() ?? '' } : null
+      })
+    }
+    const thisYear = new Date().getFullYear()
+
+    if (thisYear !== 2026) {
+      await setup()
+      const p = await openAt(local(2026, 12, 2))
+      check(`wrapped: in ${thisYear} the board's links are from ${thisYear}, so Settings offers no 2026 picture`, (await openSettings(p)) === null)
+    } else {
+      // 1. Settings: from 1 Dec, not before. No corner card before 4 Dec.
+      await setup()
+      const p0 = await openAt(local(2026, 11, 30))
+      const row0 = await openSettings(p0)
+      check('wrapped: no Settings row before 1 Dec', row0 === null, JSON.stringify(row0))
+      await p0.close()
+      const p1 = await openAt(local(2026, 12, 3))
+      const quiet1 = await none(p1)
+      const row1 = await openSettings(p1)
+      check('wrapped: from 1 Dec Settings has "Your 2026 in Stackboard"; no corner card before 4 Dec', quiet1 && row1?.title === 'Your 2026 in Stackboard' && row1.button === 'See your year', JSON.stringify(row1))
+      await p1.evaluate(() => document.querySelector('[data-wrapped-open]')?.click())
+      const opened1 = await until(p1, () => !!document.querySelector('[role=dialog] [data-wrapped] canvas') && !document.querySelector('[role=dialog] [data-keys]'))
+      const canvas1 = await p1.evaluate(() => {
+        const c = document.querySelector('[data-wrapped] canvas')
+        if (!c) return null
+        const r = c.getBoundingClientRect()
+        const px = c.getContext('2d').getImageData(20, 20, 1, 1).data
+        return { w: c.width, h: c.height, shownW: Math.round(r.width), shownH: Math.round(r.height), alpha: px[3], title: document.querySelector('[role=dialog] h2')?.textContent ?? '' }
+      })
+      check(
+        'wrapped: the Settings row opens the picture, a 1080x1350 canvas that is drawn and on screen',
+        opened1 && canvas1?.w === 1080 && canvas1.h === 1350 && canvas1.shownW > 200 && canvas1.shownH > 250 && canvas1.alpha === 255 && canvas1.title === 'Your 2026 in Stackboard',
+        JSON.stringify(canvas1),
+      )
+      const m1 = await marker()
+      check('wrapped: opening the picture writes the marker and retires the card', m1?.retired === true && m1.shown === 0 && m1.saved === false, JSON.stringify(m1))
+      await p1.close()
+
+      // 2. The picture: counts and site names only, the stack's name when ticked; Save image makes a PNG.
+      await setup()
+      const p2 = await openAt(local(2026, 12, 5))
+      await openSettings(p2)
+      await p2.evaluate(() => document.querySelector('[data-wrapped-open]')?.click())
+      await until(p2, () => (document.querySelector('[data-wrapped] canvas')?.getAttribute('aria-label') ?? '').includes('getstackboard.com/wrapped'))
+      const said = () => p2.evaluate(() => document.querySelector('[data-wrapped] canvas')?.getAttribute('aria-label') ?? '')
+      const plain = await said()
+      check(
+        'wrapped: the picture names the most-saved site and counts the busiest stack, with no stack name or link title',
+        /^My 2026 in Stackboard\n[\d,]+ links saved, most often from wrapped-test\.example\n/.test(plain) && plain.includes('\nBusiest stack: 160 links\n') && !/Wrapped busiest|Wrapped link|Year test/.test(plain),
+        plain.replace(/\n/g, ' | '),
+      )
+      await p2.click('[data-wrapped-names]')
+      await until(p2, () => (document.querySelector('[data-wrapped] canvas')?.getAttribute('aria-label') ?? '').includes('Wrapped busiest'))
+      const named = await said()
+      check('wrapped: Show stack names puts the busiest stack on the picture, and nothing else', named.includes('\nBusiest stack: Wrapped busiest (160 links)\n') && !/Wrapped link|Year test/.test(named), named.replace(/\n/g, ' | '))
+      const DL = path.join(os.tmpdir(), 'stackable-e2e-downloads')
+      fs.rmSync(DL, { recursive: true, force: true })
+      fs.mkdirSync(DL, { recursive: true })
+      const bs = await browser.target().createCDPSession()
+      await bs.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DL })
+      await p2.click('[data-wrapped-save]')
+      let png = null
+      for (let i = 0; i < 60 && !png; i++) {
+        await sleep(150)
+        const f = path.join(DL, 'my-2026-in-stackboard.png')
+        if (fs.existsSync(f) && fs.statSync(f).size > 1000) {
+          const b = fs.readFileSync(f)
+          png = { sig: b.subarray(1, 4).toString(), w: b.readUInt32BE(16), h: b.readUInt32BE(20), kb: Math.round(b.length / 1024) }
+        }
+      }
+      await bs.send('Browser.setDownloadBehavior', { behavior: 'default' }).catch(() => {})
+      check('wrapped: Save image downloads a 1080x1350 PNG named for the year', png?.sig === 'PNG' && png.w === 1080 && png.h === 1350, JSON.stringify(png))
+      await p2.click('[data-wrapped-copy]')
+      const copied = await until(p2, () => document.querySelector('[data-wrapped-copy]')?.textContent.trim() === 'Copied')
+      const m2 = await marker()
+      check('wrapped: saving the picture marks it saved', copied && m2?.saved === true && m2.retired === true, JSON.stringify(m2))
+      await p2.screenshot({ path: path.join(SHOTS, '0910-wrapped.png') })
+      check('wrapped: the picture asks nothing of the network', p2.outside.length === 0, p2.outside.slice(0, 3).join(', '))
+      await p2.close()
+
+      // 3. The corner card from 4 Dec: two new tabs at most, never twice in a day; See your year opens it.
+      await setup({ seen: true })
+      const c1 = await openAt(local(2026, 12, 5, 10))
+      const got1 = (await shown(c1)) ? await card(c1) : null
+      const m3 = await marker()
+      check(
+        'wrapped card: from 4 Dec a settled board gets "Your 2026 in Stackboard" with See your year and Not now',
+        got1?.title === 'Your 2026 in Stackboard' && /^[\d,]+ links saved this year, most often from wrapped-test\.example\. Here it is in one picture you can share\.$/.test(got1.line) && got1.open && got1.notNow === 'Not now' && m3?.shown === 1 && m3.day === '2026-12-05',
+        JSON.stringify({ got1, m3 }),
+      )
+      await c1.screenshot({ path: path.join(SHOTS, '0910-wrapped-card.png') })
+      await c1.close()
+      const c2 = await openAt(local(2026, 12, 5, 16))
+      const sameDay = await none(c2)
+      await c2.close()
+      const c3 = await openAt(local(2026, 12, 6))
+      const again = await shown(c3)
+      await c3.evaluate(() => document.querySelector('[data-wrapped-card-open]')?.click())
+      const openedFromCard = await until(c3, () => !!document.querySelector('[role=dialog] [data-wrapped] canvas') && !document.querySelector('[data-wrapped-card]'))
+      await c3.close()
+      const c4 = await openAt(local(2026, 12, 7))
+      const third = await none(c4)
+      await c4.close()
+      check('wrapped card: once a day, on two new tabs at most; See your year opens the picture', sameDay && again && openedFromCard && third, JSON.stringify({ sameDay, again, openedFromCard, third }))
+
+      // 4. Not now retires it.
+      await setup({ seen: true })
+      const n1 = await openAt(local(2026, 12, 9))
+      await shown(n1)
+      await n1.evaluate(() => document.querySelector('[data-wrapped-card-not-now]')?.click())
+      const gone = await until(n1, () => !document.querySelector('[data-wrapped-card]'))
+      const m4 = await marker()
+      await n1.close()
+      const n2 = await openAt(local(2026, 12, 11))
+      const after = await none(n2)
+      await n2.close()
+      check('wrapped card: Not now retires it', gone && m4?.retired === true && m4.shown === 1 && after, JSON.stringify(m4))
+
+      // 5. Never under a company lock, any lock (here only the rating ask's).
+      await setup({ seen: true, lock: { rating: true } })
+      const l1 = await openAt(local(2026, 12, 9))
+      const locked = await none(l1)
+      await l1.close()
+      check('wrapped card: never under a company lock', locked && ((await marker())?.shown ?? 0) === 0)
+
+      // 6. Never on a day the December note shows: it waits for the note, keeps off that day, then shows.
+      await setup({ note: null })
+      const f1 = await openAt(local(2026, 12, 5, 10))
+      const note1 = await until(f1, () => !!document.querySelector('[data-founding-note]'))
+      const quietF1 = await none(f1)
+      await f1.close()
+      const f2 = await openAt(local(2026, 12, 5, 17))
+      const quietF2 = await none(f2)
+      const noNote2 = await f2.evaluate(() => !document.querySelector('[data-founding-note]'))
+      await f2.close()
+      const m6 = await marker()
+      const f3 = await openAt(local(2026, 12, 6))
+      const next = await shown(f3)
+      await f3.close()
+      check(
+        'wrapped card: never on the day the December note shows, then from the next day',
+        note1 && quietF1 && quietF2 && noNote2 && m6?.noteSeen === 'december' && m6.noteDay === '2026-12-05' && m6.shown === 0 && next,
+        JSON.stringify({ note1, quietF1, quietF2, noNote2, m6, next }),
+      )
+      check('wrapped: no page in this block asked the network for anything', pages.every((p) => p.outside.length === 0), pages.flatMap((p) => p.outside).slice(0, 3).join(', '))
+    }
+
+    for (const p of pages) await p.close().catch(() => {})
+    await control.evaluate(async (w, id, lk, sk) => {
+      await chrome.bookmarks.removeTree(id)
+      await chrome.storage.local.remove(lk)
+      await chrome.storage.sync.remove(sk)
+      if (Object.keys(w.local).length) await chrome.storage.local.set(w.local)
+      if (Object.keys(w.sync).length) await chrome.storage.sync.set(w.sync)
+      for (const [k, v] of Object.entries(w.ls)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v)
+    }, was, seeded, LOCAL, SYNC)
+    await sleep(400)
+  }
+
   // ---------- 0.9.9: the first-run reveal (backlog K4) ----------
   // Last on purpose: it empties the board, rewrites the bookmarks bar and closes tabs.
   {
@@ -7226,6 +7476,8 @@ try {
       const reading = await mk('1', 'Reading')
       await mk(reading.id, 'Wikipedia', 'https://en.wikipedia.org/')
       await mk(reading.id, 'MDN', 'https://developer.mozilla.org/')
+      await mk(reading.id, 'W3C', 'https://www.w3.org/')
+      await mk(reading.id, 'IANA', 'https://www.iana.org/')
       await chrome.storage.local.set({ stackboardReveal: Date.now(), stackboardFresh: Date.now() })
       localStorage.removeItem('stackable:keepHintShown')
     })
@@ -7245,7 +7497,9 @@ try {
       pill: !!document.querySelector('[data-keep-hint]'),
       welcome: !!document.querySelector('[data-welcome]'),
     }))
-    check('reveal: a fresh install with bookmarks opens on the board they make', !seen.welcome && seen.made === 'Made from your bookmarks bar: 3 links in 2 stacks. Your originals stay where they are.', seen.made)
+    check('reveal: a fresh install with bookmarks opens on the board they make', !seen.welcome && seen.made === 'Made from your bookmarks bar: 5 links in 2 stacks. Your originals stay where they are.', seen.made)
+    const outs = await r1.evaluate(() => [...document.querySelectorAll('[data-reveal-actions] button')].map((b) => b.textContent.trim()))
+    check('reveal: the three ways out sit together, Start fresh among them', JSON.stringify(outs) === JSON.stringify(['Use this board', 'Choose what to bring in', 'Start fresh']), JSON.stringify(outs))
     check('reveal: stacks wear an icon where the name makes one obvious', JSON.stringify(seen.stacks) === JSON.stringify(['⭐On the bar', '📚Reading']), JSON.stringify(seen.stacks))
     check('reveal: it explains Keep it itself, and the floating pill stays away', seen.keep.includes('Keep it') && !seen.pill, JSON.stringify(seen))
     check('reveal: nothing is written before the person says so', (await board()).length === 0)
@@ -7254,7 +7508,7 @@ try {
     const finished = await until(r1, () => !!document.querySelector('[data-reveal-finish]') && document.querySelector('main h1')?.textContent === 'Home', null, 15000)
     const home = (await board()).find((s) => s.title === '🏠 Home')
     const marks = await control.evaluate(async () => Object.keys(await chrome.storage.local.get(['stackboardReveal', 'stackboardFresh'])))
-    check('reveal: Use this board writes Home with the icons, and the sheet rises over the board', finished && JSON.stringify(home?.stacks.map((s) => `${s.title}:${s.urls.length}`)) === JSON.stringify(['⭐ On the bar:1', '📚 Reading:2']), JSON.stringify(home))
+    check('reveal: Use this board writes Home with the icons, and the sheet rises over the board', finished && JSON.stringify(home?.stacks.map((s) => `${s.title}:${s.urls.length}`)) === JSON.stringify(['⭐ On the bar:1', '📚 Reading:4']), JSON.stringify(home))
     check('reveal: keeping the board retires the reveal and the Keep it pill', marks.length === 0 && !(await r1.evaluate(() => !!document.querySelector('[data-keep-hint]'))), JSON.stringify(marks))
 
     await r1.evaluate(() => document.querySelector('[data-reveal-look="nord-dark"]')?.click())
@@ -7262,6 +7516,8 @@ try {
 
     const row = await r1.evaluate(() => document.querySelector('[data-reveal-tabs]')?.innerText.replace(/\s+/g, ' ') ?? '')
     check('reveal: with tabs open it offers to stack them', /You have \d+ tabs open/.test(row), row)
+    const sheet = await r1.evaluate(() => ({ buttons: [...document.querySelectorAll('[data-reveal-finish] button')].map((b) => b.textContent.trim()), text: document.querySelector('[data-reveal-finish]')?.innerText ?? '' }))
+    check('reveal: the sheet has Stack them and no Save and close all', sheet.buttons.includes('Stack them') && !sheet.buttons.some((t) => /close/i.test(t)) && !/close/i.test(sheet.text), JSON.stringify(sheet))
     await press(r1, '[data-reveal-tabs]', 'Stack them')
     await until(r1, () => /Saved \d+ links? in your Stash space/.test(document.querySelector('[data-reveal-tabs]')?.textContent ?? ''), null, 10000)
     const stash = (await board()).find((s) => s.title === '📥 Stash')
@@ -7282,12 +7538,47 @@ try {
     const back = await until(r2, () => !!document.querySelector('[data-reveal-stack]') && !document.querySelector('[data-reveal-finish]'), null, 10000)
     check('reveal: Undo deletes the new board and opens the reveal again', back && !(await board()).some((s) => s.title === '🏠 Home'), JSON.stringify(await board()))
 
+    // Start fresh: the welcome screen with packs and a blank space, no import list, nothing written, the reveal over.
+    await press(r2, '[data-reveal-actions]', 'Start fresh')
+    const fresh = await until(r2, () => !!document.querySelector('[data-welcome="packs"]') && !document.querySelector('[data-reveal]'))
+    const freshSeen = await r2.evaluate(() => ({
+      packs: document.querySelectorAll('[data-welcome="packs"] button').length,
+      importList: !!document.querySelector('[data-welcome="import"]') || !!document.querySelector('[data-welcome="arc"]'),
+      blank: /blank space/.test(document.querySelector('[data-welcome="packs"]')?.parentElement?.innerText ?? ''),
+    }))
+    const freshMark = await control.evaluate(async () => (await chrome.storage.local.get('stackboardReveal')).stackboardReveal ?? null)
+    await sleep(400)
+    check('reveal: Start fresh lands on the welcome with the starter packs and a blank space', fresh && freshSeen.packs > 0 && !freshSeen.importList && freshSeen.blank, JSON.stringify(freshSeen))
+    check('reveal: Start fresh ends the reveal and writes nothing', freshMark === null && (await board()).length === 0, JSON.stringify({ freshMark, board: await board() }))
+    await r2.close()
+
     // The full list: the welcome screen, and the reveal is over on this computer.
-    await press(r2, '[data-reveal-actions]', 'Choose what to bring in')
-    const full = await until(r2, () => !!document.querySelector('[data-welcome="import"] label'))
+    await control.evaluate(() => chrome.storage.local.set({ stackboardReveal: Date.now() }))
+    const r2b = await openNtp(() => !!document.querySelector('[data-reveal-stack]'))
+    await press(r2b, '[data-reveal-actions]', 'Choose what to bring in')
+    const full = await until(r2b, () => !!document.querySelector('[data-welcome="import"] label'))
     const left = await control.evaluate(async () => (await chrome.storage.local.get('stackboardReveal')).stackboardReveal ?? null)
     check('reveal: Choose what to bring in opens the full list and ends the reveal', full && left === null, String(left))
-    await r2.close()
+    await r2b.close()
+
+    // A bar with under 5 links makes a thin board: the welcome screen, starter packs first, and the reveal is over.
+    await control.evaluate(async () => {
+      for (const k of await chrome.bookmarks.getChildren('1')) await chrome.bookmarks.removeTree(k.id)
+      await chrome.bookmarks.create({ parentId: '1', title: 'Example Domain', url: 'https://example.com/' })
+      await chrome.bookmarks.create({ parentId: '1', title: 'Wikipedia', url: 'https://en.wikipedia.org/' })
+      await chrome.bookmarks.create({ parentId: '1', title: 'MDN', url: 'https://developer.mozilla.org/' })
+      await chrome.bookmarks.create({ parentId: '1', title: 'W3C', url: 'https://www.w3.org/' })
+      await chrome.storage.local.set({ stackboardReveal: Date.now() })
+    })
+    const rt = await openNtp(() => !!document.querySelector('[data-welcome="packs"]') || !!document.querySelector('[data-reveal-stack]'))
+    await sleep(600)
+    const thin = await rt.evaluate(() => {
+      const top = (sel) => document.querySelector(sel)?.getBoundingClientRect().top ?? null
+      return { reveal: !!document.querySelector('[data-reveal]'), packs: top('[data-welcome="packs"]'), imp: top('[data-welcome="import"]') }
+    })
+    const thinMark = await control.evaluate(async () => (await chrome.storage.local.get('stackboardReveal')).stackboardReveal ?? null)
+    check('reveal: a bar with 4 links skips the reveal for the welcome, starter packs above the import', !thin.reveal && thin.packs !== null && thin.imp !== null && thin.packs < thin.imp && thinMark === null && (await board()).length === 0, JSON.stringify({ thin, thinMark }))
+    await rt.close()
 
     // 0.9.9: without a reveal the Keep it pill sits in the flow, above the search bar and clear of it.
     await control.evaluate(() => {

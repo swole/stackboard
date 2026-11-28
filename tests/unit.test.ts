@@ -178,7 +178,7 @@ import {
 } from '../src/lib/managedPlan'
 import { escapeXml, goDescription, goEntries, goSuggestions, looksLikeUrl, rankGo, readSearchHash, searchDisposition, searchHash } from '../src/lib/goLinks'
 import { policyAccentFromMirror } from '../src/lib/appearance'
-import { REVEAL_COPY, REVEAL_LOOKS, REVEAL_SPACE, decorateForReveal, pickRevealSource, previewOf, revealDue, stackEmoji, tabsLine } from '../src/lib/revealPlan'
+import { REVEAL_COPY, REVEAL_LOOKS, REVEAL_MIN_LINKS, REVEAL_SPACE, decorateForReveal, pickRevealSource, previewOf, revealDue, revealWorthIt, stackEmoji, tabsLine } from '../src/lib/revealPlan'
 import {
   MAX_LINKS as SHARE_MAX_LINKS,
   MAX_SHARE_URL,
@@ -683,7 +683,7 @@ eq('uninstall: odd versions stay encoded and short', [uninstallUrl('1.2.3 beta&x
   )
   eq('pro: an early user who kept to-do lists makes them without Pro', canMakeTodo({ kind: 'free', trialUsed: true }, true), true)
   eq('pro: new users need Pro or a trial for a to-do list', [canMakeTodo({ kind: 'free', trialUsed: false }, false), canMakeTodo({ kind: 'trial', daysLeft: 2 }, false)], [false, true])
-  // 0.8.0: to-do lists join Pro for early users too, unless they already had a list.
+  // 0.8.0 (3 Nov): to-do lists join Pro for early users too, unless they already had a list.
   eq('pro: the early to-do decision reads { keep }', [readEarlyTodo({ keep: true, at: 1 }), readEarlyTodo({ keep: false }), readEarlyTodo(undefined), readEarlyTodo({ keep: 'yes' }), readEarlyTodo(null)], [true, false, null, null, null])
   eq('pro: an early user with a list on the board keeps to-do lists free', decideEarlyTodo({ stored: undefined, hasLists: true, syncKeys: [] }), { keep: true, write: true })
   eq('pro: items in sync count as a list (the marker may not have synced yet)', decideEarlyTodo({ stored: undefined, hasLists: false, syncKeys: ['proEarly', 'todo:abcdefghijklmnop'] }), { keep: true, write: true })
@@ -2321,7 +2321,7 @@ import { PACKED_VERSION, parseSavedAppearance, rowsForOldBoard } from '../src/li
   eq('whats new: the full 0.8.0 lead', open.lead, 'New in Stackboard 0.8.0: folders inside stacks, a Packed layout that closes the gaps under short stacks (Settings > Appearance > Layout), and share a stack as a link.')
   eq('whats new: the Pro line and the Packed offer', [open.pro, open.tryPacked], ['Pro adds due dates and a Today list, clean-up and AI tidy.', true])
   eq('whats new: no Pro line without Pro, the trial or an early board', whatsNew080({ lockAppearance: false, lockImportExport: false, layout: 'rows', proLine: false }).pro, null)
-  // 0.8.0: the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
+  // 0.8.0 (3 Nov): the notes name the 14-day trial; early users without a list hear to-do lists moved into Pro.
   eq('whats new: the Pro note names the trial and counts to-do lists in Pro', proNoteText({ keepsTodo: false, trialOpen: true }), 'An optional upgrade with to-do lists, idle tabs that archive themselves, a daily snapshot of your board, and more looks. Try it free for 14 days, no card needed.')
   eq('whats new: an early user who had a list hears their lists stay free', proNoteText({ keepsTodo: true, trialOpen: true }), 'An optional upgrade: idle tabs archive themselves, your board gets a daily snapshot, to-do lists get due dates, and there are more looks. Try it free for 14 days, no card needed. Your to-do lists stay free either way.')
   eq('whats new: no trial line once the trial is used or running', [proNoteText({ keepsTodo: false, trialOpen: false }).includes('14 days'), proNoteText({ keepsTodo: true, trialOpen: false }).endsWith('Your to-do lists stay free either way.')], [false, true])
@@ -3449,7 +3449,7 @@ import { WHATS_NEW_097, whatsNew097 } from '../src/lib/whatsNewPlan'
   const src = (id: string, kind: 'bar' | 'other' | 'mobile' | 'folder' | 'arc', links: number) =>
     ({ id, kind, label: id, plan: { links, space: { name: id, emoji: '', stacks: [] } } })
   eq('reveal: the bookmarks bar when it has links, else the folder with the most; Arc files never', [
-    pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 3)])?.id,
+    pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 5)])?.id,
     pickRevealSource([src('other', 'other', 40), src('mobile', 'mobile', 90)])?.id,
     pickRevealSource([src('arc', 'arc', 500), src('other', 'other', 2)])?.id,
     pickRevealSource([src('bar', 'bar', 0)]),
@@ -3512,9 +3512,283 @@ import { WHATS_NEW_097, whatsNew097 } from '../src/lib/whatsNewPlan'
     'Made from your bookmarks bar: 41 links in 6 stacks. Your originals stay where they are.',
     'Made from your “Other bookmarks” folder: 1 link in 1 stack. Your originals stay where they are.',
   ])
+  eq('reveal (0.9.11): a source under 5 links is too thin for a reveal; 5 is enough; nothing is not', [
+    REVEAL_MIN_LINKS,
+    revealWorthIt(src('bar', 'bar', 4)),
+    revealWorthIt(src('bar', 'bar', 5)),
+    revealWorthIt(src('other', 'other', 400)),
+    revealWorthIt(null),
+  ], [5, false, true, true, false])
+  eq('reveal (0.9.11): bar ok keeps the bar; a thin bar gives way to a big folder; both thin means no reveal', [
+    pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 6)])?.id,
+    revealWorthIt(pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 6)])),
+    pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 3)])?.id,
+    revealWorthIt(pickRevealSource([src('other', 'other', 40), src('bar', 'bar', 3)])),
+    pickRevealSource([src('other', 'other', 5), src('bar', 'bar', 4)])?.id,
+    pickRevealSource([src('other', 'other', 4), src('bar', 'bar', 3)])?.id,
+    revealWorthIt(pickRevealSource([src('other', 'other', 4), src('bar', 'bar', 3)])),
+    revealWorthIt(pickRevealSource([src('bar', 'bar', 3)])),
+    revealWorthIt(pickRevealSource([src('arc', 'arc', 500), src('bar', 'bar', 3)])),
+  ], ['bar', true, 'other', true, 'other', 'other', false, false, false])
+  eq('reveal (0.9.11): the sheet offers Stack them and no longer a close-everything button', [
+    'stackClose' in REVEAL_COPY,
+    REVEAL_COPY.stack,
+    REVEAL_COPY.fresh,
+    /close/i.test(REVEAL_COPY.tabsHint),
+  ], [false, 'Stack them', 'Start fresh', false])
   const words = Object.values(REVEAL_COPY).map((w) => (typeof w === 'function' ? (w as (...a: unknown[]) => string)('Bookmarks bar', 3, 2) : w))
   eq('reveal copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
   eq('reveal copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
+}
+
+// ---------- 0.9.10: Your 2026 in Stackboard (wrappedPlan.ts) ----------
+import {
+  NO_MARKER,
+  WRAPPED_CARD_SHOWS,
+  WRAPPED_COPY,
+  WRAPPED_MIN_SAVED,
+  boardLine,
+  cardFinished,
+  count as wrappedCount,
+  fullDay,
+  heroWords,
+  hostOf,
+  localDay,
+  markRetired,
+  markSaved,
+  markShown,
+  noteFoundingDay,
+  parseWrappedMarker,
+  wrappedCardDue,
+  wrappedCardLine,
+  wrappedCardSeason,
+  wrappedFacts,
+  wrappedOffered,
+  wrappedSeason,
+  wrappedShareText,
+  wrappedStats,
+  wrappedTiles,
+} from '../src/lib/wrappedPlan'
+import type { Bookmark as WLink, Space as WSpace, Stack as WStack } from '../src/lib/types'
+{
+  // Local-clock times, as the board's dateAdded values read on this computer.
+  const at = (y: number, m: number, d: number, h = 12, min = 0, s = 0, ms = 0) => new Date(y, m - 1, d, h, min, s, ms).getTime()
+  let n = 0
+  const link = (url: string, dateAdded?: number): WLink => ({ id: `w${++n}`, title: `Title ${n}`, url, parentStackId: 'x', ...(dateAdded === undefined ? {} : { dateAdded }) })
+  const stack = (title: string, bookmarks: WLink[], extra: Partial<WStack> = {}): WStack => ({ id: `st${++n}`, title, parentSpaceId: 'sp', bookmarks, ...extra })
+  const space = (name: string, stacks: WStack[], extra: Partial<WSpace> = {}): WSpace => ({ id: `sp${++n}`, rawTitle: name, name, emoji: '', stacks, ...extra })
+
+  const empty = wrappedStats({ spaces: [], year: 2026 })
+  eq('wrapped: an empty board has nothing to show and is not offered', [
+    empty.saved, empty.links, empty.spaces, empty.stacks, empty.busiestStack, empty.topSite, empty.oldest, empty.busiestMonth, empty.stashes, empty.todosDone, wrappedOffered(empty),
+  ], [0, 0, 0, 0, null, null, null, null, null, null, false])
+  const bare = wrappedStats({ spaces: [space('Empty', [stack('Nothing yet', [])])], year: 2026 })
+  eq('wrapped: a space with an empty stack has no busiest stack', [bare.spaces, bare.stacks, bare.links, bare.busiestStack], [1, 1, 0, null])
+
+  // A board with a bit of everything: www and bare hosts, a page with no site, a folder inside a
+  // stack, a to-do stack, the last moment of 2025 and the first of 2027, and a company space.
+  const board: WSpace[] = [
+    space('Work', [
+      stack('Dev', [
+        link('https://github.com/a', at(2026, 3, 2)),
+        link('https://stackoverflow.com/q/1', at(2026, 3, 3)),
+        link('https://stackoverflow.com/q/2', at(2026, 3, 4)),
+        link('https://github.com/b', at(2026, 3, 5)),
+        link('https://www.github.com/c', at(2026, 4, 1)),
+        link('file:///C:/notes.txt', at(2026, 4, 2)),
+      ]),
+      stack('Reading', [link('https://www.nytimes.com/x', at(2026, 6, 3)), link('https://nytimes.com/y', at(2026, 6, 4))], {
+        folders: [{ id: 'f1', title: 'Long reads', parentId: 'x', bookmarks: [link('https://en.wikipedia.org/wiki/X', at(2019, 5, 1)), link('https://example.com/')], folders: [] }],
+      }),
+      stack('Groceries', [], { todo: { id: 'abcdefgh12345678', anchorId: 'm1' } }),
+    ]),
+    space('Home', [
+      stack('Recipes', [
+        link('https://www.seriouseats.com/a', at(2025, 12, 31, 23, 59, 59, 999)),
+        link('https://seriouseats.com/b', at(2026, 1, 1, 0, 0, 0, 0)),
+        link('https://seriouseats.com/c', at(2026, 12, 31, 23, 59, 59, 999)),
+        link('https://seriouseats.com/d', at(2027, 1, 1, 0, 0, 0, 0)),
+      ]),
+    ]),
+    space('Acme', [stack('Company links', Array.from({ length: 10 }, (_, i) => link(`https://intranet.example/${i}`, at(2026, 2, 1))))], { company: true }),
+  ]
+  const todos = [
+    { id: 't1', text: 'a', done: true, at: at(2026, 5, 1) },
+    { id: 't2', text: 'b', done: true, at: at(2026, 12, 31, 23, 0) },
+    { id: 't3', text: 'c', done: true, at: at(2025, 12, 31, 23, 0) },
+    { id: 't4', text: 'd', done: false, at: at(2026, 7, 1) },
+  ]
+  const s = wrappedStats({ spaces: board, year: 2026, stashes: 12, todos })
+  eq('wrapped: links on the board count folders inside stacks and leave the company space out', [s.links, s.spaces, s.stacks], [14, 2, 4])
+  eq('wrapped: links saved in the year, from its first moment to its last, a page with no site included', s.saved, 10)
+  eq('wrapped: the busiest stack is the one with the most links', s.busiestStack, { name: 'Dev', links: 6 })
+  eq('wrapped: the most-saved site joins www and bare hosts, and only counts the year', s.topSite, { host: 'github.com', links: 3 })
+  eq('wrapped: the busiest month', s.busiestMonth, { month: 2, links: 4 })
+  eq('wrapped: the oldest link on the board is its site and day, from any year', s.oldest, { host: 'en.wikipedia.org', at: at(2019, 5, 1) })
+  eq('wrapped: stashes from the counter, to-dos done that were added in the year', [s.stashes, s.todosDone], [12, 2])
+  eq('wrapped: no stash counter and unread lists give no numbers', [wrappedStats({ spaces: board, year: 2026 }).stashes, wrappedStats({ spaces: board, year: 2026, stashes: null, todos: null }).todosDone], [null, null])
+  const y2025 = wrappedStats({ spaces: board, year: 2025 })
+  eq('wrapped: another year counts only its own links', [y2025.saved, y2025.topSite, y2025.busiestMonth], [1, { host: 'seriouseats.com', links: 1 }, { month: 11, links: 1 }])
+
+  // Ties.
+  const tieStacks = wrappedStats({
+    spaces: [
+      space('A', [stack('Alpha', [link('https://a.com/1', at(2026, 2, 1)), link('https://a.com/2', at(2026, 2, 2))])]),
+      space('B', [stack('Beta', [link('https://b.com/1', at(2026, 5, 1)), link('https://b.com/2', at(2026, 5, 2))])]),
+    ],
+    year: 2026,
+  })
+  eq('wrapped ties: the first busiest stack on the board, and the earlier busiest month', [tieStacks.busiestStack?.name, tieStacks.busiestMonth?.month], ['Alpha', 1])
+  // b.com sits first on the board, but a.com reaches three links first (5 Mar against 6 Mar).
+  const tieSites = wrappedStats({
+    spaces: [space('S', [
+      stack('B first', [link('https://b.com/1', at(2026, 3, 3)), link('https://b.com/2', at(2026, 3, 4)), link('https://b.com/3', at(2026, 3, 6))]),
+      stack('A second', [link('https://a.com/1', at(2026, 3, 1)), link('https://a.com/2', at(2026, 3, 2)), link('https://a.com/3', at(2026, 3, 5))]),
+    ])],
+    year: 2026,
+  })
+  eq('wrapped ties: of two sites with as many links, the one that got there first', tieSites.topSite, { host: 'a.com', links: 3 })
+  const same = at(2026, 8, 8)
+  const tieOld = wrappedStats({ spaces: [space('S', [stack('One', [link('https://first.com/', same)]), stack('Two', [link('https://second.com/', same)])])], year: 2026 })
+  eq('wrapped ties: of two links saved at the same moment, the oldest is the first on the board', tieOld.oldest?.host, 'first.com')
+
+  // Under five links in the year, nothing is offered; links from other years don't count.
+  const few = (k: number) => wrappedStats({
+    spaces: [space('S', [stack('T', [
+      ...Array.from({ length: k }, (_, i) => link(`https://x.com/${i}`, at(2026, 9, 1 + i))),
+      ...Array.from({ length: 10 }, (_, i) => link(`https://old.com/${i}`, at(2025, 9, 1 + i))),
+    ])])],
+    year: 2026,
+  })
+  eq('wrapped: offered from five links saved in the year', [wrappedOffered(few(4)), wrappedOffered(few(WRAPPED_MIN_SAVED)), few(4).links], [false, true, 14])
+
+  eq('wrapped: sites as people say them, web links only', [
+    hostOf('https://www.GitHub.com/x'), hostOf('http://localhost:3000/'), hostOf('https://192.168.1.1/'), hostOf('chrome://settings'), hostOf('file:///C:/a.txt'), hostOf('not a url'),
+  ], ['github.com', 'localhost', '192.168.1.1', null, null, null])
+  eq('wrapped: numbers and days in English', [wrappedCount(1248), wrappedCount(5), fullDay(at(2026, 6, 3)), localDay(at(2026, 12, 4, 0, 0)), localDay(at(2026, 12, 3, 23, 59, 59, 999))], ['1,248', '5', '3 Jun 2026', '2026-12-04', '2026-12-03'])
+
+  // The words: counts and site names only, the stack's name only when asked for.
+  eq('wrapped tiles: counts and site names, in order', wrappedTiles(s, false), [
+    { key: 'site', label: 'Most saved site', value: 'github.com', sub: '3 links' },
+    { key: 'month', label: 'Busiest month', value: 'March', sub: '4 links saved' },
+    { key: 'stack', label: 'Busiest stack', value: '6 links', sub: '' },
+    { key: 'oldest', label: 'Oldest link', value: 'en.wikipedia.org', sub: 'saved 1 May 2019' },
+  ])
+  eq('wrapped tiles: Show stack names puts the busiest stack on the picture', wrappedTiles(s, true)[2], { key: 'stack', label: 'Busiest stack', value: 'Dev', sub: '6 links' })
+  eq('wrapped facts: the board now, then to-dos done and stashes', wrappedFacts(s), [
+    { key: 'links', label: 'Links on the board', value: '14' },
+    { key: 'spaces', label: 'Spaces', value: '2' },
+    { key: 'stacks', label: 'Stacks', value: '4' },
+    { key: 'todos', label: 'To-dos done', value: '2' },
+    { key: 'stashes', label: 'Stashes', value: '12' },
+  ])
+  eq('wrapped facts: one of each reads in the singular', wrappedFacts({ ...s, links: 1, spaces: 1, stacks: 1, todosDone: 1, stashes: 1 }).map((f) => f.label), ['Link on the board', 'Space', 'Stack', 'To-do done', 'Stash'])
+  eq('wrapped facts: no to-dos done and no stash counter leave their rows out',wrappedFacts(wrappedStats({ spaces: board, year: 2026, todos: [] })).map((f) => f.key), ['links', 'spaces', 'stacks'])
+  const files = wrappedStats({ spaces: [space('S', [stack('Files', Array.from({ length: 6 }, (_, i) => link(`file:///C:/f${i}.txt`, at(2026, 2, 1 + i))))])], year: 2026 })
+  eq('wrapped tiles: a board of pages with no site has no site tiles', [wrappedOffered(files), wrappedTiles(files, false).map((t) => t.key)], [true, ['month', 'stack']])
+  eq('wrapped: the share text', wrappedShareText(s, false), [
+    'My 2026 in Stackboard',
+    '10 links saved, most often from github.com',
+    'Busiest month: March (4 links saved)',
+    'Busiest stack: 6 links',
+    'Oldest link: en.wikipedia.org (saved 1 May 2019)',
+    'To-dos done: 2',
+    'Stashes: 12',
+    '14 links on the board, in 2 spaces and 4 stacks',
+    'getstackboard.com/wrapped',
+  ].join('\n'))
+  const titles = board.flatMap((sp) => sp.stacks.flatMap((st) => [...st.bookmarks, ...(st.folders ?? []).flatMap((f) => f.bookmarks)].map((b) => b.title)))
+  const plain = wrappedShareText(s, false)
+  const named = wrappedShareText(s, true)
+  eq('wrapped privacy: no stack or space names and no link titles unless asked; the asked-for name only', [
+    ['Dev', 'Reading', 'Recipes', 'Work', 'Home', 'Acme'].filter((w) => plain.includes(w)),
+    titles.filter((t) => plain.includes(t) || named.includes(t)),
+    named.includes('Busiest stack: Dev (6 links)'),
+    ['Reading', 'Recipes', 'Work', 'Home'].filter((w) => named.includes(w)),
+  ], [[], [], true, []])
+  eq('wrapped: the big number, the board line and the card line', [
+    heroWords(s), heroWords({ ...s, saved: 1 }), boardLine(s), boardLine({ ...s, links: 1, spaces: 1, stacks: 1 }), wrappedCardLine(s), wrappedCardLine({ ...s, topSite: null }),
+  ], [
+    'links saved',
+    'link saved',
+    '14 links on the board, in 2 spaces and 4 stacks',
+    '1 link on the board, in 1 space and 1 stack',
+    '10 links saved this year, most often from github.com. Here it is in one picture you can share.',
+    '10 links saved this year. Here it is in one picture you can share.',
+  ])
+
+  // When: Settings from 1 Dec, the corner card from 4 Dec, both to the end of 15 Jan, local time.
+  eq('wrapped: the Settings row from 1 Dec to 15 Jan', [
+    wrappedSeason(at(2026, 11, 30, 23, 59, 59, 999)), wrappedSeason(at(2026, 12, 1, 0, 0)), wrappedSeason(at(2027, 1, 15, 23, 59, 59, 999)), wrappedSeason(at(2027, 1, 16, 0, 0)),
+  ], [false, true, true, false])
+  eq('wrapped: the corner card from 4 Dec to 15 Jan', [
+    wrappedCardSeason(at(2026, 12, 3, 23, 59, 59, 999)), wrappedCardSeason(at(2026, 12, 4, 0, 0)), wrappedCardSeason(at(2027, 1, 15, 23, 59)), wrappedCardSeason(at(2027, 1, 16, 0, 0)),
+  ], [false, true, true, false])
+
+  const base = {
+    now: at(2026, 12, 10),
+    offered: true,
+    marker: NO_MARKER,
+    opens: 10,
+    firstSeen: at(2026, 11, 1),
+    locked: false,
+    noteApplies: false,
+    noteShown: null,
+    welcoming: false,
+  } as Parameters<typeof wrappedCardDue>[0]
+  const due = (o: Partial<typeof base>) => wrappedCardDue({ ...base, ...o })
+  eq('wrapped card: due on a settled board in the season', due({}), true)
+  eq('wrapped card: never when not offered, under a company lock or on the welcome screen', [due({ offered: false }), due({ locked: true }), due({ welcoming: true })], [false, false, false])
+  eq('wrapped card: from 4 Dec to 15 Jan', [due({ now: at(2026, 12, 3, 23, 0) }), due({ now: at(2026, 12, 4, 0, 0) }), due({ now: at(2027, 1, 15, 22, 0) }), due({ now: at(2027, 1, 16, 9, 0) })], [false, true, true, false])
+  eq('wrapped card: on two new tabs at most, never twice in a day, never after Not now', [
+    due({ marker: { ...NO_MARKER, retired: true } }),
+    due({ marker: { ...NO_MARKER, shown: WRAPPED_CARD_SHOWS, day: '2026-12-05' } }),
+    due({ marker: { ...NO_MARKER, shown: 1, day: '2026-12-10' } }),
+    due({ marker: { ...NO_MARKER, shown: 1, day: '2026-12-09' } }),
+  ], [false, false, false, true])
+  eq('wrapped card: waits for a new install to settle in', [due({ opens: 2 }), due({ firstSeen: base.now - 19 * 3600000 }), due({ firstSeen: base.now - 21 * 3600000 })], [false, false, true])
+  eq('wrapped card: never on a day the December note shows, and waits while it is still to come', [
+    due({ noteApplies: true, noteShown: null }),
+    due({ noteApplies: true, noteShown: 'december', marker: { ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-10' } }),
+    due({ noteApplies: true, noteShown: 'december', marker: { ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-09' } }),
+    due({ now: at(2026, 12, 29), noteApplies: true, noteShown: 'december', marker: { ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-01' } }),
+    due({ now: at(2026, 12, 29), noteApplies: true, noteShown: 'last-days', marker: { ...NO_MARKER, noteSeen: 'last-days', noteDay: '2026-12-28' } }),
+    due({ noteApplies: false, noteShown: null }),
+    due({ now: at(2027, 1, 2), noteApplies: true, noteShown: null }),
+  ], [false, false, true, false, true, true, true])
+
+  eq('wrapped marker: the December note seen in a new window marks today, the same window changes nothing', [
+    noteFoundingDay(NO_MARKER, null, '2026-12-01') === NO_MARKER,
+    noteFoundingDay(NO_MARKER, 'december', '2026-12-01'),
+    noteFoundingDay({ ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-01' }, 'last-days', '2026-12-28'),
+    noteFoundingDay({ ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-01' }, null, '2026-12-03'),
+  ], [
+    true,
+    { ...NO_MARKER, noteSeen: 'december', noteDay: '2026-12-01' },
+    { ...NO_MARKER, noteSeen: 'last-days', noteDay: '2026-12-28' },
+    { ...NO_MARKER, noteSeen: null, noteDay: '2026-12-01' },
+  ])
+  const once = markShown(NO_MARKER, '2026-12-05')
+  eq('wrapped marker: shown, retired and saved', [
+    once, cardFinished(once), cardFinished(markShown(once, '2026-12-06')), markRetired(once).retired, cardFinished(markRetired(once)), markSaved(NO_MARKER),
+  ], [
+    { ...NO_MARKER, shown: 1, day: '2026-12-05' }, false, true, true, true, { ...NO_MARKER, retired: true, saved: true },
+  ])
+  eq('wrapped marker: parsing keeps what it knows and drops junk', [
+    parseWrappedMarker(null),
+    parseWrappedMarker('junk'),
+    parseWrappedMarker('[1]'),
+    parseWrappedMarker('{"shown":"2","day":"5 Dec","retired":1,"noteSeen":"later","noteDay":7}'),
+    parseWrappedMarker('{"shown":-3}').shown,
+    parseWrappedMarker(JSON.stringify({ shown: 1, day: '2026-12-05', retired: true, saved: true, noteSeen: 'december', noteDay: '2026-12-01' })),
+  ], [
+    NO_MARKER, NO_MARKER, NO_MARKER, NO_MARKER, 0,
+    { shown: 1, day: '2026-12-05', retired: true, saved: true, noteSeen: 'december', noteDay: '2026-12-01' },
+  ])
+
+  const words = [...Object.values(WRAPPED_COPY), plain, named, wrappedCardLine(s), ...wrappedTiles(s, true).flatMap((t) => [t.label, t.value, t.sub]), ...wrappedFacts(s).flatMap((f) => [f.label, f.value])]
+  eq('wrapped copy: no em dashes or middle dots', words.filter((w) => [0x2014, 0x2013, 0xb7].some((c) => w.includes(String.fromCharCode(c)))), [])
+  eq('wrapped copy: no "X, not Y" contrasts', words.filter((w) => /, not |\bnot just\b|\bnot only\b|\brather than\b/i.test(w)), [])
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS')

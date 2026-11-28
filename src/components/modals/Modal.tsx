@@ -6,7 +6,8 @@ interface Props {
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
-  width?: 'sm' | 'md' | 'lg'
+  /** 'xl' (0.9.10): the year's picture beside its controls. */
+  width?: 'sm' | 'md' | 'lg' | 'xl'
   /** 'light' keeps the board visible behind the dialog (Settings, where changes preview live). */
   scrim?: 'normal' | 'light'
 }
@@ -21,7 +22,7 @@ export function Modal({ title, onClose, children, footer, width = 'sm', scrim = 
   }, [onClose])
 
   const widthClass =
-    width === 'lg' ? 'max-w-xl' : width === 'md' ? 'max-w-md' : 'max-w-sm'
+    width === 'xl' ? 'max-w-2xl' : width === 'lg' ? 'max-w-xl' : width === 'md' ? 'max-w-md' : 'max-w-sm'
 
   return (
     <div

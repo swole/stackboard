@@ -43,6 +43,7 @@ import { TrialEndCard } from './components/TrialEndCard'
 import { ReverseTrialCard } from './components/ReverseTrialCard'
 import { WhyNotCard } from './components/WhyNotCard'
 import { FoundingNote } from './components/FoundingNote'
+import { WrappedCard } from './components/WrappedCard'
 import { MomentLine } from './components/MomentLine'
 import { useCorner } from './lib/corner'
 import { CommandBar } from './components/CommandBar'
@@ -410,6 +411,7 @@ export default function App() {
         <ReverseTrialCard welcoming={welcoming} />
         <WhyNotCard welcoming={welcoming} />
         <FoundingNote welcoming={welcoming} />
+        <WrappedCard welcoming={welcoming} />
         <MomentLine />
         <CommandBar />
         <ShareAddCard />

@@ -5,8 +5,8 @@ import type { CompanyLocks } from './types'
 // The bottom-right corner of a new tab (0.9.0): the what's-new notes, the trial-end recap, the
 // reverse-trial card (0.9.2), "what stopped you?" (0.9.3), the December note (0.9.5) and the
 // moment-of-need line take turns, one card at a time, and all of them wait while the rating ask is
-// on screen. The tidy coach mark (0.9.6) takes its turn with them. The order is in nudgePlan.ts
-// (CornerCard). Per page; nothing is stored.
+// on screen. The tidy coach mark (0.9.6) and the card about the person's year (0.9.10) take their
+// turns with them. The order is in nudgePlan.ts (CornerCard). Per page; nothing is stored.
 //
 // 0.9.6: the company's locks for these nudges, and for the rating ask, come from the policy's real
 // answer (company.ts readLocksSettled, set here by the board's refresh), however long managed storage

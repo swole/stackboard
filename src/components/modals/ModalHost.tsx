@@ -14,6 +14,8 @@ import { PacksModal } from './PacksModal'
 const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })))
 // Clean-up (Pro, 0.7.1) loads only when someone opens it.
 const CleanupModal = lazy(() => import('./CleanupModal').then((m) => ({ default: m.CleanupModal })))
+// The year's picture (0.9.10) too: its drawing code stays out of a plain new tab.
+const Wrapped = lazy(() => import('../Wrapped').then((m) => ({ default: m.Wrapped })))
 
 export function ModalHost() {
   const modal = useStackableStore((s) => s.modal)
@@ -86,6 +88,12 @@ export function ModalHost() {
       return (
         <Suspense fallback={null}>
           <CleanupModal />
+        </Suspense>
+      )
+    case 'wrapped':
+      return (
+        <Suspense fallback={null}>
+          <Wrapped />
         </Suspense>
       )
   }

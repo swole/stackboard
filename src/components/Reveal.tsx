@@ -22,6 +22,7 @@ import {
   TAB_TRICK_MIN,
   decorateForReveal,
   pickRevealSource,
+  revealWorthIt,
   previewOf,
   tabsLine,
   type PreviewStack,
@@ -38,7 +39,8 @@ export function FirstRun() {
   const sources = useImportSources()
   const lockImport = useStackableStore((s) => !!s.tree?.company?.lock?.importExport)
   const [due, setDue] = useState<boolean | null>(null)
-  const [classic, setClassic] = useState(false)
+  // What the person picked on the reveal: the full import list, or a blank start.
+  const [choice, setChoice] = useState<'import' | 'fresh' | null>(null)
 
   useEffect(() => {
     let live = true
@@ -49,22 +51,25 @@ export function FirstRun() {
   }, [])
 
   const ready = sources !== null && due !== null
-  const pick = useMemo(
-    () => (ready && due && !classic && !lockImport ? pickRevealSource(sources) : null),
-    [ready, due, classic, lockImport, sources],
+  const best = useMemo(
+    () => (ready && due && !choice && !lockImport ? pickRevealSource(sources) : null),
+    [ready, due, choice, lockImport, sources],
   )
-  // Nothing to reveal here (no bookmarks, a company lock, or the person chose the full list): done for good.
+  // 0.9.11: a thin folder (under 5 links) makes a weak board, so the welcome screen takes it, packs first.
+  const thin = !!best && !revealWorthIt(best)
+  const pick = thin ? null : best
+  // Nothing to reveal here (no bookmarks, a thin folder, a company lock, or the person chose another way): done for good.
   useEffect(() => {
     if (ready && due && !pick) void endReveal()
   }, [ready, due, pick])
 
   // A blank canvas for the moment it takes to decide, so the welcome screen never flashes first.
   if (!ready) return <div className="h-full" aria-busy="true" />
-  if (!pick) return <Welcome sources={sources} />
-  return <Reveal source={pick} onChoose={() => setClassic(true)} />
+  if (!pick) return <Welcome sources={sources} lead={choice === 'fresh' ? 'fresh' : thin ? 'packs' : 'import'} />
+  return <Reveal source={pick} onChoose={setChoice} />
 }
 
-function Reveal({ source, onChoose }: { source: ImportSource; onChoose: () => void }) {
+function Reveal({ source, onChoose }: { source: ImportSource; onChoose: (choice: 'import' | 'fresh') => void }) {
   const refresh = useStackableStore((s) => s.refresh)
   const selectSpace = useStackableStore((s) => s.selectSpace)
   const flashItem = useStackableStore((s) => s.flashItem)
@@ -114,10 +119,11 @@ function Reveal({ source, onChoose }: { source: ImportSource; onChoose: () => vo
     }
   }
 
-  const choose = () => {
+  // Both ways out end the reveal for good. Nothing is written until the person picks something on the welcome screen.
+  const choose = (choice: 'import' | 'fresh') => {
     void endReveal()
     useReveal.getState().set({ phase: 'off' })
-    onChoose()
+    onChoose(choice)
   }
 
   return (
@@ -182,11 +188,19 @@ function Reveal({ source, onChoose }: { source: ImportSource; onChoose: () => vo
             {progress === null && <ArrowRight className="h-4 w-4" />}
           </button>
           <button
-            onClick={choose}
+            onClick={() => choose('import')}
             disabled={progress !== null}
             className="rounded-lg px-2 py-1.5 text-sm font-medium text-accent-text hover:bg-accent-soft disabled:opacity-40"
           >
             {REVEAL_COPY.choose}
+          </button>
+          <button
+            data-reveal-fresh
+            onClick={() => choose('fresh')}
+            disabled={progress !== null}
+            className="rounded-lg px-2 py-1.5 text-sm font-medium text-accent-text hover:bg-accent-soft disabled:opacity-40"
+          >
+            {REVEAL_COPY.fresh}
           </button>
           <span className="text-xs text-muted sm:ml-auto">{REVEAL_COPY.footer}</span>
           {error && <span className="w-full text-xs text-danger">Couldn’t set up the board: {error}</span>}
@@ -295,23 +309,6 @@ export function RevealFinish() {
     }
   }
 
-  const stackAndClose = async () => {
-    if (busy) return
-    setBusy(true)
-    try {
-      // The worker saves and closes every tab but this one, which then shows the certificate (App.tsx).
-      const r = (await chrome.runtime.sendMessage({ type: 'bankruptcy', keepTab: true })) as { error?: string } | null
-      if (r?.error) throw new Error(r.error)
-      useReveal.getState().set({ phase: 'off' })
-      await refresh()
-      window.dispatchEvent(new Event('stackboard:note'))
-    } catch (err) {
-      reportError('save and close your tabs', err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const showTabs = !!tabs && tabs.tabs >= TAB_TRICK_MIN
 
   return (
@@ -380,22 +377,13 @@ export function RevealFinish() {
               <p className="text-xs text-muted">{stacked === null ? REVEAL_COPY.tabsHint : REVEAL_COPY.stacked(stacked)}</p>
             </div>
             {stacked === null && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => void stackTabs()}
-                  disabled={busy}
-                  className="rounded-lg border border-line bg-card px-3 py-1.5 text-sm font-medium text-fg hover:bg-hover disabled:opacity-50"
-                >
-                  {REVEAL_COPY.stack}
-                </button>
-                <button
-                  onClick={() => void stackAndClose()}
-                  disabled={busy}
-                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-accent-text hover:bg-accent-soft disabled:opacity-50"
-                >
-                  {REVEAL_COPY.stackClose}
-                </button>
-              </div>
+              <button
+                onClick={() => void stackTabs()}
+                disabled={busy}
+                className="rounded-lg border border-line bg-card px-3 py-1.5 text-sm font-medium text-fg hover:bg-hover disabled:opacity-50"
+              >
+                {REVEAL_COPY.stack}
+              </button>
             )}
           </div>
         )}

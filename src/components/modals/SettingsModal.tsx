@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Modal, PrimaryButton, SecondaryButton } from './Modal'
-import { Check, Download, FileUp, FolderInput, LifeBuoy, Link2, Package, Star, Upload } from 'lucide-react'
+import { Check, Download, FileUp, FolderInput, Gift, LifeBuoy, Link2, Package, Star, Upload } from 'lucide-react'
 import { IS_EXTENSION, exportBackup, importBackup } from '../../lib/bookmarks'
 import { downloadJson, openInNewTab, pickJsonFile } from '../../lib/tabs'
 import { REVIEWS_URL, SHARE_URL, helpUrl } from '../../lib/onboarding'
@@ -8,6 +8,7 @@ import { prefs } from '../../lib/prefs'
 import { usePro } from '../../lib/pro'
 import { useCorner } from '../../lib/corner'
 import { hasPro } from '../../lib/proPlan'
+import { WRAPPED_COPY, WRAPPED_YEAR, wrappedOffered, wrappedSeason, wrappedStats } from '../../lib/wrappedPlan'
 import type { BookmarkBackup } from '../../lib/types'
 import { useStackableStore } from '../../store/useStackableStore'
 import { AppearanceSettings, LayoutSetting } from '../AppearanceSettings'
@@ -28,6 +29,12 @@ export function SettingsModal() {
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  // 0.9.10: "Your 2026 in Stackboard", 1 Dec to 15 Jan, for a board with a year to show (wrappedPlan.ts).
+  const tree = useStackableStore((s) => s.tree)
+  const wrappedOn = useMemo(
+    () => !!tree && wrappedSeason(Date.now()) && wrappedOffered(wrappedStats({ spaces: tree.spaces, year: WRAPPED_YEAR })),
+    [tree],
+  )
 
   const copyLink = async () => {
     try {
@@ -170,6 +177,19 @@ export function SettingsModal() {
         )}
 
         <KeysSection />
+
+        {wrappedOn && (
+          <section data-wrapped-setting>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{WRAPPED_COPY.title}</h3>
+            <p className="mb-2 text-xs text-muted">{WRAPPED_COPY.settingsLine}</p>
+            <SecondaryButton onClick={() => openModal({ kind: 'wrapped' })} data-wrapped-open>
+              <span className="inline-flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5" />
+                {WRAPPED_COPY.open}
+              </span>
+            </SecondaryButton>
+          </section>
+        )}
 
         <section>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">

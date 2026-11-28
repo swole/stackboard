@@ -1,4 +1,4 @@
-// The first-run reveal (0.9.9, backlog K4: make the first minute feel like opening a new
+// The first-run reveal (0.9.9, backlog K4; 22 Nov: make the first minute feel like opening a new
 // phone). A fresh install with bookmarks to bring opens on a preview of the board those bookmarks make,
 // already laid out, and one button keeps it. Pure: no DOM, no chrome.*, so tests/unit.test.ts covers it.
 
@@ -26,12 +26,24 @@ export interface RevealSource {
   plan: { space: PlannedSpace; links: number }
 }
 
-/** The bookmarks bar when it holds links (it's what people use), else the folder with the most links. */
+/**
+ * The bookmarks bar when it holds enough links for a board (it's what people use). A thinner bar
+ * gives way to the folder with the most links (0.9.11). With neither big enough, the biggest one is
+ * returned and revealWorthIt() says no.
+ */
 export function pickRevealSource<T extends RevealSource>(sources: readonly T[]): T | null {
   const live = sources.filter((s) => s.kind !== 'arc' && s.plan.links > 0)
   const bar = live.find((s) => s.kind === 'bar')
-  if (bar) return bar
+  if (bar && bar.plan.links >= REVEAL_MIN_LINKS) return bar
   return live.reduce<T | null>((best, s) => (!best || s.plan.links > best.plan.links ? s : best), null)
+}
+
+/** A source with fewer links than this makes a thin board: the person gets the welcome screen, packs first (0.9.11). */
+export const REVEAL_MIN_LINKS = 5
+
+/** Whether the picked source holds enough links to be worth a reveal. */
+export function revealWorthIt(source: Pick<RevealSource, 'plan'> | null): boolean {
+  return !!source && source.plan.links >= REVEAL_MIN_LINKS
 }
 
 // ---------- names ----------
@@ -160,14 +172,14 @@ export const REVEAL_COPY = {
   use: 'Use this board',
   copying: (done: number, total: number) => `Setting up ${done.toLocaleString()} of ${total.toLocaleString()}`,
   choose: 'Choose what to bring in',
+  fresh: 'Start fresh',
   footer: 'Saved as ordinary Chrome bookmarks, so it syncs with Chrome. No account.',
   moreLinks: (n: number) => `+${plural(n, 'more link')}`,
   moreStacks: (n: number) => `and ${plural(n, 'more stack')}`,
   finishTitle: 'Make it yours',
   finishLooks: 'Pick a look. Settings has more, your own picture included.',
-  tabsHint: 'Stack them on your board, or save them all and close them for a clean start.',
+  tabsHint: 'Save them in a Stash space on your board. They stay open.',
   stack: 'Stack them',
-  stackClose: 'Save and close all',
   stacked: (n: number) => `Saved ${plural(n, 'link')} in your Stash space. The tabs stay open.`,
   done: 'Done',
   undo: 'Undo',

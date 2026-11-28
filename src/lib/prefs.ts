@@ -26,6 +26,7 @@ const WHY_NOT_ASKED = 'stackable:whyNotAsked'
 const FOUNDING_NOTE = 'stackable:foundingNote'
 const TIDY_COACH = 'stackable:tidyCoach'
 const TIDY_WIN = 'stackable:tidyWin'
+const WRAPPED_2026 = 'stackable:wrapped2026'
 
 function read(key: string): string | null {
   try {
@@ -71,6 +72,11 @@ export const prefs = {
   rating: () => read(RATING),
   setRating: (answer: 'rated' | 'dismissed') => write(RATING, answer),
   stashes: (): number => Number(read(STASHES)) || 0,
+  /** The same count, or null when this device has never counted a stash (0.9.10: the year's picture leaves it out). */
+  stashesCounted: (): number | null => {
+    const raw = read(STASHES)
+    return raw === null ? null : Number(raw) || 0
+  },
   /** Counts a finished stash on this device and returns the new total (rating milestone, 0.5.3). */
   bumpStashes: (): number => {
     const n = (Number(read(STASHES)) || 0) + 1
@@ -125,6 +131,9 @@ export const prefs = {
   },
   setTidyWin: (at: number) => write(TIDY_WIN, String(at)),
   clearTidyWin: () => write(TIDY_WIN, null),
+  /** "Your 2026 in Stackboard" (0.9.10): the card's marker as stored, JSON (wrappedPlan.ts parses it). */
+  wrapped2026: (): string | null => read(WRAPPED_2026),
+  setWrapped2026: (json: string) => write(WRAPPED_2026, json),
   /** How many new tabs have shown the "Keep it" hint, including this one. */
   bumpKeepHint: (): number => {
     const n = (Number(read(KEEP_HINT_SHOWN)) || 0) + 1
